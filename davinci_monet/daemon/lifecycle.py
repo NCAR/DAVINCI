@@ -7,11 +7,7 @@ from __future__ import annotations
 
 import fcntl
 import os
-import signal
-import sys
-import threading
 from pathlib import Path
-from types import FrameType
 from typing import Callable, Optional
 
 from davinci_monet.logging import get_logger
