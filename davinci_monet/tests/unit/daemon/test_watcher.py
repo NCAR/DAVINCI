@@ -6,6 +6,7 @@ Deterministic: an injectable monotonic Clock and an injectable filesystem scan
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from davinci_monet.daemon.config import DaemonConfig, WatchRule
@@ -112,3 +113,43 @@ def test_growing_file_does_not_fire_until_stable() -> None:
     assert len(events) == 1
     assert events[0].new_files == [f]
     assert events[0].settle_mode == "quiescence"
+
+
+def test_sentinel_rule_fires_only_when_marker_appears(tmp_path) -> None:
+    clock = FakeClock()
+    marker = tmp_path / "DELIVERED"
+    f = "/data/modis/a.hdf"
+    # scan always returns one matching data file; firing is gated on the marker.
+    scan = FakeScan([{f: FileStat(size=10, mtime=1.0)}])
+    rule = _rule(
+        name="modis",
+        watch="/data/modis/*.hdf",
+        sentinel=str(marker),
+        settle=30.0,
+    )
+    assert rule.settle_mode == "sentinel"
+    w = PollingWatcher(rules=[rule], config=DaemonConfig(), clock=clock, scan=scan)
+
+    # Marker absent: never fires, no matter how much time passes.
+    assert w.poll() == []
+    clock.advance(10_000.0)
+    assert w.poll() == []
+
+    # Marker appears -> fires exactly once with settle_mode="sentinel".
+    marker.write_text("ok")
+    events = w.poll()
+    assert len(events) == 1
+    assert events[0].watch_name == "modis"
+    assert events[0].settle_mode == "sentinel"
+    assert events[0].new_files == [f]
+
+    # Marker still present -> does NOT re-fire.
+    assert w.poll() == []
+
+    # Marker removed then re-delivered -> re-arms and fires again.
+    os.remove(marker)
+    assert w.poll() == []
+    marker.write_text("ok2")
+    events2 = w.poll()
+    assert len(events2) == 1
+    assert events2[0].settle_mode == "sentinel"
