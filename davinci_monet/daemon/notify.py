@@ -7,8 +7,10 @@ CI never shells out to a real ``osascript`` and never writes to real iCloud.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Sequence
 
 from davinci_monet.logging import get_logger
 
@@ -81,3 +83,80 @@ class DesktopNotifier:
 
     def __call__(self, title: str, message: str) -> bool:
         return send_desktop_notification(title, message, runner=self._runner)
+
+
+# A copy function takes (src, dst) absolute path strings.
+CopyFn = Callable[[str, str], None]
+
+
+def _default_copy(src: str, dst: str) -> None:
+    shutil.copy2(src, dst)
+
+
+def copy_to_icloud(
+    *,
+    icloud_dir: str | Path,
+    plots: Sequence[str],
+    summary_text: str,
+    summary_name: str,
+    copyfn: CopyFn | None = None,
+) -> list[str]:
+    """Copy generated plots into ``icloud_dir`` and write a Markdown summary.
+
+    Creates ``icloud_dir`` if needed. Missing source plots are logged and
+    skipped. Returns the list of destination paths actually written (plots +
+    the summary file). The copy primitive is injectable for tests.
+    """
+    copy = copyfn or _default_copy
+    dest_dir = Path(icloud_dir).expanduser()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[str] = []
+    for src in plots:
+        src_path = Path(src)
+        if not src_path.is_file():
+            logger.warning("iCloud copy: source plot missing, skipped: %s", src)
+            continue
+        dst = dest_dir / src_path.name
+        try:
+            copy(str(src_path), str(dst))
+            written.append(str(dst))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("iCloud copy failed for %s: %s", src, exc)
+
+    summary_path = dest_dir / summary_name
+    try:
+        summary_path.write_text(summary_text)
+        written.append(str(summary_path))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("iCloud summary write failed: %s", exc)
+
+    return written
+
+
+class IcloudCopier:
+    """Callable wrapper binding an icloud_dir + copy primitive."""
+
+    def __init__(
+        self,
+        *,
+        icloud_dir: str | Path,
+        copyfn: CopyFn | None = None,
+    ) -> None:
+        self._dir = icloud_dir
+        self._copyfn = copyfn
+
+    def __call__(
+        self,
+        *,
+        plots: Sequence[str],
+        summary_text: str,
+        summary_name: str,
+    ) -> list[str]:
+        return copy_to_icloud(
+            icloud_dir=self._dir,
+            plots=plots,
+            summary_text=summary_text,
+            summary_name=summary_name,
+            copyfn=self._copyfn,
+        )
