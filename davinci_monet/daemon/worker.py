@@ -1,10 +1,12 @@
 """Daemon worker: the isolated child process that runs ONE pipeline.
 
 Invoked as ``python -m davinci_monet.daemon.worker``. Reads a JobSpec JSON from
-stdin, sets env, optionally injects new files into the resolved config, runs the
-pipeline via run_analysis, streams ProgressEvent-shaped JSON lines to stdout, and
-exits 0 iff PipelineResult.success is True. This is the ONLY daemon module that
-imports the scientific pipeline.
+stdin, sets env, optionally injects new files into the resolved config, drives
+PipelineRunner.run() directly (so a progress callback can be pre-wired to the
+context before the runner's internal formatter is installed), streams
+ProgressEvent-shaped JSON lines to stdout, and exits 0 iff
+PipelineResult.success is True.  This is the ONLY daemon module that imports
+the scientific pipeline.
 """
 
 from __future__ import annotations

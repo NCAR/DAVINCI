@@ -1,11 +1,70 @@
-"""Unit tests for the daemon worker (progress emission + exit code; mocked pipeline)."""
+"""Unit tests for the daemon worker (config injection + progress emission + exit code).
+
+Injection tests exercise worker.inject_new_files() directly (pure logic, no I/O).
+Progress/exit-code tests exercise worker.run_job() with a monkeypatched pipeline.
+The chaining regression test exercises the real PipelineRunner.run() to confirm
+that a pre-wired context.progress_callback survives the runner's internal
+formatter installation at davinci_monet/pipeline/runner.py:1508-1602.
+"""
 
 from __future__ import annotations
 
-import json as _json
-from datetime import datetime
-
 from davinci_monet.daemon.contracts import JobSpec, ProgressEvent
+
+# ---------------------------------------------------------------------------
+# inject_new_files — pure logic, no I/O
+# ---------------------------------------------------------------------------
+
+
+def test_inject_new_files_overrides_target_source_files() -> None:
+    from davinci_monet.daemon import worker
+
+    config = {
+        "analysis": {"output_dir": "/out"},
+        "sources": {
+            "modis": {"type": "modis", "files": "/data/modis/*.hdf"},
+            "cam": {"type": "cesm_fv", "files": "/data/cam/*.nc"},
+        },
+    }
+    new_files = ["/data/modis/new_b.hdf", "/data/modis/new_a.hdf"]
+
+    out = worker.inject_new_files(config, inject_into="modis", new_files=new_files)
+
+    # Target source files: replaced by the injected list (sorted), filename cleared
+    assert out["sources"]["modis"]["files"] == [
+        "/data/modis/new_a.hdf",
+        "/data/modis/new_b.hdf",
+    ]
+    assert out["sources"]["modis"].get("filename") is None
+    # Other sources untouched
+    assert out["sources"]["cam"]["files"] == "/data/cam/*.nc"
+    # Original config not mutated in place
+    assert config["sources"]["modis"]["files"] == "/data/modis/*.hdf"
+
+
+def test_inject_new_files_unknown_source_raises() -> None:
+    from davinci_monet.daemon import worker
+
+    config = {"sources": {"cam": {"type": "cesm_fv", "files": "/x/*.nc"}}}
+    try:
+        worker.inject_new_files(config, inject_into="missing", new_files=["/y/a.nc"])
+    except KeyError as exc:
+        assert "missing" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected KeyError for unknown inject_into source")
+
+
+def test_inject_new_files_noop_when_inject_into_none() -> None:
+    from davinci_monet.daemon import worker
+
+    config = {"sources": {"cam": {"files": "/x/*.nc"}}}
+    out = worker.inject_new_files(config, inject_into=None, new_files=["/y/a.nc"])
+    assert out["sources"]["cam"]["files"] == "/x/*.nc"
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for run_job tests
+# ---------------------------------------------------------------------------
 
 
 def _spec(tmp_path, inject_into=None, new_files=None) -> JobSpec:
@@ -45,14 +104,20 @@ class _FakeResult:
         self.failed_stages = []
 
 
+# ---------------------------------------------------------------------------
+# run_job — mocked pipeline
+# ---------------------------------------------------------------------------
+
+
 def test_run_job_emits_started_progress_result_and_sets_env(tmp_path, monkeypatch, capsys):
     """run_job must emit started, at least one progress, and a result event.
 
-    This test was introduced to prove the fix for the latent correctness bug
-    where the runner's internal formatter callback overwrote the worker's
-    progress_callback before any stage executed.  The fix in runner.py now
-    chains any pre-existing context.progress_callback through the internal
-    callback, so the worker's events ARE emitted.
+    This test verifies the wiring: spec.env is applied to os.environ, the
+    progress callback installed on the context is forwarded through run_job's
+    _emit() helper, and the terminal result event carries the expected metadata.
+    Note: this test uses a _FakeRunner whose run() calls context.progress_callback
+    directly.  For a test that exercises the real runner chaining path, see
+    test_runner_chains_pre_existing_progress_callback below.
     """
     from davinci_monet.daemon import worker
     from davinci_monet.pipeline import runner as _runner
@@ -74,9 +139,6 @@ def test_run_job_emits_started_progress_result_and_sets_env(tmp_path, monkeypatc
         def run(self, context):
             captured["env_var"] = __import__("os").environ.get("DAEMON_TEST_VAR")
             captured["callback"] = context.progress_callback
-            # Simulate the pipeline emitting one progress message via the
-            # worker-supplied callback.  In the real runner this callback is
-            # *chained* through the formatter; here we call it directly.
             if context.progress_callback:
                 context.progress_callback("Loading model: cam (1/1)")
             return _FakeResult(_FakeContext(context.config), success=True)
@@ -97,9 +159,7 @@ def test_run_job_emits_started_progress_result_and_sets_env(tmp_path, monkeypatc
 
     assert kinds[0] == "started", f"first event must be 'started', got {kinds}"
     assert kinds[-1] == "result", f"last event must be 'result', got {kinds}"
-    assert (
-        "progress" in kinds
-    ), "worker must emit 'progress' events; callback was dead code before the fix"
+    assert "progress" in kinds, "worker must emit 'progress' events"
 
     result_evt = events[-1]
     assert result_evt.success is True
@@ -168,3 +228,58 @@ def test_run_job_surfaces_real_log_path(tmp_path, monkeypatch, capsys):
     events = [ProgressEvent.parse_line(line) for line in lines if ProgressEvent.parse_line(line)]
     result_evt = events[-1]
     assert result_evt.log_path == expected_log
+
+
+# ---------------------------------------------------------------------------
+# Regression guard: real PipelineRunner must chain pre-existing callback
+# ---------------------------------------------------------------------------
+
+
+def test_runner_chains_pre_existing_progress_callback():
+    """The real PipelineRunner.run() must forward messages to a callback set before run().
+
+    This is the regression guard for the bug fixed at
+    davinci_monet/pipeline/runner.py:1508-1602, where runner.run() now captures
+    any pre-existing context.progress_callback BEFORE installing the internal
+    formatter callback, then chains the two together.
+
+    FAILURE MODE if the fix is reverted: runner.run() would overwrite
+    context.progress_callback with the internal formatter callback, discarding
+    the pre-wired outer callback.  The stage's log_progress() call would then
+    never reach ``received``, and the final assert would fail.
+
+    The test uses a real PipelineRunner with a single stub stage (no sci-stack
+    imports needed) so it exercises the exact production code path.
+    """
+    from davinci_monet.pipeline.runner import PipelineRunner
+    from davinci_monet.pipeline.stages import PipelineContext, StageResult, StageStatus
+
+    received: list[str] = []
+
+    # A minimal stage that emits one progress message then succeeds.
+    class _EchoStage:
+        name = "echo"
+
+        def execute(self, context: PipelineContext) -> StageResult:
+            context.log_progress("hello from echo stage")
+            return StageResult(stage_name="echo", status=StageStatus.COMPLETED)
+
+        def validate(self, context: PipelineContext) -> bool:
+            return True
+
+    runner = PipelineRunner(stages=[_EchoStage()], show_progress=False, show_plots=False)
+    context = PipelineContext(config={"analysis": {}})
+    # Pre-wire the callback BEFORE calling runner.run().  The runner must chain
+    # through it even after installing its own internal formatter callback.
+    context.progress_callback = received.append
+
+    runner.run(context)
+
+    assert received, (
+        "context.progress_callback was never called: "
+        "runner.run() likely overwrote the pre-wired callback instead of chaining it "
+        "(runner.py:1508-1602 chaining fix may have been reverted)"
+    )
+    assert any(
+        "hello from echo stage" in msg for msg in received
+    ), f"expected 'hello from echo stage' in forwarded messages, got: {received}"
