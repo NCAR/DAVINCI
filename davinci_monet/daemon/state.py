@@ -123,9 +123,7 @@ class StateStore:
 
     def _duration_since_started(self, job_id: int, ended_iso: str) -> Optional[float]:
         """Compute ended-minus-started in seconds, or None if no start time."""
-        row = self._conn.execute(
-            "SELECT started_at FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT started_at FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None or row["started_at"] in (None, ""):
             return None
         started = datetime.fromisoformat(str(row["started_at"]))
