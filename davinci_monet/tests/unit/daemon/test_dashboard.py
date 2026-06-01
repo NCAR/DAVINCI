@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 from rich.console import Console
 
+from davinci_monet.daemon.contracts import StreamEvent
 from davinci_monet.daemon.dashboard import (
     DashboardState,
+    apply_stream_event,
     render_dashboard,
     render_queue_panel,
     render_recent_panel,
@@ -201,3 +203,79 @@ class TestRenderDashboard:
         draining = DashboardState(version=1, pid=9, uptime_s=1.0, draining=True, max_concurrent=1)
         text = _render_to_text(render_dashboard(draining))
         assert "draining" in text.lower()
+
+
+class TestApplyStreamEvent:
+    def test_progress_event_updates_progress_map(self, sample_state: DashboardState) -> None:
+        ev = StreamEvent(event="log_line", data={"job_id": 7, "message": "Pairing cam vs airnow"})
+        apply_stream_event(sample_state, ev)
+        assert sample_state.progress[7] == "Pairing cam vs airnow"
+
+    def test_stage_progress_event(self, sample_state: DashboardState) -> None:
+        ev = StreamEvent(
+            event="job_update", data={"job_id": 7, "stage": "statistics", "kind": "stage"}
+        )
+        apply_stream_event(sample_state, ev)
+        assert "statistics" in sample_state.progress[7]
+
+    def test_job_update_moves_running_to_recent(self, sample_state: DashboardState) -> None:
+        ev = StreamEvent(
+            event="job_update",
+            data={
+                "id": 7,
+                "watch_name": "cam_realtime",
+                "config_path": "configs/asia-aq.yaml",
+                "on_fire": "whole_config",
+                "status": "completed",
+                "submitted_at": "2026-05-31T11:59:00",
+                "ended_at": "2026-05-31T12:30:00",
+                "duration_s": 1860.0,
+            },
+        )
+        apply_stream_event(sample_state, ev)
+        assert all(j["id"] != 7 for j in sample_state.running)
+        assert any(j["id"] == 7 and j["status"] == "completed" for j in sample_state.recent)
+
+    def test_job_update_promotes_queued_to_running(self, sample_state: DashboardState) -> None:
+        ev = StreamEvent(
+            event="job_update",
+            data={
+                "id": 8,
+                "watch_name": "modis_stream",
+                "config_path": "configs/modis-aod.yaml",
+                "on_fire": "new_files_only",
+                "status": "running",
+                "submitted_at": "2026-05-31T12:01:00",
+                "started_at": "2026-05-31T12:31:00",
+            },
+        )
+        apply_stream_event(sample_state, ev)
+        assert any(j["id"] == 8 for j in sample_state.running)
+        assert all(j["id"] != 8 for j in sample_state.queued)
+
+    def test_watch_update_replaces_summary(self, sample_state: DashboardState) -> None:
+        ev = StreamEvent(
+            event="watch_update",
+            data={
+                "name": "modis_stream",
+                "enabled": True,
+                "source": "live",
+                "on_fire": "new_files_only",
+                "settle_mode": "sentinel",
+                "watch": "/scratch/modis/*.hdf",
+                "run": "configs/modis-aod.yaml",
+                "state": "armed",
+                "last_job_id": None,
+                "last_status": None,
+                "last_fired_at": None,
+            },
+        )
+        apply_stream_event(sample_state, ev)
+        modis = next(w for w in sample_state.watches if w["name"] == "modis_stream")
+        assert modis["enabled"] is True
+        assert modis["state"] == "armed"
+
+    def test_unknown_event_is_noop(self, sample_state: DashboardState) -> None:
+        before = len(sample_state.running)
+        apply_stream_event(sample_state, StreamEvent(event="mystery", data={}))
+        assert len(sample_state.running) == before
