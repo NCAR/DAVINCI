@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import fcntl
 import os
+import signal
+import threading
+import time
 from pathlib import Path
+from types import FrameType
 from typing import Callable, Optional
 
 from davinci_monet.logging import get_logger
@@ -122,3 +126,110 @@ class PidLock:
 
     def __exit__(self, *exc: object) -> None:
         self.release()
+
+
+class DrainController:
+    """Thread-safe graceful-drain flag + in-flight wait helper.
+
+    The supervisor checks :attr:`draining` to stop accepting new triggers, and
+    calls :meth:`wait_for_idle` to block until in-flight workers finish (up to a
+    timeout). Signal handlers flip the flag via :meth:`request_drain`.
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._reason: Optional[str] = None
+
+    @property
+    def draining(self) -> bool:
+        return self._event.is_set()
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self._reason
+
+    def request_drain(self, reason: Optional[str] = None) -> None:
+        """Set the drain flag (idempotent; first reason is retained)."""
+        with self._lock:
+            if not self._event.is_set():
+                self._reason = reason
+                self._event.set()
+                logger.info("Drain requested (reason=%s)", reason)
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        """Block until drain is requested; returns True if it was set."""
+        return self._event.wait(timeout)
+
+    def wait_for_idle(
+        self,
+        in_flight: Callable[[], int],
+        *,
+        timeout: Optional[float],
+        poll: float = 0.25,
+    ) -> bool:
+        """Poll ``in_flight`` until it reaches 0 or ``timeout`` elapses.
+
+        Returns True if the system went idle within the timeout, False if the
+        deadline passed with workers still running. ``timeout=None`` waits
+        indefinitely.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if in_flight() <= 0:
+                return True
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+            remaining = poll
+            if deadline is not None:
+                remaining = min(poll, max(0.0, deadline - time.monotonic()))
+            time.sleep(remaining)
+
+
+class SignalHooks:
+    """Injectable wrapper over the signal primitives the handler installer needs.
+
+    Defaults delegate to the real ``signal`` module; tests can substitute a fake
+    to drive installation without touching process-global handlers.
+    """
+
+    def getsignal(self, signum: int) -> object:
+        return signal.getsignal(signum)
+
+    def signal(self, signum: int, handler: object) -> object:
+        return signal.signal(signum, handler)  # type: ignore[arg-type]
+
+
+# An on-drain callback receives the signal name (e.g. "SIGTERM") and starts a
+# graceful drain. DrainController.request_drain and Supervisor.request_shutdown
+# both conform to Callable[[str], None].
+OnDrainFn = Callable[[str], None]
+
+
+def install_signal_handlers(
+    on_drain: OnDrainFn,
+    *,
+    signums: tuple[int, ...] = (signal.SIGTERM, signal.SIGINT),
+    hooks: "SignalHooks | None" = None,
+) -> dict[int, object]:
+    """Install drain-on-signal handlers for ``signums``.
+
+    ``on_drain`` is any ``Callable[[str], None]`` (e.g.
+    ``DrainController.request_drain`` or ``Supervisor.request_shutdown``). Each
+    installed handler calls ``on_drain(signal.Signals(signum).name)`` and returns
+    control (it does NOT exit; the supervisor loop observes the drain flag and
+    drains gracefully). Returns the previous handlers keyed by signal number so
+    the caller can restore them.
+    """
+    h = hooks or SignalHooks()
+    previous: dict[int, object] = {}
+
+    def _handler(signum: int, _frame: Optional[FrameType]) -> None:
+        name = signal.Signals(signum).name
+        logger.info("Received %s; initiating graceful drain", name)
+        on_drain(name)
+
+    for signum in signums:
+        previous[signum] = h.getsignal(signum)
+        h.signal(signum, _handler)
+    return previous
