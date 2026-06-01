@@ -19,14 +19,16 @@ from davinci_monet.daemon.control import ControlServer
 
 
 def _recv_line(sock: socket.socket, timeout: float = 5.0) -> str:
-    """Read one newline-terminated line from a connected socket."""
+    """Read exactly one newline-terminated line from a connected socket."""
     sock.settimeout(timeout)
     buf = b""
-    while not buf.endswith(b"\n"):
-        chunk = sock.recv(4096)
+    while True:
+        chunk = sock.recv(1)
         if not chunk:
             break
         buf += chunk
+        if chunk == b"\n":
+            break
     return buf.decode("utf-8")
 
 
@@ -172,3 +174,75 @@ class TestErrorEnvelope:
         assert payload["ok"] is True
         assert payload["data"] == {"routed": "status"}
         assert seen == {"cmd": "status", "args": {"n": 1}}
+
+
+class TestStreaming:
+    def test_ack_then_events_then_end(self, server) -> None:
+        srv, sock_path = server
+
+        def sub(args: dict):
+            # first yield = ack ControlResponse
+            yield ControlResponse(ok=True, data={"subscribed": args.get("topics", [])})
+            for i in range(3):
+                yield StreamEvent(event="job_update", data={"i": i})
+
+        srv.register_stream("subscribe", sub)
+
+        conn = _connect(sock_path)
+        conn.sendall(
+            (json.dumps({"cmd": "subscribe", "args": {"topics": ["jobs"]}}) + "\n").encode()
+        )
+        ack = json.loads(_recv_line(conn))
+        assert ack["ok"] is True
+        assert ack["data"] == {"subscribed": ["jobs"]}
+
+        events = []
+        for _ in range(3):
+            events.append(json.loads(_recv_line(conn)))
+        conn.close()
+
+        assert [e["event"] for e in events] == ["job_update"] * 3
+        assert [e["data"]["i"] for e in events] == [0, 1, 2]
+
+    def test_server_tolerates_client_disconnect_midstream(self, server) -> None:
+        srv, sock_path = server
+        produced = threading.Event()
+
+        def sub(args: dict):
+            yield ControlResponse(ok=True, data={"streaming": True})
+            # emit many events; client will hang up after the first
+            for i in range(1000):
+                yield StreamEvent(event="log_line", data={"i": i})
+                produced.set()
+
+        srv.register_stream("logs_tail", sub)
+
+        conn = _connect(sock_path)
+        conn.sendall((json.dumps({"cmd": "logs_tail", "args": {}}) + "\n").encode())
+        ack = json.loads(_recv_line(conn))
+        assert ack["ok"] is True
+        # read one event then disconnect abruptly
+        _recv_line(conn)
+        conn.close()
+
+        # server must remain healthy: a fresh ping handler still round-trips
+        srv.register("ping", lambda a: ControlResponse(ok=True, data={"pong": True}))
+        conn2 = _connect(sock_path)
+        conn2.sendall((json.dumps({"cmd": "ping", "args": {}}) + "\n").encode())
+        payload = json.loads(_recv_line(conn2))
+        conn2.close()
+        assert payload["data"] == {"pong": True}
+
+    def test_stream_with_no_events_just_ack(self, server) -> None:
+        srv, sock_path = server
+
+        def sub(args: dict):
+            yield ControlResponse(ok=True, data={"subscribed": []})
+
+        srv.register_stream("subscribe", sub)
+        conn = _connect(sock_path)
+        conn.sendall((json.dumps({"cmd": "subscribe", "args": {}}) + "\n").encode())
+        ack = json.loads(_recv_line(conn))
+        conn.close()
+        assert ack["ok"] is True
+        assert ack["data"] == {"subscribed": []}
