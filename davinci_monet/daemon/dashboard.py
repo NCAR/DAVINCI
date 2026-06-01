@@ -9,7 +9,7 @@ to keep this module import-clean — importing it must not pull in matplotlib/xa
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from rich.console import Group
 from rich.panel import Panel
@@ -264,27 +264,48 @@ def run_dashboard(
     console: "Any" = None,
     refresh_per_second: float = 2.0,
     topics: Optional[list[str]] = None,
-) -> None:  # pragma: no cover - blocking live loop, not unit-tested
-    """Blocking `daemon top` loop: seed from ``status``, fold ``subscribe`` events."""
+    *,
+    iterations: Optional[int] = None,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> None:  # pragma: no cover - blocking live loop (logic covered via iterations)
+    """Blocking ``daemon top`` loop: poll ``status`` on an interval and re-render.
+
+    Polls the always-wired ``status`` control command (rather than a push
+    stream) so the dashboard works against any running daemon. ``iterations``
+    bounds the loop for tests (None = run until Ctrl-C or the daemon goes away);
+    ``sleep`` is injectable for the same reason. ``topics`` is accepted for
+    signature stability but unused by the polling loop.
+    """
+    import time as _time
+
     from rich.console import Console
     from rich.live import Live
 
+    sleep_fn = sleep or _time.sleep
     console = console or Console()
-    topics = topics or ["jobs", "watches", "stats"]
+    interval = 1.0 / refresh_per_second if refresh_per_second and refresh_per_second > 0 else 0.5
 
-    seed = client.call("status")
-    state = (
-        DashboardState.from_status(seed.data)
-        if getattr(seed, "ok", False) and seed.data
-        else DashboardState(version=0, pid=0, uptime_s=0.0, draining=False, max_concurrent=1)
-    )
+    def _snapshot() -> DashboardState:
+        seed = client.call("status")
+        if getattr(seed, "ok", False) and getattr(seed, "data", None):
+            return DashboardState.from_status(seed.data)
+        return DashboardState(version=0, pid=0, uptime_s=0.0, draining=False, max_concurrent=1)
 
     with Live(
-        render_dashboard(state),
+        render_dashboard(_snapshot()),
         console=console,
         refresh_per_second=refresh_per_second,
         screen=True,
     ) as live:
-        for event in client.stream("subscribe", topics=topics):
-            apply_stream_event(state, event)
-            live.update(render_dashboard(state))
+        count = 0
+        try:
+            while iterations is None or count < iterations:
+                sleep_fn(interval)
+                try:
+                    snap = _snapshot()
+                except OSError:
+                    break  # daemon went away — exit cleanly
+                live.update(render_dashboard(snap))
+                count += 1
+        except KeyboardInterrupt:
+            pass

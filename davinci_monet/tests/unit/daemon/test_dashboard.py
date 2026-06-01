@@ -14,6 +14,7 @@ from davinci_monet.daemon.dashboard import (
     render_recent_panel,
     render_running_panel,
     render_watches_panel,
+    run_dashboard,
 )
 
 
@@ -279,3 +280,55 @@ class TestApplyStreamEvent:
         before = len(sample_state.running)
         apply_stream_event(sample_state, StreamEvent(event="mystery", data={}))
         assert len(sample_state.running) == before
+
+
+class _DashResp:
+    ok = True
+    data = {
+        "version": 1,
+        "pid": 7,
+        "uptime_s": 3.0,
+        "draining": False,
+        "max_concurrent": 1,
+        "running": [],
+        "queued": [],
+        "watches": [
+            {"name": "cam", "enabled": True, "state": "armed", "settle_mode": "quiescence"}
+        ],
+        "recent": [],
+    }
+
+
+def test_run_dashboard_polls_status_until_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
+    # run_dashboard must poll the (wired) status command, NOT the subscribe
+    # stream (which the serve path never wires). It seeds once, then polls once
+    # per iteration, rendering each snapshot, and exits cleanly.
+    import rich.live
+
+    class _DummyLive:
+        def __init__(self, renderable: object, **kw: object) -> None: ...
+        def __enter__(self) -> "_DummyLive":
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def update(self, renderable: object) -> None: ...
+
+    monkeypatch.setattr(rich.live, "Live", _DummyLive)
+
+    calls = {"status": 0}
+
+    class _Client:
+        def call(self, cmd: str, **kw: object) -> _DashResp:
+            assert cmd == "status"
+            calls["status"] += 1
+            return _DashResp()
+
+        def stream(self, *a: object, **kw: object) -> object:
+            raise AssertionError("run_dashboard must not consume the subscribe stream")
+
+    run_dashboard(
+        _Client(), console=object(), refresh_per_second=50.0, iterations=3, sleep=lambda _s: None
+    )
+    assert calls["status"] == 4  # 1 seed snapshot + 3 polled iterations
