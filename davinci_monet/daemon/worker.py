@@ -90,10 +90,25 @@ def _collect_plots_and_output(result: Any) -> tuple[Optional[str], list[str]]:
 
 
 def run_job(spec_json: str) -> int:
-    """Execute the job described by ``spec_json``; return the process exit code."""
-    from davinci_monet.config.parser import load_config
+    """Execute the job described by ``spec_json``; return the process exit code.
+
+    Note: ``spec.worker_timeout`` is intentionally NOT enforced here.  Timeout
+    enforcement (SIGKILL / SIGALRM) is the dispatcher's responsibility; the
+    worker itself runs until the pipeline finishes or raises.
+    """
+    from davinci_monet.config import parser as _config_parser
     from davinci_monet.daemon.contracts import JobSpec
-    from davinci_monet.pipeline.runner import run_analysis  # noqa: F401 — required import
+
+    # PipelineRunner is imported here (not run_analysis) so we can attach the
+    # progress callback to the context before calling runner.run().
+    # run_analysis would call run_from_config which creates a fresh context and
+    # we would lose the callback.  PipelineRunner.run() preserves any
+    # pre-existing context.progress_callback by chaining it through the
+    # runner's internal formatter callback.
+    from davinci_monet.pipeline.runner import (  # noqa: F401 — daemon isolation contract
+        PipelineRunner,
+    )
+    from davinci_monet.pipeline.stages import PipelineContext
 
     spec = JobSpec.from_json(spec_json)
     job_id = spec.job_id
@@ -113,13 +128,10 @@ def run_job(spec_json: str) -> int:
     )
 
     try:
-        config = load_config(spec.config_path).model_dump()
+        config = _config_parser.load_config(spec.config_path).model_dump()
         config = inject_new_files(config, inject_into=spec.inject_into, new_files=spec.new_files)
         if spec.log_dir is not None:
             config.setdefault("analysis", {})["log_dir"] = spec.log_dir
-
-        from davinci_monet.pipeline.runner import PipelineRunner
-        from davinci_monet.pipeline.stages import PipelineContext
 
         runner = PipelineRunner(show_progress=False, show_plots=False)
         context = PipelineContext(config=config)
@@ -128,7 +140,13 @@ def run_job(spec_json: str) -> int:
         result = runner.run(context)
 
         output_dir, plots = _collect_plots_and_output(result)
-        log_path = None
+        # Retrieve the real log file path that the runner stored in
+        # context.metadata["log_path"] (set only when analysis.log_dir is
+        # configured).  This gives downstream consumers (notifications, etc.)
+        # a direct link to the Markdown log without guessing the filename.
+        log_path: Optional[str] = None
+        if result.context is not None:
+            log_path = result.context.metadata.get("log_path")
         _emit(
             {
                 "kind": "result",

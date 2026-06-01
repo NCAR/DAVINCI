@@ -1505,10 +1505,18 @@ class PipelineRunner:
         # Print header
         formatter.header(config_path=config_path, analysis_config=analysis_config)
 
+        # Capture any externally-supplied progress callback (e.g. from the daemon
+        # worker) before we overwrite it below.  The new internal callback will
+        # forward every message to this outer callback *after* the formatter/log
+        # logic, so both the display/log pipeline and the caller's callback are
+        # notified.
+        _outer_progress_callback: Callable[[str], None] | None = context.progress_callback
+
         # Set up progress callback that uses formatter and collects data
         def _make_progress_callback(
             fmt: ProgressFormatter,
             collector: LogCollector | None,
+            outer: Callable[[str], None] | None = None,
         ) -> Callable[[str], None]:
             """Create progress callback for formatted output and log collection."""
 
@@ -1583,9 +1591,15 @@ class PipelineRunner:
                     done_msg = msg.strip()[5:].strip()
                     fmt.item_done(done_msg)
 
+                # Forward to caller-supplied outer callback (e.g. daemon worker).
+                if outer is not None:
+                    outer(msg)
+
             return callback
 
-        context.progress_callback = _make_progress_callback(formatter, log_collector)
+        context.progress_callback = _make_progress_callback(
+            formatter, log_collector, _outer_progress_callback
+        )
 
         result = PipelineResult(
             success=True,
@@ -1683,6 +1697,12 @@ class PipelineRunner:
                     formatter.preview_plots(
                         plot_paths, duration=1.0, preview_format=self._preview_format
                     )
+
+        # Store the log_path in context metadata so callers (e.g. the daemon
+        # worker) can retrieve the real log file path without having to mirror
+        # the runner's path construction logic.
+        if log_path is not None and context is not None:
+            context.metadata["log_path"] = str(log_path)
 
         result.end_time = datetime.now()
         result.total_duration_seconds = time.time() - start_time
