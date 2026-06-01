@@ -7,26 +7,90 @@ load_watches / merge_rules functions. Runtime primitive enums/literals
 davinci_monet.daemon.contracts and never redefined here.
 
 Pydantic style mirrors davinci_monet/config/schema.py (StrictModel /
-FlexibleModel). Layer-1 ${VAR} expansion reuses the project config parser.
+FlexibleModel). Layer-1 ${VAR} expansion uses local helpers (os + yaml only)
+so that the long-lived SUPERVISOR never transitively imports xarray/pandas.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TextIO
+
+import yaml
 
 from pydantic import Field, field_validator
 
-from davinci_monet.config.parser import expand_env_vars, load_yaml
+# Import ONLY from leaf submodules to avoid triggering the heavy geo/data stack:
+#   - davinci_monet.config.schema  — pure pydantic, no xarray
+#   - davinci_monet.daemon.contracts — pure pydantic + stdlib, no xarray
+# Do NOT import from davinci_monet.config.parser (pulls in MonetConfig ->
+# config.schema -> config.__init__ -> ... -> xarray) or from
+# davinci_monet.core.exceptions (running core/__init__.py imports
+# core.base/types/protocols which pull xarray).
 from davinci_monet.config.schema import FlexibleModel, StrictModel
-from davinci_monet.core.exceptions import ConfigurationError
 from davinci_monet.daemon.contracts import (
     NotifyChannel,
     OnFireMode,
     SettleMode,
     WatchSource,
 )
+
+
+# ---------------------------------------------------------------------------
+# Lightweight YAML helpers (stdlib only — no project imports)
+# ---------------------------------------------------------------------------
+
+
+class ConfigurationError(Exception):
+    """Raised by load_watches when a watches.yaml file is invalid.
+
+    Defined here (not imported from davinci_monet.core.exceptions) so that
+    importing this module does NOT trigger davinci_monet/core/__init__.py,
+    which eagerly re-exports core.base / core.types / core.protocols and
+    thereby drags xarray/pandas into the supervisor process.
+    """
+
+
+def _load_yaml(source: str | Path | TextIO) -> dict[str, Any]:
+    """Load raw YAML from a file path or YAML string (stdlib + PyYAML only)."""
+    try:
+        if isinstance(source, (str, Path)):
+            path = Path(source)
+            if path.exists():
+                with open(path) as fh:
+                    data = yaml.safe_load(fh)
+            else:
+                # Treat as a YAML string (useful in tests / pipes)
+                data = yaml.safe_load(str(source))
+        else:
+            data = yaml.safe_load(source)
+
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ConfigurationError(f"YAML root must be a mapping, got {type(data)}")
+        return data
+    except yaml.YAMLError as exc:
+        raise ConfigurationError(f"Failed to parse YAML: {exc}") from exc
+    except FileNotFoundError as exc:
+        raise ConfigurationError(f"Configuration file not found: {source}") from exc
+
+
+def _expand_env_vars(data: dict[str, Any]) -> dict[str, Any]:
+    """Recursively expand ${VAR}/$VAR in string values (os.path.expandvars)."""
+
+    def _expand(value: Any) -> Any:
+        if isinstance(value, str):
+            return os.path.expandvars(value)
+        if isinstance(value, dict):
+            return {k: _expand(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_expand(item) for item in value]
+        return value
+
+    result: dict[str, Any] = _expand(data)
+    return result
 
 _DURATION_UNITS: dict[str, float] = {
     "s": 1.0,
@@ -195,18 +259,18 @@ class WatchesFile(StrictModel):
 def load_watches(source: str | Path) -> WatchesFile:
     """Load + layer-1 env-expand + validate a watches.yaml into a WatchesFile.
 
-    Reuses load_yaml + expand_env_vars for ${VAR} expansion against the
+    Uses local _load_yaml + _expand_env_vars for ${VAR} expansion against the
     DAEMON's os.environ, then constructs DaemonConfig and each WatchRule
     (injecting the mapping key as ``name``). on_fire == "new_files_only" with
     no ``inject_into`` is a validation error.
     """
-    raw = load_yaml(source)
+    raw = _load_yaml(source)
 
     daemon_raw = raw.get("daemon") or {}
     if not isinstance(daemon_raw, dict):
         raise ConfigurationError("watches.yaml 'daemon' block must be a mapping")
     # Layer-1: expand the whole daemon policy block (paths, icloud_dir, ...).
-    daemon_raw = expand_env_vars(daemon_raw)
+    daemon_raw = _expand_env_vars(daemon_raw)
 
     watches_raw = raw.get("watches") or {}
     if not isinstance(watches_raw, dict):
@@ -228,7 +292,7 @@ def load_watches(source: str | Path) -> WatchesFile:
         # (env is the layer-2 worker overlay and is expanded inside the worker).
         rule_data: dict[str, Any] = dict(rule_raw)
         env_overlay = rule_data.pop("env", None)
-        rule_data = expand_env_vars(rule_data)
+        rule_data = _expand_env_vars(rule_data)
         if env_overlay is not None:
             rule_data["env"] = env_overlay
         rule_data["name"] = str(name)

@@ -3,11 +3,77 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from davinci_monet.daemon.config import DaemonConfig, NotificationConfig, WatchRule, parse_duration
+from davinci_monet.config.parser import expand_env_vars  # noqa: F401  (public-API parity check)
+from davinci_monet.daemon.config import (
+    ConfigurationError,
+    DaemonConfig,
+    NotificationConfig,
+    WatchRule,
+    WatchesFile,
+    load_watches,
+    parse_duration,
+)
+
+
+# ---------------------------------------------------------------------------
+# Supervisor import invariant — daemon.config must NOT drag in xarray/pandas
+# ---------------------------------------------------------------------------
+
+
+class TestSupervisorImportInvariant:
+    """Guard the architecture invariant: importing daemon.config must not
+    transitively load xarray or pandas into the supervisor process.
+
+    We use a subprocess with a fresh Python interpreter so that xarray/pandas
+    loaded by the test-suite itself (via other imports) cannot produce a false
+    pass.
+    """
+
+    def _check_heavy_imports(self, module: str) -> subprocess.CompletedProcess:
+        """Run a fresh Python process that imports ``module`` and reports
+        whether xarray / pandas ended up in sys.modules."""
+        script = (
+            f"import {module}\n"
+            "import sys\n"
+            "print('xarray' in sys.modules)\n"
+            "print('pandas' in sys.modules)\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def test_daemon_config_does_not_load_xarray(self) -> None:
+        result = self._check_heavy_imports("davinci_monet.daemon.config")
+        assert result.returncode == 0, (
+            f"Import failed:\n{result.stderr}"
+        )
+        lines = result.stdout.strip().splitlines()
+        xarray_loaded = lines[0].strip() == "True"
+        assert not xarray_loaded, (
+            "importing davinci_monet.daemon.config loaded xarray — "
+            "the supervisor-imports-nothing-heavy invariant is broken"
+        )
+
+    def test_daemon_config_does_not_load_pandas(self) -> None:
+        result = self._check_heavy_imports("davinci_monet.daemon.config")
+        assert result.returncode == 0, (
+            f"Import failed:\n{result.stderr}"
+        )
+        lines = result.stdout.strip().splitlines()
+        pandas_loaded = lines[1].strip() == "True"
+        assert not pandas_loaded, (
+            "importing davinci_monet.daemon.config loaded pandas — "
+            "the supervisor-imports-nothing-heavy invariant is broken"
+        )
 
 
 class TestParseDuration:
@@ -73,7 +139,7 @@ class TestNotificationConfig:
         cfg = NotificationConfig(icloud_dir="~/somewhere")
         assert str(cfg.icloud_dir) == str(Path.home() / "somewhere")
 
-    def test_icloud_dir_env_expanded(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+    def test_icloud_dir_env_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ICLOUD_ROOT", "/tmp/icloud")
         cfg = NotificationConfig(icloud_dir="${ICLOUD_ROOT}/sub")
         assert str(cfg.icloud_dir) == "/tmp/icloud/sub"
@@ -158,7 +224,7 @@ class TestDaemonConfig:
         assert not str(cfg.state_dir).startswith("~")
         assert str(cfg.state_dir) == str(Path.home() / ".davinci" / "daemon")
 
-    def test_state_dir_env_expanded(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+    def test_state_dir_env_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DAEMON_ROOT", "/tmp/dmn")
         cfg = DaemonConfig(state_dir="${DAEMON_ROOT}/state")
         assert str(cfg.state_dir) == "/tmp/dmn/state"
@@ -192,19 +258,14 @@ class TestDaemonConfig:
         assert cfg.notifications.desktop is False
 
 
-from davinci_monet.config.parser import expand_env_vars  # noqa: F401  (parity check)
-from davinci_monet.core.exceptions import ConfigurationError
-from davinci_monet.daemon.config import WatchesFile, load_watches
-
-
-def _write(tmp_path: "Path", text: str) -> "Path":
+def _write(tmp_path: Path, text: str) -> Path:
     p = tmp_path / "watches.yaml"
     p.write_text(text)
     return p
 
 
 class TestLoadWatches:
-    def test_minimal_file(self, tmp_path: "Path") -> None:
+    def test_minimal_file(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path,
             """
@@ -227,7 +288,7 @@ watches:
         assert rule.on_fire == "whole_config"
 
     def test_layer1_env_expansion_on_paths(
-        self, tmp_path: "Path", monkeypatch: "pytest.MonkeyPatch"
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("DATA", "/scratch/cam")
         path = _write(
@@ -246,7 +307,7 @@ watches:
         assert rule.sentinel == "/scratch/cam/DONE"
 
     def test_per_rule_env_not_layer1_expanded(
-        self, tmp_path: "Path", monkeypatch: "pytest.MonkeyPatch"
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("DATA", "/scratch/cam")
         path = _write(
@@ -264,7 +325,7 @@ watches:
         # env overlay is layer-2 (worker-side) -> stays verbatim
         assert rule.env == {"DATA": "${OTHER}/root"}
 
-    def test_new_files_only_requires_inject_into(self, tmp_path: "Path") -> None:
+    def test_new_files_only_requires_inject_into(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path,
             """
@@ -278,7 +339,7 @@ watches:
         with pytest.raises(ConfigurationError, match="inject_into"):
             load_watches(path)
 
-    def test_new_files_only_with_inject_into_ok(self, tmp_path: "Path") -> None:
+    def test_new_files_only_with_inject_into_ok(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path,
             """
@@ -294,7 +355,7 @@ watches:
         assert rule.on_fire == "new_files_only"
         assert rule.inject_into == "modis_src"
 
-    def test_bad_on_fire_value_raises(self, tmp_path: "Path") -> None:
+    def test_bad_on_fire_value_raises(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path,
             """
@@ -308,7 +369,7 @@ watches:
         with pytest.raises(ConfigurationError):
             load_watches(path)
 
-    def test_empty_file_defaults(self, tmp_path: "Path") -> None:
+    def test_empty_file_defaults(self, tmp_path: Path) -> None:
         path = _write(tmp_path, "watches: {}\n")
         wf = load_watches(path)
         assert wf.watches == {}
