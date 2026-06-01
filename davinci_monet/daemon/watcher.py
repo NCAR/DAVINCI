@@ -15,9 +15,10 @@ from __future__ import annotations
 import glob
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Optional
 
 from davinci_monet.daemon.config import DaemonConfig, WatchRule
 from davinci_monet.daemon.contracts import Clock, TriggerEvent
