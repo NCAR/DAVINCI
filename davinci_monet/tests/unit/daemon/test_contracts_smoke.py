@@ -49,10 +49,8 @@ def test_config_package_exports_strict_flexible_model() -> None:
     from davinci_monet.config import FlexibleModel, StrictModel  # noqa: F401
 
     # Sanity: they are the real Pydantic base classes.
-    from davinci_monet.config.schema import (
-        FlexibleModel as SchemaFlexible,
-        StrictModel as SchemaStrict,
-    )
+    from davinci_monet.config.schema import FlexibleModel as SchemaFlexible
+    from davinci_monet.config.schema import StrictModel as SchemaStrict
 
     assert StrictModel is SchemaStrict
     assert FlexibleModel is SchemaFlexible

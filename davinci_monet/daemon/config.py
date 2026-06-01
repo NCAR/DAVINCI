@@ -28,12 +28,7 @@ from pydantic import Field, field_validator
 # davinci_monet.core.exceptions (running core/__init__.py imports
 # core.base/types/protocols which pull xarray).
 from davinci_monet.config.schema import FlexibleModel, StrictModel
-from davinci_monet.daemon.contracts import (
-    NotifyChannel,
-    OnFireMode,
-    SettleMode,
-    WatchSource,
-)
+from davinci_monet.daemon.contracts import NotifyChannel, OnFireMode, SettleMode, WatchSource
 
 # ---------------------------------------------------------------------------
 # Lightweight YAML helpers (stdlib only — no project imports)
