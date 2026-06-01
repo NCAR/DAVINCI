@@ -10,9 +10,13 @@ import os
 import signal
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:  # supervisor-pure: only a type hint, no runtime import cycle
+    from davinci_monet.daemon.config import DaemonConfig
 
 from davinci_monet.logging import get_logger
 
@@ -233,3 +237,190 @@ def install_signal_handlers(
         previous[signum] = h.getsignal(signum)
         h.signal(signum, _handler)
     return previous
+
+
+class OsHooks:
+    """Injectable wrapper over the os primitives daemonize needs.
+
+    Defaults delegate to the real ``os`` module. Tests substitute a fake to
+    drive the fork/exit logic deterministically without actually forking the
+    pytest process.
+    """
+
+    def fork(self) -> int:
+        return os.fork()
+
+    def setsid(self) -> None:
+        os.setsid()
+
+    def chdir(self, path: str) -> None:
+        os.chdir(path)
+
+    def umask(self, mask: int) -> int:
+        return os.umask(mask)
+
+    def _exit(self, code: int) -> None:
+        os._exit(code)
+
+    def open(self, path: str, flags: int, mode: int = 0o777) -> int:
+        return os.open(path, flags, mode)
+
+    def dup2(self, fd: int, fd2: int) -> None:
+        os.dup2(fd, fd2)
+
+    def close(self, fd: int) -> None:
+        os.close(fd)
+
+    def getpid(self) -> int:
+        return os.getpid()
+
+    def kill(self, pid: int, sig: int) -> None:
+        os.kill(pid, sig)
+
+
+def daemonize(
+    log_path: "str | Path",
+    *,
+    hooks: "OsHooks | None" = None,
+) -> None:
+    """Detach into the background via the classic POSIX double-fork.
+
+    Sequence: ``fork`` (parent exits) -> ``setsid`` (new session, drop the
+    controlling TTY) -> ``fork`` again (intermediate parent exits so the daemon
+    can never reacquire a TTY) -> ``chdir('/')`` + ``umask(0)`` -> redirect
+    stdin from ``/dev/null`` and stdout/stderr to ``log_path`` (append). Returns
+    in the final daemon process only; the ancestor processes call ``_exit(0)``.
+    """
+    h = hooks or OsHooks()
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ---- first fork: detach from the launching shell ----------------------
+    if h.fork() > 0:
+        h._exit(0)  # original parent leaves
+    h.setsid()  # become session leader, no controlling terminal
+
+    # ---- second fork: ensure we are not a session leader ------------------
+    if h.fork() > 0:
+        h._exit(0)  # intermediate parent leaves
+
+    # ---- daemon context ---------------------------------------------------
+    h.chdir("/")
+    h.umask(0)
+
+    # ---- redirect stdio ---------------------------------------------------
+    devnull_fd = h.open(os.devnull, os.O_RDONLY)
+    log_fd = h.open(
+        str(log_path),
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+        0o644,
+    )
+    h.dup2(devnull_fd, 0)  # stdin  <- /dev/null
+    h.dup2(log_fd, 1)  # stdout -> daemon.log
+    h.dup2(log_fd, 2)  # stderr -> daemon.log
+    if devnull_fd > 2:
+        h.close(devnull_fd)
+    if log_fd > 2:
+        h.close(log_fd)
+
+
+@dataclass
+class BackgroundResult:
+    """Outcome of a start_background / stop_background lifecycle operation.
+
+    ``started`` is True when the daemon was (start) launched into the background
+    or (stop) successfully signalled and reaped. ``message`` is a human string for
+    the CLI to print; ``pid`` is the backgrounded daemon's pid when known.
+    """
+
+    started: bool
+    message: str
+    pid: Optional[int] = None
+
+
+def start_background(
+    daemon_cfg: "DaemonConfig",
+    run: Callable[[], None],
+    *,
+    hooks: "OsHooks | None" = None,
+) -> BackgroundResult:
+    """Launch ``run`` as a backgrounded daemon (double-fork) under the PID lock.
+
+    ``run`` is the foreground serve callable (e.g. ``supervisor.serve``); lifecycle
+    intentionally NEVER imports the supervisor, so the caller supplies it. If a
+    live daemon already holds the lock, returns ``started=False`` with a message
+    naming the running pid. Otherwise the original process double-forks: the final
+    daemon child acquires the PidLock, redirects stdio to ``daemon.log`` via
+    :func:`daemonize`, and calls ``run()``; the original parent returns
+    ``started=True`` with the backgrounded pid. ``hooks`` (OsHooks) is injected so
+    the fork/lock/exit path is unit-testable without forking pytest.
+    """
+    h = hooks or OsHooks()
+    lock = PidLock(pid_path=daemon_cfg.pid_path, lock_path=daemon_cfg.lock_path)
+    # Check if ANY live pid holds the daemon pid file (including our own pid,
+    # which would indicate a prior start_background already backgrounded us).
+    running = lock.read_pid()
+    if running is not None and _default_is_alive(running):
+        return BackgroundResult(
+            started=False,
+            message=f"DAVINCI daemon already running (pid {running}).",
+            pid=running,
+        )
+
+    # ---- double-fork: original parent returns; child becomes the daemon ----
+    if h.fork() > 0:
+        # Original process: wait briefly for the child to record its pid, then
+        # report success to the CLI caller.
+        child_pid = lock.read_pid()
+        return BackgroundResult(
+            started=True,
+            message=f"DAVINCI daemon started in background (pid {child_pid}).",
+            pid=child_pid,
+        )
+
+    # ---- daemon child ------------------------------------------------------
+    daemonize(daemon_cfg.log_path, hooks=h)
+    lock.acquire()  # writes the daemon's pid; held for the process lifetime
+    try:
+        run()
+    finally:
+        lock.release()
+    h._exit(0)
+    return BackgroundResult(started=True, message="", pid=h.getpid())  # pragma: no cover
+
+
+def stop_background(
+    daemon_cfg: "DaemonConfig",
+    *,
+    timeout: float = 10.0,
+    hooks: "OsHooks | None" = None,
+) -> BackgroundResult:
+    """Signal a backgrounded daemon to drain + exit and wait for it to die.
+
+    Reads the daemon pid from the PID lock, sends ``SIGTERM`` (graceful drain),
+    then polls liveness up to ``timeout`` seconds. Returns ``started=True`` when
+    the process exits in time (or was already gone), ``started=False`` on timeout
+    or when no pid file is present. ``hooks`` is injected for testability.
+    """
+    h = hooks or OsHooks()
+    lock = PidLock(pid_path=daemon_cfg.pid_path, lock_path=daemon_cfg.lock_path)
+    pid = lock.read_pid()
+    if pid is None:
+        return BackgroundResult(started=False, message="No running daemon found.")
+    try:
+        h.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return BackgroundResult(
+            started=True, message="Daemon was not running (stale pid cleared).", pid=pid
+        )
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _default_is_alive(pid):
+            return BackgroundResult(started=True, message=f"Daemon stopped (pid {pid}).", pid=pid)
+        time.sleep(0.1)
+    return BackgroundResult(
+        started=False,
+        message=f"Daemon (pid {pid}) did not exit within {timeout:.0f}s.",
+        pid=pid,
+    )
