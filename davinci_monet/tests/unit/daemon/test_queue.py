@@ -76,3 +76,76 @@ class TestCoalescing:
         q = RunQueue()
         assert q.pending_count() == 0
         assert q.next_job() is None
+
+
+class TestFifoOrder:
+    def test_distinct_watches_pop_in_submission_order(self) -> None:
+        q = RunQueue()
+        base = datetime(2026, 5, 31, 12, 0, 0)
+        q.submit(_event("alpha", ["/a/1.nc"], when=base))
+        q.submit(_event("bravo", ["/b/1.nc"], when=base + timedelta(seconds=1)))
+        q.submit(_event("charlie", ["/c/1.nc"], when=base + timedelta(seconds=2)))
+
+        assert q.pending_names() == ["alpha", "bravo", "charlie"]
+        popped = [q.next_job(), q.next_job(), q.next_job()]
+        assert [j.watch_name for j in popped if j is not None] == [
+            "alpha",
+            "bravo",
+            "charlie",
+        ]
+        assert q.next_job() is None
+
+    def test_coalesce_does_not_reorder_fifo(self) -> None:
+        q = RunQueue()
+        q.submit(_event("alpha", ["/a/1.nc"]))
+        q.submit(_event("bravo", ["/b/1.nc"]))
+        # A late repeat for 'alpha' coalesces in place; 'alpha' must NOT jump
+        # behind 'bravo' nor ahead of its original slot.
+        q.submit(_event("alpha", ["/a/2.nc"]))
+        assert q.pending_names() == ["alpha", "bravo"]
+        first = q.next_job()
+        assert first is not None and first.watch_name == "alpha"
+        assert first.new_files == ["/a/1.nc", "/a/2.nc"]
+
+
+class TestRunningLifecycle:
+    def test_trigger_while_running_requeues_exactly_one_pending(self) -> None:
+        q = RunQueue()
+        # Initial trigger, then pop it -> the watch is now RUNNING.
+        q.submit(_event("cam", ["/d/a.nc"]))
+        running_job = q.next_job()
+        assert running_job is not None and running_job.watch_name == "cam"
+        assert q.is_running("cam") is True
+        assert q.pending_count() == 0
+
+        # A new trigger arrives while 'cam' is still running -> re-queue one.
+        q.submit(_event("cam", ["/d/b.nc"]))
+        assert q.pending_count() == 1
+        assert q.pending_names() == ["cam"]
+
+        # Two more rapid triggers during the same running window coalesce into
+        # that single pending re-queue (still exactly one pending).
+        q.submit(_event("cam", ["/d/c.nc"]))
+        q.submit(_event("cam", ["/d/b.nc", "/d/d.nc"]))
+        assert q.pending_count() == 1
+
+        # Finish the in-flight run; the re-queued pending is independent of it.
+        q.mark_done("cam")
+        assert q.is_running("cam") is False
+
+        requeued = q.next_job()
+        assert requeued is not None and requeued.watch_name == "cam"
+        # The re-queued entry only contains files that arrived AFTER the pop;
+        # the originally-running run's file ("/d/a.nc") is not folded back in.
+        assert requeued.new_files == ["/d/b.nc", "/d/c.nc", "/d/d.nc"]
+        assert q.next_job() is None
+
+    def test_mark_running_and_done_are_idempotent(self) -> None:
+        q = RunQueue()
+        q.mark_running("cam")
+        q.mark_running("cam")
+        assert q.running_names() == {"cam"}
+        q.mark_done("cam")
+        q.mark_done("cam")  # second call must not raise
+        assert q.running_names() == set()
+        assert q.is_running("cam") is False
