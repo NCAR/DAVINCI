@@ -135,10 +135,7 @@ class PollingWatcher:
         self, rule: WatchRule, st: _RuleState, now: float
     ) -> Optional[TriggerEvent]:
         current = self._scan(rule.watch)
-        if current:
-            if st.first_seen_t is None:
-                st.first_seen_t = now
-        else:
+        if not current:
             # nothing matches: reset transient timing but keep settled history.
             st.tracked = {}
             st.last_change_t = None
@@ -152,7 +149,15 @@ class PollingWatcher:
 
         current_set = set(current)
         if current_set == st.settled:
-            return None  # identical to the last-fired batch; do not re-fire.
+            # identical to the last-fired batch: no pending batch is settling.
+            st.first_seen_t = None
+            return None  # do not re-fire.
+
+        # A pending (not-yet-fired) batch exists. Anchor the max_settle_wait
+        # valve to when THIS batch first diverged from the fired set, so a later
+        # batch is never force-fired using an earlier batch's start time.
+        if st.first_seen_t is None:
+            st.first_seen_t = now
 
         quiesced = (now - st.last_change_t) >= rule.settle
         forced = self._max_settle_exceeded(st, now)
@@ -192,11 +197,7 @@ class PollingWatcher:
         return self._fire(rule, st, current, "sentinel")
 
     def _marker_present(self, marker: str) -> bool:
-        """Sentinel presence via the injected scan (deterministic in tests).
-
-        The marker's own directory is globbed; presence is membership. Falls
-        back to os.path.exists for production when the marker is a plain path.
-        """
+        """Sentinel presence via ``os.path.exists``; returns False on OSError."""
         try:
             return os.path.exists(marker)
         except OSError:
@@ -214,6 +215,7 @@ class PollingWatcher:
         if not new:
             new = sorted(current)
         st.settled = set(current)
+        st.first_seen_t = None  # re-anchor the valve for the NEXT pending batch.
         return TriggerEvent(
             watch_name=rule.name,
             new_files=new,

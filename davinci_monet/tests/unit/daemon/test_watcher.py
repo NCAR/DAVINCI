@@ -190,3 +190,51 @@ def test_max_settle_wait_none_never_force_fires() -> None:
     for _ in range(10):
         clock.advance(10_000.0)
         assert w.poll() == []  # forever-growing + no valve -> never fires.
+
+
+def test_second_batch_reanchors_max_settle_after_fire() -> None:
+    # Regression: the max_settle_wait valve must measure from the START of the
+    # current pending batch, NOT from the first file the rule ever saw. Otherwise
+    # a new (still-growing) batch that arrives long after an earlier fire is
+    # force-fired immediately, because first_seen_t is stale from batch 1.
+    clock = FakeClock(start=1000.0)
+    a = "/data/a.nc"
+    b = "/data/b.nc"
+    scan = FakeScan(
+        [
+            {a: FileStat(size=100, mtime=1.0)},  # poll0: a appears
+            {a: FileStat(size=100, mtime=1.0)},  # poll1: a stable -> fires batch 1
+            {
+                a: FileStat(size=100, mtime=1.0),
+                b: FileStat(size=100, mtime=2.0),
+            },  # poll2: b appears
+            {a: FileStat(size=100, mtime=1.0), b: FileStat(size=200, mtime=3.0)},  # poll3: b grows
+            {a: FileStat(size=100, mtime=1.0), b: FileStat(size=300, mtime=4.0)},  # poll4: b grows
+            {a: FileStat(size=100, mtime=1.0), b: FileStat(size=400, mtime=5.0)},  # poll5: b grows
+            {a: FileStat(size=100, mtime=1.0), b: FileStat(size=500, mtime=6.0)},  # poll6: b grows
+        ]
+    )
+    cfg = DaemonConfig(max_settle_wait=100.0)
+    w = PollingWatcher(rules=[_rule(settle=30.0)], config=cfg, clock=clock, scan=scan)
+
+    assert w.poll() == []  # poll0: a just appeared
+    clock.advance(40.0)
+    batch1 = w.poll()  # poll1: a stable for 40s -> fires
+    assert len(batch1) == 1
+    assert batch1[0].new_files == [a]
+
+    # 200s later (>> the 100s valve measured from a's first-seen) a NEW file appears.
+    clock.advance(200.0)
+    assert w.poll() == []  # poll2: b's batch must NOT inherit a's start time
+    # b keeps growing; it must not force-fire until 100s from ITS OWN start (t=1240).
+    clock.advance(30.0)
+    assert w.poll() == []  # poll3: t=1270, 30s into b's batch
+    clock.advance(30.0)
+    assert w.poll() == []  # poll4: t=1300, 60s
+    clock.advance(30.0)
+    assert w.poll() == []  # poll5: t=1330, 90s
+    clock.advance(30.0)
+    batch2 = w.poll()  # poll6: t=1360, 120s >= 100s valve -> force-fires
+    assert len(batch2) == 1
+    assert batch2[0].new_files == [b]
+    assert batch2[0].settle_mode == "quiescence"
