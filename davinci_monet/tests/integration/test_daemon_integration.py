@@ -301,13 +301,51 @@ def test_daemon_whole_config_integration(
 def _glob_model_config_dict(
     obs_nc: Path, model_glob: str, output_dir: Path, log_dir: Path
 ) -> dict[str, Any]:
-    """Like _minimal_point_config_dict but the model files: is a glob that is
-    EMPTY until the daemon injects the newly-arrived file (on_fire=new_files_only)."""
-    cfg = _minimal_point_config_dict(
-        Path("/nonexistent/placeholder.nc"), obs_nc, output_dir, log_dir
-    )
-    cfg["model"]["synthetic"]["files"] = model_glob
-    return cfg
+    """Unified sources: config whose model source files: is a glob that is
+    EMPTY until the daemon injects the newly-arrived file (on_fire=new_files_only).
+
+    Uses the sources: schema (not the legacy model:/obs: schema) so that
+    inject_new_files, which operates on config['sources'][inject_into], can
+    override the target without requiring legacy-schema handling in the worker.
+    """
+    return {
+        "analysis": {
+            "start_time": "2024-01-15 00:00:00",
+            "end_time": "2024-01-15 06:00:00",
+            "output_dir": str(output_dir),
+            "log_dir": str(log_dir),
+        },
+        "sources": {
+            "synthetic": {
+                "type": "generic",
+                "role": "model",
+                "files": model_glob,
+                "radius_of_influence": 50000,
+                "mapping": {"surface": {"O3": "O3"}},
+                "variables": {"O3": {"units": "ppb"}},
+            },
+            "surface": {
+                "type": "pt_sfc",
+                "role": "obs",
+                "filename": str(obs_nc),
+                "variables": {"O3": {"obs_min": 0, "obs_max": 200, "units": "ppb"}},
+            },
+        },
+        "pairs": {
+            "synthetic_surface": {
+                "sources": ["synthetic", "surface"],
+                "variables": {"synthetic": "O3", "surface": "O3"},
+            }
+        },
+        "plots": {
+            "scatter_o3": {
+                "type": "scatter",
+                "pairs": ["synthetic_surface"],
+                "title": "O3: Model vs Observations",
+            }
+        },
+        "stats": {"metrics": ["N", "MB", "RMSE", "R"]},
+    }
 
 
 def test_daemon_new_files_only_injection_integration(
