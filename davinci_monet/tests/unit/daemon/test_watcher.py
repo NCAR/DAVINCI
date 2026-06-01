@@ -153,3 +153,40 @@ def test_sentinel_rule_fires_only_when_marker_appears(tmp_path) -> None:
     events2 = w.poll()
     assert len(events2) == 1
     assert events2[0].settle_mode == "sentinel"
+
+
+def test_max_settle_wait_force_fires_growing_file() -> None:
+    clock = FakeClock()
+    f = "/data/grow.nc"
+    # File grows on EVERY poll, so it never quiesces on its own.
+    snapshots = [{f: FileStat(size=100 * (i + 1), mtime=float(i))} for i in range(20)]
+    scan = FakeScan(snapshots)
+    # settle is large (never reached); max_settle_wait is the only thing that fires.
+    cfg = DaemonConfig(max_settle_wait=100.0)
+    w = PollingWatcher(rules=[_rule(settle=1000.0)], config=cfg, clock=clock, scan=scan)
+
+    assert w.poll() == []  # first_seen recorded here.
+    # Grow for 90s total (< 100s valve) -> still no fire despite constant growth.
+    for _ in range(3):
+        clock.advance(30.0)
+        assert w.poll() == []
+    # Cross the 100s valve while still growing -> force-fires once.
+    clock.advance(30.0)
+    events = w.poll()
+    assert len(events) == 1
+    assert events[0].watch_name == "w"
+    assert events[0].settle_mode == "quiescence"
+
+
+def test_max_settle_wait_none_never_force_fires() -> None:
+    clock = FakeClock()
+    f = "/data/grow.nc"
+    snapshots = [{f: FileStat(size=100 * (i + 1), mtime=float(i))} for i in range(20)]
+    scan = FakeScan(snapshots)
+    cfg = DaemonConfig(max_settle_wait=None)  # valve disabled.
+    w = PollingWatcher(rules=[_rule(settle=1000.0)], config=cfg, clock=clock, scan=scan)
+
+    assert w.poll() == []
+    for _ in range(10):
+        clock.advance(10_000.0)
+        assert w.poll() == []  # forever-growing + no valve -> never fires.
