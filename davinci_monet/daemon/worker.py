@@ -82,7 +82,8 @@ def _collect_plots_and_output(result: Any) -> tuple[Optional[str], list[str]]:
     if context is None:
         return output_dir, plots
     analysis = (context.config or {}).get("analysis", {})
-    output_dir = analysis.get("output_dir")
+    raw_output_dir = analysis.get("output_dir")
+    output_dir = str(raw_output_dir) if raw_output_dir is not None else None
     for stage_name in ("plotting", "obs_plotting"):
         stage_result = context.results.get(stage_name)
         data = getattr(stage_result, "data", None)
