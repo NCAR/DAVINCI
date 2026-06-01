@@ -7,9 +7,11 @@ launches `python -m davinci_monet.daemon.worker` as a fresh subprocess.
 
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Optional
@@ -106,14 +108,29 @@ def spawn_worker(
         text=True,
         bufsize=1,
     )
-    assert proc.stdin is not None and proc.stdout is not None
+    assert proc.stdin is not None
 
     proc.stdin.write(spec.to_json())
     proc.stdin.write("\n")
     proc.stdin.flush()
     proc.stdin.close()
 
+    # Drain stderr on a background thread so a full stderr pipe buffer (>64 KB
+    # on macOS/Linux) never blocks the worker from writing to stdout and never
+    # deadlocks the stdout-drain loop below.
+    assert proc.stderr is not None
+    proc_stderr = proc.stderr  # capture for closure — narrows type to IO[str]
+    stderr_buf = io.StringIO()
+
+    def _drain_stderr() -> None:
+        for chunk in iter(lambda: proc_stderr.read(4096), ""):
+            stderr_buf.write(chunk)
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
     events: list[ProgressEvent] = []
+    assert proc.stdout is not None
     for line in proc.stdout:
         event = ProgressEvent.parse_line(line)
         if event is None:
@@ -122,14 +139,16 @@ def spawn_worker(
         if on_event is not None:
             on_event(event)
 
+    # proc.stdout is exhausted (EOF); now wait for the process to exit.
     timeout = spec.worker_timeout
-    assert proc.stderr is not None
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
-    stderr = proc.stderr.read()
+
+    stderr_thread.join()
+    stderr = stderr_buf.getvalue()
 
     return WorkerRunResult(
         job_id=spec.job_id,
