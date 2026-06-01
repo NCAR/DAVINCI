@@ -8,12 +8,16 @@ imports the pipeline/sci-stack; the supervisor it launches forks workers that do
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 import typer
 
-from davinci_monet.cli.app import ERROR_COLOR, INFO_COLOR, SUCCESS_COLOR
+# Define colour constants locally so importing this module never triggers
+# davinci_monet.cli.app.register_commands(), which would pull in the pipeline
+# (xarray / matplotlib / monet) at module load time.
+ERROR_COLOR: str = typer.colors.BRIGHT_RED
+INFO_COLOR: str = typer.colors.CYAN
+SUCCESS_COLOR: str = typer.colors.GREEN
 
 app = typer.Typer(
     name="daemon",
@@ -204,7 +208,8 @@ def logs(
     _require_alive(client)
     if tail:
         for event in client.stream("logs_tail", target=target, kind=kind):
-            line = event.data.get("line") or event.data.get("message", "")
+            d = event.data or {}
+            line = d.get("line") or d.get("message", "")
             typer.echo(line)
         return
     data = _call(client, "logs", target=target, kind=kind)

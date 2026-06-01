@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from davinci_monet.cli.commands import daemon as daemon_cli
