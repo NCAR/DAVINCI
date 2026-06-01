@@ -24,13 +24,14 @@ import enum
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional, Protocol
+from typing import Any, Literal, Optional, Protocol, runtime_checkable
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 
 # Reuse the project's pydantic base classes verbatim — DO NOT redefine them.
+# Importing from the submodule directly avoids triggering the heavy geo/data
+# stack that davinci_monet/config/__init__.py would otherwise pull in eagerly.
 from davinci_monet.config.schema import FlexibleModel, StrictModel
-
 
 # =============================================================================
 # 0. Enums & literal aliases
@@ -153,7 +154,8 @@ class WatchStatusRecord(StrictModel):
 # =============================================================================
 
 
-class StateStore:
+@runtime_checkable
+class StateStore(Protocol):
     """SQLite-backed job history + watch runtime-status persistence.
 
     stdlib sqlite3 only. Single connection, check_same_thread=False, accessed
@@ -162,8 +164,8 @@ class StateStore:
     ISO-8601 (datetime.isoformat()); all dict/list fields json.dumps'd.
     """
 
-    def __init__(self, db_path: str | Path) -> None: ...
     def init_schema(self) -> None: ...  # idempotent CREATE TABLE IF NOT EXISTS ...
+
     def close(self) -> None: ...
 
     # ---- jobs CRUD --------------------------------------------------------
@@ -232,6 +234,7 @@ class StateStore:
         ...
 
     def get_watch_status(self, watch_name: str) -> Optional[WatchStatusRecord]: ...
+
     def list_watch_status(self) -> list[WatchStatusRecord]: ...
 
     def add_live_rule(self, rule: Any) -> None:
@@ -509,5 +512,6 @@ class Clock(Protocol):
     time deterministically. The PollingWatcher takes one of these.
     """
 
-    def now(self) -> float: ...        # monotonic seconds
+    def now(self) -> float: ...  # monotonic seconds
+
     def sleep(self, seconds: float) -> None: ...
