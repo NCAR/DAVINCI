@@ -187,3 +187,61 @@ class TestDaemonShellDispatch:
         assert shell.is_quit("quit") is True
         assert shell.is_quit("exit") is True
         assert shell.is_quit("status") is False
+
+
+class TestShellNeverStopsDaemon:
+    def test_quit_emits_no_shutdown(self) -> None:
+        for word in ("quit", "exit", "q"):
+            res = parse_command(word)
+            assert res.cmd != "shutdown"
+            assert res.cmd is None
+            assert res.local is True
+
+    def test_shutdown_verb_is_not_reachable(self) -> None:
+        # The shell has no `shutdown`/`stop` verb; it must be an unknown command.
+        with pytest.raises(ValueError, match="unknown command"):
+            parse_command("shutdown")
+        with pytest.raises(ValueError, match="unknown command"):
+            parse_command("stop")
+
+    def test_dispatch_quit_never_calls_shutdown(self) -> None:
+        shell, client = TestDaemonShellDispatch()._shell()
+        shell.execute("quit")
+        # No call at all, and certainly not shutdown.
+        client.call.assert_not_called()
+        for call in client.call.call_args_list:
+            assert call.args[0] != "shutdown"
+
+
+class TestRunShell:
+    def test_run_shell_dispatches_then_quits_cleanly(self) -> None:
+        from davinci_monet.daemon.shell import run_shell
+
+        client = MagicMock()
+        client.call.return_value = ControlResponse(ok=True, data={"pong": True})
+        # Scripted input: one real command, then quit ends the loop.
+        scripted = iter(["status", "quit"])
+        outputs: list[str] = []
+
+        run_shell(
+            client,
+            input_fn=lambda _prompt: next(scripted),
+            output_fn=outputs.append,
+        )
+
+        client.call.assert_called_once_with("status")
+        # Quitting never sends shutdown and the loop returned cleanly.
+        for call in client.call.call_args_list:
+            assert call.args[0] != "shutdown"
+
+    def test_run_shell_exits_on_eof(self) -> None:
+        from davinci_monet.daemon.shell import run_shell
+
+        client = MagicMock()
+
+        def _raise_eof(_prompt: str) -> str:
+            raise EOFError
+
+        # EOF (Ctrl-D) ends the loop without touching the socket.
+        run_shell(client, input_fn=_raise_eof, output_fn=lambda _s: None)
+        client.call.assert_not_called()
