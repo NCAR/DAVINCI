@@ -106,3 +106,69 @@ class TestRequestResponse:
         assert payload["ok"] is False
         assert "kaboom" in payload["error"]
         assert payload["code"] == "handler_error"
+
+
+class TestErrorEnvelope:
+    def test_unknown_command(self, server) -> None:
+        srv, sock_path = server
+        conn = _connect(sock_path)
+        conn.sendall((json.dumps({"cmd": "does_not_exist", "args": {}}) + "\n").encode())
+        payload = json.loads(_recv_line(conn))
+        conn.close()
+        assert payload["ok"] is False
+        assert payload["code"] == "unsupported"
+        assert "does_not_exist" in payload["error"]
+
+    def test_malformed_json(self, server) -> None:
+        srv, sock_path = server
+        conn = _connect(sock_path)
+        conn.sendall(b"this is not json\n")
+        payload = json.loads(_recv_line(conn))
+        conn.close()
+        assert payload["ok"] is False
+        assert payload["code"] == "invalid_args"
+
+    def test_missing_cmd(self, server) -> None:
+        srv, sock_path = server
+        conn = _connect(sock_path)
+        conn.sendall((json.dumps({"args": {"x": 1}}) + "\n").encode())
+        payload = json.loads(_recv_line(conn))
+        conn.close()
+        assert payload["ok"] is False
+        assert payload["code"] == "invalid_args"
+
+    def test_non_object_args(self, server) -> None:
+        srv, sock_path = server
+        conn = _connect(sock_path)
+        conn.sendall((json.dumps({"cmd": "x", "args": [1, 2, 3]}) + "\n").encode())
+        payload = json.loads(_recv_line(conn))
+        conn.close()
+        assert payload["ok"] is False
+        assert payload["code"] == "invalid_args"
+
+    def test_dispatch_fallback_routes_unregistered_command(self, tmp_path: Path) -> None:
+        # A ControlServer built with a `dispatch=` fallback routes any command not
+        # in the per-command registry through dispatch(cmd, args) instead of
+        # returning "unsupported". The supervisor passes handle_command here.
+        seen: dict = {}
+
+        def dispatch(cmd: str, args: dict) -> ControlResponse:
+            seen.update({"cmd": cmd, "args": args})
+            return ControlResponse(ok=True, data={"routed": cmd})
+
+        sock_path = tmp_path / "fallback.sock"
+        srv = ControlServer(sock_path, dispatch)
+        srv.start()
+        deadline = time.monotonic() + 5.0
+        while not sock_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        try:
+            conn = _connect(sock_path)
+            conn.sendall((json.dumps({"cmd": "status", "args": {"n": 1}}) + "\n").encode())
+            payload = json.loads(_recv_line(conn))
+            conn.close()
+        finally:
+            srv.stop()
+        assert payload["ok"] is True
+        assert payload["data"] == {"routed": "status"}
+        assert seen == {"cmd": "status", "args": {"n": 1}}
