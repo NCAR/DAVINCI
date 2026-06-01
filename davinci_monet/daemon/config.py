@@ -86,9 +86,7 @@ class NotificationConfig(FlexibleModel):
 
     desktop: bool = True
     icloud_copy: bool = True
-    icloud_dir: Path = Field(
-        default=Path("~/Library/Mobile Documents/com~apple~CloudDocs/Claude")
-    )
+    icloud_dir: Path = Field(default=Path("~/Library/Mobile Documents/com~apple~CloudDocs/Claude"))
 
     @field_validator("icloud_dir", mode="before")
     @classmethod
