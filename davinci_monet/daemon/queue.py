@@ -116,3 +116,19 @@ class RunQueue:
 
     def is_running(self, watch_name: str) -> bool:
         return watch_name in self._running
+
+    # ---- QueueLike protocol compatibility -----------------------------------
+    def pop(self) -> tuple[str, list[str]] | None:
+        """Pop the oldest pending entry and return (watch_name, new_files).
+
+        Alias for ``next_job()`` that conforms to the ``QueueLike`` protocol
+        used by the supervisor. Returns ``None`` if no entries are pending.
+        """
+        job = self.next_job()
+        if job is None:
+            return None
+        return job.watch_name, job.new_files
+
+    def __len__(self) -> int:
+        """Return the number of pending (not yet started) entries."""
+        return self.pending_count()
