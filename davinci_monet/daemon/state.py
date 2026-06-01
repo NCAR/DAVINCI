@@ -19,11 +19,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from davinci_monet.daemon.config import WatchRule
 from davinci_monet.daemon.contracts import (
     SCHEMA_DDL,
     JobRecord,
     JobStatus,
     OnFireMode,
+    WatchSource,
+    WatchStatusRecord,
 )
 
 __all__ = ["StateStore"]
@@ -247,6 +250,96 @@ class StateStore:
         ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
+    # -- watch_status CRUD -------------------------------------------------
+
+    def upsert_watch_status(self, record: WatchStatusRecord) -> None:
+        """INSERT OR REPLACE the watch_status row keyed by watch_name."""
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO watch_status
+                (watch_name, enabled, source, rule_json, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                record.watch_name,
+                1 if record.enabled else 0,
+                record.source,
+                json.dumps(record.rule_json) if record.rule_json is not None else None,
+                (record.updated_at or datetime.now()).isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    def set_enabled(self, watch_name: str, enabled: bool) -> None:
+        """Pause/resume a watch, preserving its existing source/rule_json."""
+        existing = self.get_watch_status(watch_name)
+        source: WatchSource = existing.source if existing is not None else "file"
+        rule_json = existing.rule_json if existing is not None else None
+        self.upsert_watch_status(
+            WatchStatusRecord(
+                watch_name=watch_name,
+                enabled=enabled,
+                source=source,
+                rule_json=rule_json,
+                updated_at=datetime.now(),
+            )
+        )
+
+    def get_watch_status(self, watch_name: str) -> Optional[WatchStatusRecord]:
+        """Return the watch_status row for ``watch_name`` or None."""
+        row = self._conn.execute(
+            "SELECT * FROM watch_status WHERE watch_name = ?", (watch_name,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_watch_status(row)
+
+    def list_watch_status(self) -> list[WatchStatusRecord]:
+        """Return every watch_status row (name-ordered)."""
+        rows = self._conn.execute(
+            "SELECT * FROM watch_status ORDER BY watch_name"
+        ).fetchall()
+        return [self._row_to_watch_status(r) for r in rows]
+
+    def add_live_rule(self, rule: WatchRule) -> None:
+        """Persist a runtime-added rule as source='live' with its JSON dump."""
+        self.upsert_watch_status(
+            WatchStatusRecord(
+                watch_name=rule.name,
+                enabled=rule.enabled,
+                source="live",
+                rule_json=rule.model_dump(mode="json"),
+                updated_at=datetime.now(),
+            )
+        )
+
+    def remove_watch(self, watch_name: str) -> None:
+        """Delete the watch_status row (drops a live rule / runtime overrides)."""
+        self._conn.execute(
+            "DELETE FROM watch_status WHERE watch_name = ?", (watch_name,)
+        )
+        self._conn.commit()
+
+    def disabled_names(self) -> set[str]:
+        """Names with enabled=False (fed to merge_rules on reload)."""
+        rows = self._conn.execute(
+            "SELECT watch_name FROM watch_status WHERE enabled = 0"
+        ).fetchall()
+        return {r["watch_name"] for r in rows}
+
+    def live_rules(self) -> dict[str, WatchRule]:
+        """Reconstruct WatchRule objects for every source='live' row."""
+        rows = self._conn.execute(
+            "SELECT * FROM watch_status WHERE source = 'live' AND rule_json IS NOT NULL"
+        ).fetchall()
+        result: dict[str, WatchRule] = {}
+        for row in rows:
+            rule_json = _loads(row["rule_json"], None)
+            if rule_json is None:
+                continue
+            result[row["watch_name"]] = WatchRule(**rule_json)
+        return result
+
     # -- decoding helpers --------------------------------------------------
 
     @staticmethod
@@ -266,4 +359,14 @@ class StateStore:
             log_path=row["log_path"],
             result_summary=_loads(row["result_summary"], None),
             error=row["error"],
+        )
+
+    @staticmethod
+    def _row_to_watch_status(row: sqlite3.Row) -> WatchStatusRecord:
+        return WatchStatusRecord(
+            watch_name=row["watch_name"],
+            enabled=bool(row["enabled"]),
+            source=row["source"],
+            rule_json=_loads(row["rule_json"], None),
+            updated_at=_parse_dt(row["updated_at"]),
         )

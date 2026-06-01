@@ -179,3 +179,132 @@ def test_active_jobs_returns_queued_and_running(db_path: Path) -> None:
         assert statuses <= {JobStatus.QUEUED, JobStatus.RUNNING}
     finally:
         store.close()
+
+
+from davinci_monet.daemon.config import WatchRule
+from davinci_monet.daemon.contracts import WatchStatusRecord
+
+
+def _live_rule(name: str = "modis_stream") -> WatchRule:
+    return WatchRule(
+        name=name,
+        watch="/scratch/modis/*.hdf",
+        run="/cfg/modis-aod.yaml",
+        on_fire="new_files_only",
+        inject_into="modis",
+        settle=15.0,
+    )
+
+
+def test_set_enabled_and_disabled_names(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        store.set_enabled("cam_realtime", False)
+        store.set_enabled("modis_stream", True)
+        assert store.disabled_names() == {"cam_realtime"}
+
+        store.set_enabled("cam_realtime", True)
+        assert store.disabled_names() == set()
+    finally:
+        store.close()
+
+
+def test_upsert_replaces_existing_row(db_path: Path) -> None:
+    from datetime import datetime
+
+    store = StateStore(db_path)
+    try:
+        store.upsert_watch_status(
+            WatchStatusRecord(
+                watch_name="w", enabled=True, source="file",
+                updated_at=datetime.now(),
+            )
+        )
+        store.upsert_watch_status(
+            WatchStatusRecord(
+                watch_name="w", enabled=False, source="file",
+                updated_at=datetime.now(),
+            )
+        )
+        rec = store.get_watch_status("w")
+        assert rec is not None
+        assert rec.enabled is False
+        assert len(store.list_watch_status()) == 1  # replaced, not duplicated
+    finally:
+        store.close()
+
+
+def test_get_watch_status_missing_returns_none(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        assert store.get_watch_status("nope") is None
+    finally:
+        store.close()
+
+
+def test_add_live_rule_roundtrips(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        rule = _live_rule()
+        store.add_live_rule(rule)
+
+        rec = store.get_watch_status(rule.name)
+        assert rec is not None
+        assert rec.source == "live"
+        assert rec.rule_json is not None
+
+        rules = store.live_rules()
+        assert set(rules) == {rule.name}
+        restored = rules[rule.name]
+        assert isinstance(restored, WatchRule)
+        assert restored.name == rule.name
+        assert restored.watch == rule.watch
+        assert restored.run == rule.run
+        assert restored.on_fire == "new_files_only"
+        assert restored.inject_into == "modis"
+        assert restored.settle == 15.0
+    finally:
+        store.close()
+
+
+def test_live_rules_excludes_file_rules(db_path: Path) -> None:
+    from datetime import datetime
+
+    store = StateStore(db_path)
+    try:
+        store.upsert_watch_status(
+            WatchStatusRecord(
+                watch_name="declared", enabled=True, source="file",
+                updated_at=datetime.now(),
+            )
+        )
+        store.add_live_rule(_live_rule("live_one"))
+        assert set(store.live_rules()) == {"live_one"}
+    finally:
+        store.close()
+
+
+def test_remove_watch_deletes_row(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        store.add_live_rule(_live_rule("gone"))
+        assert store.get_watch_status("gone") is not None
+        store.remove_watch("gone")
+        assert store.get_watch_status("gone") is None
+        assert "gone" not in store.live_rules()
+    finally:
+        store.close()
+
+
+def test_watch_status_survives_restart(db_path: Path) -> None:
+    store1 = StateStore(db_path)
+    store1.add_live_rule(_live_rule("persisted"))
+    store1.set_enabled("declared_paused", False)
+    store1.close()
+
+    store2 = StateStore(db_path)
+    try:
+        assert "persisted" in store2.live_rules()
+        assert store2.disabled_names() == {"declared_paused"}
+    finally:
+        store2.close()
