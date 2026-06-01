@@ -14,7 +14,15 @@ from datetime import datetime
 from typing import Any, Callable, Optional, Protocol
 
 from davinci_monet.daemon.config import DaemonConfig, WatchesFile, WatchRule
-from davinci_monet.daemon.contracts import Clock, JobSpec, JobStatus, TriggerEvent
+from davinci_monet.daemon.contracts import (
+    PROTOCOL_VERSION,
+    Clock,
+    ControlResponse,
+    JobRecord,
+    JobSpec,
+    JobStatus,
+    TriggerEvent,
+)
 
 logger = logging.getLogger("davinci.daemon.supervisor")
 
@@ -204,6 +212,167 @@ class Supervisor:
             self.notifier.notify_result(job, rule)
         except Exception:
             logger.exception("notify failed for watch %s", rule.name)
+
+    # ---- control command dispatch ----------------------------------------
+    def handle_command(self, cmd: str, args: Optional[dict[str, Any]] = None) -> ControlResponse:
+        """Route one control request to a handler and return a ControlResponse.
+
+        Mirrors the COMMAND CATALOG in contracts.py. Streaming commands
+        (subscribe/logs_tail) are handled by the control server's push loop, not
+        here; this returns the ack data for them.
+        """
+        args = args or {}
+        handler = self._handler_table().get(cmd)
+        if handler is None:
+            return ControlResponse(ok=False, error=f"unknown command: {cmd}", code="unsupported")
+        try:
+            return handler(args)
+        except KeyError as exc:
+            return ControlResponse(ok=False, error=f"missing arg: {exc}", code="invalid_args")
+
+    def _handler_table(self) -> dict[str, Callable[[dict[str, Any]], ControlResponse]]:
+        return {
+            "ping": self._cmd_ping,
+            "status": self._cmd_status,
+            "watch_list": self._cmd_watch_list,
+            "watch_pause": self._cmd_watch_pause,
+            "watch_resume": self._cmd_watch_resume,
+            "watch_trigger": self._cmd_watch_trigger,
+            "history": self._cmd_history,
+            "job_get": self._cmd_job_get,
+            "shutdown": self._cmd_shutdown,
+            "subscribe": self._cmd_subscribe_ack,
+            "logs_tail": self._cmd_logs_tail_ack,
+        }
+
+    def _cmd_ping(self, args: dict[str, Any]) -> ControlResponse:
+        import os
+
+        return ControlResponse(
+            ok=True,
+            data={
+                "pong": True,
+                "version": PROTOCOL_VERSION,
+                "pid": os.getpid(),
+                "uptime_s": self.uptime_s,
+            },
+        )
+
+    def watch_summaries(self) -> list[dict[str, Any]]:
+        """Compact per-watch rows (WatchSummary shape) for list/status/top."""
+        summaries: list[dict[str, Any]] = []
+        for name, rule in self.rules.items():
+            state = "paused" if not rule.enabled else "armed"
+            summaries.append(
+                {
+                    "name": name,
+                    "enabled": rule.enabled,
+                    "source": "file",
+                    "on_fire": rule.on_fire,
+                    "settle_mode": rule.settle_mode,
+                    "watch": rule.watch,
+                    "run": rule.run,
+                    "state": state,
+                    "last_job_id": None,
+                    "last_status": None,
+                    "last_fired_at": None,
+                }
+            )
+        return summaries
+
+    def _cmd_watch_list(self, args: dict[str, Any]) -> ControlResponse:
+        return ControlResponse(ok=True, data={"watches": self.watch_summaries()})
+
+    def _set_enabled(self, name: str, enabled: bool) -> ControlResponse:
+        rule = self.rules.get(name)
+        if rule is None:
+            return ControlResponse(ok=False, error=f"no such watch: {name}", code="not_found")
+        self.rules[name] = rule.model_copy(update={"enabled": enabled})
+        self.state.set_enabled(name, enabled)
+        return ControlResponse(ok=True, data={"name": name, "enabled": enabled})
+
+    def _cmd_watch_pause(self, args: dict[str, Any]) -> ControlResponse:
+        return self._set_enabled(args["name"], False)
+
+    def _cmd_watch_resume(self, args: dict[str, Any]) -> ControlResponse:
+        return self._set_enabled(args["name"], True)
+
+    def _cmd_watch_trigger(self, args: dict[str, Any]) -> ControlResponse:
+        name = args["name"]
+        rule = self.rules.get(name)
+        if rule is None:
+            return ControlResponse(ok=False, error=f"no such watch: {name}", code="not_found")
+        files = sorted(args.get("files", []) or [])
+        event = TriggerEvent(
+            watch_name=name,
+            new_files=files,
+            detected_at=datetime.now(),
+            settle_mode=rule.settle_mode,
+        )
+        coalesced = self.queue.submit(event)
+        return ControlResponse(
+            ok=True,
+            data={"queued_job_id": None, "coalesced": bool(coalesced)},
+        )
+
+    def build_status(self) -> dict[str, Any]:
+        """Assemble the StatusData payload (running/queued/watches/recent)."""
+        import os
+
+        active = list(self.state.active_jobs())
+        running = [self._job_dump(j) for j in active if self._job_status(j) == JobStatus.RUNNING]
+        queued = [self._job_dump(j) for j in active if self._job_status(j) == JobStatus.QUEUED]
+        recent = [self._job_dump(j) for j in self.state.list_jobs(limit=10)]
+        return {
+            "version": PROTOCOL_VERSION,
+            "pid": os.getpid(),
+            "uptime_s": self.uptime_s,
+            "draining": self._draining,
+            "max_concurrent": self.daemon_cfg.max_concurrent,
+            "running": running,
+            "queued": queued,
+            "watches": self.watch_summaries(),
+            "recent": recent,
+        }
+
+    @staticmethod
+    def _job_status(job: Any) -> Any:
+        return getattr(job, "status", None)
+
+    @staticmethod
+    def _job_dump(job: Any) -> Any:
+        if hasattr(job, "model_dump"):
+            return job.model_dump(mode="json")
+        return job
+
+    def _cmd_status(self, args: dict[str, Any]) -> ControlResponse:
+        return ControlResponse(ok=True, data=self.build_status())
+
+    def _cmd_history(self, args: dict[str, Any]) -> ControlResponse:
+        jobs = self.state.list_jobs(
+            watch_name=args.get("watch"),
+            status=JobStatus.FAILED if args.get("failed") else None,
+            limit=int(args.get("limit", 50)),
+        )
+        return ControlResponse(ok=True, data={"jobs": [self._job_dump(j) for j in jobs]})
+
+    def _cmd_job_get(self, args: dict[str, Any]) -> ControlResponse:
+        job = self.state.get_job(int(args["job_id"]))
+        return ControlResponse(ok=True, data={"job": self._job_dump(job) if job else None})
+
+    def _cmd_shutdown(self, args: dict[str, Any]) -> ControlResponse:
+        drain = bool(args.get("drain", True))
+        self.request_shutdown()
+        if not drain:
+            self._stopped = True
+        return ControlResponse(ok=True, data={"shutting_down": True, "draining": drain})
+
+    def _cmd_subscribe_ack(self, args: dict[str, Any]) -> ControlResponse:
+        topics = args.get("topics") or ["jobs", "watches", "stats"]
+        return ControlResponse(ok=True, data={"subscribed": list(topics)})
+
+    def _cmd_logs_tail_ack(self, args: dict[str, Any]) -> ControlResponse:
+        return ControlResponse(ok=True, data={"streaming": True})
 
     # ---- lifecycle --------------------------------------------------------
     def request_shutdown(self, reason: str = "signal") -> None:
