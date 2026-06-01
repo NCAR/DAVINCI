@@ -129,3 +129,53 @@ class WatchRule(FlexibleModel):
     def settle_mode(self) -> SettleMode:
         """'sentinel' if a sentinel path is set, else 'quiescence'."""
         return "sentinel" if self.sentinel else "quiescence"
+
+
+class DaemonConfig(FlexibleModel):
+    """Top-level daemon policy (the ``daemon:`` block of watches.yaml)."""
+
+    state_dir: Path = Field(default=Path("~/.davinci/daemon"))
+    poll_interval: float = Field(default=5.0)
+    max_concurrent: int = 1
+    hdf5_file_locking: bool = False
+    max_settle_wait: Optional[float] = Field(default=1800.0)
+    worker_timeout: Optional[float] = None
+    notifications: NotificationConfig = Field(default_factory=NotificationConfig)
+
+    @field_validator(
+        "poll_interval", "max_settle_wait", "worker_timeout", mode="before"
+    )
+    @classmethod
+    def _parse_durations(cls, v: Any) -> Any:
+        """Accept "5s"/"30m"/number via parse_duration; pass None through."""
+        if v is None:
+            return None
+        return parse_duration(v)
+
+    @field_validator("state_dir", mode="before")
+    @classmethod
+    def _expand_state_dir(cls, v: Any) -> Any:
+        """Expand ~ and ${VAR} at daemon load (layer-1)."""
+        if v is None:
+            return v
+        return Path(_expand_path_str(str(v)))
+
+    @property
+    def db_path(self) -> Path:
+        return self.state_dir / "history.db"
+
+    @property
+    def socket_path(self) -> Path:
+        return self.state_dir / "control.sock"
+
+    @property
+    def pid_path(self) -> Path:
+        return self.state_dir / "daemon.pid"
+
+    @property
+    def lock_path(self) -> Path:
+        return self.state_dir / "daemon.lock"
+
+    @property
+    def log_path(self) -> Path:
+        return self.state_dir / "daemon.log"

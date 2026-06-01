@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from davinci_monet.daemon.config import NotificationConfig, WatchRule, parse_duration
+from davinci_monet.daemon.config import DaemonConfig, NotificationConfig, WatchRule, parse_duration
 
 
 class TestParseDuration:
@@ -141,3 +141,52 @@ class TestWatchRule:
         # env is the layer-2 worker overlay; values are stored verbatim
         rule = WatchRule(name="r", watch="/x", run="/c", env={"DATA": "${HOME}/d"})
         assert rule.env == {"DATA": "${HOME}/d"}
+
+
+class TestDaemonConfig:
+    def test_defaults(self) -> None:
+        cfg = DaemonConfig()
+        assert cfg.poll_interval == 5.0
+        assert cfg.max_concurrent == 1
+        assert cfg.hdf5_file_locking is False
+        assert cfg.max_settle_wait == 1800.0
+        assert cfg.worker_timeout is None
+        assert isinstance(cfg.notifications, NotificationConfig)
+
+    def test_state_dir_user_expanded(self) -> None:
+        cfg = DaemonConfig()
+        assert not str(cfg.state_dir).startswith("~")
+        assert str(cfg.state_dir) == str(Path.home() / ".davinci" / "daemon")
+
+    def test_state_dir_env_expanded(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+        monkeypatch.setenv("DAEMON_ROOT", "/tmp/dmn")
+        cfg = DaemonConfig(state_dir="${DAEMON_ROOT}/state")
+        assert str(cfg.state_dir) == "/tmp/dmn/state"
+
+    def test_poll_interval_duration_string(self) -> None:
+        cfg = DaemonConfig(poll_interval="10s")
+        assert cfg.poll_interval == 10.0
+
+    def test_max_settle_wait_duration_string(self) -> None:
+        cfg = DaemonConfig(max_settle_wait="30m")
+        assert cfg.max_settle_wait == 1800.0
+
+    def test_max_settle_wait_none_disables(self) -> None:
+        cfg = DaemonConfig(max_settle_wait=None)
+        assert cfg.max_settle_wait is None
+
+    def test_worker_timeout_duration_string(self) -> None:
+        cfg = DaemonConfig(worker_timeout="2h")
+        assert cfg.worker_timeout == 7200.0
+
+    def test_derived_paths(self) -> None:
+        cfg = DaemonConfig(state_dir="/tmp/dstate")
+        assert cfg.db_path == Path("/tmp/dstate/history.db")
+        assert cfg.socket_path == Path("/tmp/dstate/control.sock")
+        assert cfg.pid_path == Path("/tmp/dstate/daemon.pid")
+        assert cfg.lock_path == Path("/tmp/dstate/daemon.lock")
+        assert cfg.log_path == Path("/tmp/dstate/daemon.log")
+
+    def test_nested_notifications_dict(self) -> None:
+        cfg = DaemonConfig(notifications={"desktop": False})
+        assert cfg.notifications.desktop is False
