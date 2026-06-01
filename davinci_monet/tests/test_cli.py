@@ -527,6 +527,39 @@ class TestCLIImports:
         assert SUCCESS_COLOR is not None
         assert WARNING_COLOR is not None
 
+    def test_cli_lazy_reexports_no_recursion_in_fresh_interpreter(self) -> None:
+        """Regression guard: each re-exported name must be importable in a clean
+        interpreter where the cli.app submodule has NOT been pre-bound.
+
+        The previous __getattr__ implementation used
+        ``from davinci_monet.cli import app as _app_module`` which re-entered
+        __getattr__ infinitely because ``app`` collides with the ``cli/app.py``
+        submodule name and the fromlist lookup triggered another __getattr__ call.
+        Running in a subprocess ensures no prior import has side-bound the
+        attribute, which is the condition that masks the bug in the in-process
+        tests above.
+        """
+        import subprocess
+        import sys
+
+        names = [
+            "cli",
+            "timer",
+            "INFO_COLOR",
+            "ERROR_COLOR",
+            "SUCCESS_COLOR",
+            "WARNING_COLOR",
+            "DEBUG",
+        ]
+        imports = ", ".join(names)
+        code = f"from davinci_monet.cli import {imports}"
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Fresh-interpreter import raised an error:\n{result.stderr}"
+
 
 # =============================================================================
 # Integration Tests

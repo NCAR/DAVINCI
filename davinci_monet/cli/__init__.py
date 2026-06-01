@@ -44,7 +44,8 @@ _ATTRS = frozenset(__all__)
 
 def __getattr__(name: str) -> object:
     if name in _ATTRS:
-        from davinci_monet.cli import app as _app_module  # noqa: PLC0415
+        import importlib  # noqa: PLC0415
 
+        _app_module = importlib.import_module("davinci_monet.cli.app")
         return getattr(_app_module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
