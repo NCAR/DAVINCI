@@ -358,11 +358,19 @@ def test_daemon_new_files_only_injection_integration(
 
     incoming = tmp_path / "incoming"
     incoming.mkdir()
+    # model_staging is a SEPARATE directory that is never populated with any
+    # files.  The model source's files: glob resolves to NOTHING without
+    # injection.  Only the dispatcher's inject_new_files path (on_fire=
+    # new_files_only) overrides that glob with the real file that lands in
+    # `incoming/`, proving that the pipeline cannot succeed without injection.
+    model_staging = tmp_path / "model_staging"
+    model_staging.mkdir()
     output_dir = tmp_path / "run_output"
     log_dir = tmp_path / "run_logs"
 
-    # Model source files: is a glob into the (initially empty) watched dir.
-    model_glob = str(incoming / "*.nc")
+    # Model source files: points at the EMPTY model_staging dir; the watch
+    # glob points at incoming/ — these are different directories.
+    model_glob = str(model_staging / "*.nc")
     run_cfg = _glob_model_config_dict(obs_nc, model_glob, output_dir, log_dir)
     run_cfg_path = tmp_path / "run.yaml"
     run_cfg_path.write_text(yaml.safe_dump(run_cfg))
