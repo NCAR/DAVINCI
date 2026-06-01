@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -136,6 +137,23 @@ def render_queue_panel(state: DashboardState) -> Panel:
     return Panel(table, title="QUEUE", border_style=_ORANGE, padding=(0, 1))
 
 
+def render_header(state: DashboardState) -> Panel:
+    line = Text()
+    line.append("DAVINCI daemon", style=f"bold {_AQUA}")
+    line.append("   ")
+    line.append(f"pid {state.pid}", style="dim")
+    line.append("   ")
+    line.append(f"uptime {_fmt_duration(state.uptime_s)}", style="dim")
+    line.append("   ")
+    line.append(f"concurrency {state.max_concurrent}", style="dim")
+    line.append("   ")
+    line.append(f"v{state.version}", style="dim")
+    if state.draining:
+        line.append("   ")
+        line.append("draining", style=f"bold {_ORANGE}")
+    return Panel(line, border_style=_AQUA, padding=(0, 2))
+
+
 def render_recent_panel(state: DashboardState) -> Panel:
     table = Table(expand=True, box=None, pad_edge=False)
     table.add_column("JOB", no_wrap=True)
@@ -152,3 +170,14 @@ def render_recent_panel(state: DashboardState) -> Panel:
     if not state.recent:
         table.add_row("—", Text("no history", style="dim"), "", "")
     return Panel(table, title="RECENT", border_style=_GREEN, padding=(0, 1))
+
+
+def render_dashboard(state: DashboardState) -> Group:
+    """Compose the full `daemon top` frame from a snapshot."""
+    return Group(
+        render_header(state),
+        render_watches_panel(state),
+        render_running_panel(state),
+        render_queue_panel(state),
+        render_recent_panel(state),
+    )

@@ -7,6 +7,7 @@ from rich.console import Console
 
 from davinci_monet.daemon.dashboard import (
     DashboardState,
+    render_dashboard,
     render_queue_panel,
     render_recent_panel,
     render_running_panel,
@@ -177,3 +178,26 @@ class TestRecentPanel:
         assert "failed" in text
         assert "cam_realtime" in text
         assert "modis_stream" in text
+
+
+class TestRenderDashboard:
+    def test_composite_contains_all_sections(self, sample_state: DashboardState) -> None:
+        text = _render_to_text(render_dashboard(sample_state))
+        # Header
+        assert "DAVINCI" in text
+        assert "4242" in text  # pid
+        # Each panel's content
+        assert "cam_realtime" in text  # watches + running + recent
+        assert "modis_stream" in text  # queue + recent
+        assert "Loading model: cam (1/2)" in text  # running progress
+        assert "completed" in text  # recent
+
+    def test_header_shows_uptime(self, sample_state: DashboardState) -> None:
+        text = _render_to_text(render_dashboard(sample_state))
+        # 3725s -> "1.0h" or "62.1m" formatting; just assert an uptime label.
+        assert "uptime" in text.lower()
+
+    def test_draining_flag_surfaced(self) -> None:
+        draining = DashboardState(version=1, pid=9, uptime_s=1.0, draining=True, max_concurrent=1)
+        text = _render_to_text(render_dashboard(draining))
+        assert "draining" in text.lower()
