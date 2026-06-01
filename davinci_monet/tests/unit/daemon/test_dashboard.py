@@ -104,6 +104,33 @@ def _render_to_text(renderable: object) -> str:
     return console.export_text()
 
 
+class TestDashboardStateFromStatus:
+    def test_round_trip_from_status_dict(self) -> None:
+        data = {
+            "version": "2",
+            "pid": "1234",
+            "uptime_s": "99.5",
+            "draining": True,
+            "max_concurrent": "3",
+            "running": [{"id": 1}],
+            "queued": [],
+            "watches": [{"name": "w1"}],
+            "recent": [{"id": 0}],
+        }
+        state = DashboardState.from_status(data)
+        assert state.version == 2
+        assert state.pid == 1234
+        assert state.uptime_s == 99.5
+        assert state.draining is True
+        assert state.max_concurrent == 3
+        assert state.running == [{"id": 1}]
+        assert state.queued == []
+        assert state.watches == [{"name": "w1"}]
+        assert state.recent == [{"id": 0}]
+        # progress is not populated from status dict (comes from stream events)
+        assert state.progress == {}
+
+
 class TestWatchesPanel:
     def test_lists_both_watches(self, sample_state: DashboardState) -> None:
         text = _render_to_text(render_watches_panel(sample_state))
