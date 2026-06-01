@@ -144,20 +144,38 @@ class Supervisor:
             logger.exception("dispatch raised for job %d", job_id)
             self.state.mark_failed(job_id, exit_code=None, error=str(exc))
             self._running_count -= 1
+            # Clear the RunQueue RUNNING marker so introspection (is_running /
+            # running_names / WatchSummary state) does not report this watch as
+            # forever-running after the job finishes.
+            if hasattr(self.queue, "mark_done"):
+                self.queue.mark_done(watch_name)
             self._notify(job_id, rule)
             return
         self._running_count -= 1
+        # Clear the RunQueue RUNNING marker (see above).
+        if hasattr(self.queue, "mark_done"):
+            self.queue.mark_done(watch_name)
         self._record_result(job_id, rule, result)
 
     def _record_result(self, job_id: int, rule: WatchRule, result: Any) -> None:
         success = bool(getattr(result, "success", False))
         log_path = getattr(result, "log_path", None)
         if success:
+            # Build result_summary with output_dir and plots folded in so that
+            # notify_outcome can read result_summary['output_dir'] and
+            # result_summary['plots'] for the iCloud copy step.
+            raw_summary: dict[str, Any] = dict(getattr(result, "result_summary", None) or {})
+            output_dir = getattr(result, "output_dir", None)
+            plots = getattr(result, "plots", None)
+            if output_dir is not None:
+                raw_summary["output_dir"] = output_dir
+            if plots is not None:
+                raw_summary["plots"] = list(plots)
             self.state.mark_completed(
                 job_id,
                 exit_code=getattr(result, "exit_code", 0) or 0,
                 log_path=log_path,
-                result_summary=getattr(result, "result_summary", None),
+                result_summary=raw_summary or None,
             )
         else:
             self.state.mark_failed(
@@ -255,11 +273,41 @@ def build_supervisor(
     if notifier is None:
         notifier = Notifier(cfg)
 
-    # spawn_worker is spawn_worker(spec, *, on_event=None); the Supervisor calls
-    # its dispatcher as dispatcher(spec, daemon_cfg, on_event=...). Adapt the
-    # arity with a thin wrapper so the call site and the worker launcher agree.
+    # spawn_worker returns a WorkerRunResult that carries only success/exit_code/
+    # events/stderr.  The supervisor's _record_result expects an object with
+    # result_summary (dict containing output_dir + plots), log_path, and error.
+    # _WorkerResultAdapter translates the worker's terminal "result" ProgressEvent
+    # (kind=="result", fields: output_dir/plots/summary/log_path/error per
+    # contracts.py) into that shape so _record_result and notify_outcome both see
+    # the full payload.
+    class _WorkerResultAdapter:
+        """Wraps WorkerRunResult + its terminal ProgressEvent for _record_result."""
+
+        def __init__(self, run_result: Any) -> None:
+            result_event = run_result.result_event  # ProgressEvent | None
+            self.success: bool = run_result.success
+            self.exit_code: int = run_result.exit_code
+            # Terminal result event fields — fall back gracefully when absent.
+            if result_event is not None:
+                self.log_path: Any = getattr(result_event, "log_path", None)
+                self.output_dir: Any = getattr(result_event, "output_dir", None)
+                self.plots: Any = getattr(result_event, "plots", None) or []
+                self.error: Any = getattr(result_event, "error", None)
+                # "summary" is the per-run stats/stage digest that goes into
+                # jobs.result_summary; output_dir and plots are folded in by
+                # _record_result so notify_outcome can read them from the dict.
+                self.result_summary: Any = dict(getattr(result_event, "summary", None) or {})
+            else:
+                # Worker exited without emitting a result line (crash / timeout).
+                self.log_path = None
+                self.output_dir = None
+                self.plots = []
+                self.result_summary = {}
+                self.error = run_result.stderr.strip() or "worker exited without result"
+
     def _dispatch(spec: JobSpec, daemon_cfg: DaemonConfig, *, on_event: Any = None) -> Any:
-        return spawn_worker(spec, on_event=on_event)
+        run_result = spawn_worker(spec, on_event=on_event)
+        return _WorkerResultAdapter(run_result)
 
     return Supervisor(
         watches_file=watches_file,

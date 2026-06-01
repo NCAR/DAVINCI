@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
-import pytest
-
 from davinci_monet.daemon.config import DaemonConfig, WatchesFile, WatchRule
-from davinci_monet.daemon.contracts import JobRecord, JobSpec, JobStatus, TriggerEvent
+from davinci_monet.daemon.contracts import JobSpec, JobStatus, TriggerEvent
 
 
 class FakeClock:
