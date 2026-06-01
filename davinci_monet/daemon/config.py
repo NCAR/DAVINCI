@@ -12,7 +12,19 @@ FlexibleModel). Layer-1 ${VAR} expansion reuses the project config parser.
 
 from __future__ import annotations
 
-from typing import Optional
+import os
+from pathlib import Path
+from typing import Any, Optional
+
+from pydantic import Field, field_validator
+
+from davinci_monet.config.schema import FlexibleModel, StrictModel
+from davinci_monet.daemon.contracts import (
+    NotifyChannel,
+    OnFireMode,
+    SettleMode,
+    WatchSource,
+)
 
 _DURATION_UNITS: dict[str, float] = {
     "s": 1.0,
@@ -62,3 +74,26 @@ def parse_duration(value: str | int | float | None) -> Optional[float]:
     if magnitude < 0:
         raise ValueError(f"Duration must be non-negative: {value!r}")
     return magnitude * unit
+
+
+def _expand_path_str(value: str) -> str:
+    """Layer-1 path expansion: ${VAR}/$VAR then ~ (daemon environment)."""
+    return os.path.expanduser(os.path.expandvars(value))
+
+
+class NotificationConfig(FlexibleModel):
+    """Daemon-level notification policy (the ``daemon.notifications`` block)."""
+
+    desktop: bool = True
+    icloud_copy: bool = True
+    icloud_dir: Path = Field(
+        default=Path("~/Library/Mobile Documents/com~apple~CloudDocs/Claude")
+    )
+
+    @field_validator("icloud_dir", mode="before")
+    @classmethod
+    def _expand_user(cls, v: Any) -> Any:
+        """Expand ~ and ${VAR} at daemon load (layer-1 expansion)."""
+        if v is None:
+            return v
+        return Path(_expand_path_str(str(v)))
