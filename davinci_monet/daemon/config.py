@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Optional, TextIO
 
 import yaml
-
 from pydantic import Field, field_validator
 
 # Import ONLY from leaf submodules to avoid triggering the heavy geo/data stack:
@@ -35,7 +34,6 @@ from davinci_monet.daemon.contracts import (
     SettleMode,
     WatchSource,
 )
-
 
 # ---------------------------------------------------------------------------
 # Lightweight YAML helpers (stdlib only — no project imports)
@@ -91,6 +89,7 @@ def _expand_env_vars(data: dict[str, Any]) -> dict[str, Any]:
 
     result: dict[str, Any] = _expand(data)
     return result
+
 
 _DURATION_UNITS: dict[str, float] = {
     "s": 1.0,

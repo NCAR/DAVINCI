@@ -9,17 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from davinci_monet.config.parser import expand_env_vars  # noqa: F401  (public-API parity check)
 from davinci_monet.daemon.config import (
     ConfigurationError,
     DaemonConfig,
     NotificationConfig,
-    WatchRule,
     WatchesFile,
+    WatchRule,
     load_watches,
     parse_duration,
 )
-
 
 # ---------------------------------------------------------------------------
 # Supervisor import invariant — daemon.config must NOT drag in xarray/pandas
@@ -53,9 +51,7 @@ class TestSupervisorImportInvariant:
 
     def test_daemon_config_does_not_load_xarray(self) -> None:
         result = self._check_heavy_imports("davinci_monet.daemon.config")
-        assert result.returncode == 0, (
-            f"Import failed:\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"Import failed:\n{result.stderr}"
         lines = result.stdout.strip().splitlines()
         xarray_loaded = lines[0].strip() == "True"
         assert not xarray_loaded, (
@@ -65,9 +61,7 @@ class TestSupervisorImportInvariant:
 
     def test_daemon_config_does_not_load_pandas(self) -> None:
         result = self._check_heavy_imports("davinci_monet.daemon.config")
-        assert result.returncode == 0, (
-            f"Import failed:\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"Import failed:\n{result.stderr}"
         lines = result.stdout.strip().splitlines()
         pandas_loaded = lines[1].strip() == "True"
         assert not pandas_loaded, (
