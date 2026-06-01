@@ -105,8 +105,8 @@ def test_worker_runs_synthetic_config_through_pipeline(tmp_path, capsys):
     assert code == 0, "worker should exit 0 on a successful pipeline run"
 
     lines = [l for l in capsys.readouterr().out.splitlines() if l.strip()]
-    events = [ProgressEvent.parse_line(l) for l in lines]
-    events = [e for e in events if e is not None]
+    parsed = [ProgressEvent.parse_line(l) for l in lines]
+    events = [e for e in parsed if e is not None]
 
     kinds = [e.kind for e in events]
     assert kinds[0] == "started"

@@ -9,6 +9,8 @@ formatter installation at davinci_monet/pipeline/runner.py:1508-1602.
 
 from __future__ import annotations
 
+from typing import Any
+
 from davinci_monet.daemon.contracts import JobSpec, ProgressEvent
 
 # ---------------------------------------------------------------------------
@@ -19,7 +21,7 @@ from davinci_monet.daemon.contracts import JobSpec, ProgressEvent
 def test_inject_new_files_overrides_target_source_files() -> None:
     from davinci_monet.daemon import worker
 
-    config = {
+    config: dict[str, Any] = {
         "analysis": {"output_dir": "/out"},
         "sources": {
             "modis": {"type": "modis", "files": "/data/modis/*.hdf"},
@@ -153,8 +155,8 @@ def test_run_job_emits_started_progress_result_and_sets_env(tmp_path, monkeypatc
     assert captured["env_var"] == "set"  # spec.env applied to os.environ
 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    events = [ProgressEvent.parse_line(line) for line in lines]
-    events = [e for e in events if e is not None]
+    parsed = [ProgressEvent.parse_line(line) for line in lines]
+    events = [e for e in parsed if e is not None]
     kinds = [e.kind for e in events]
 
     assert kinds[0] == "started", f"first event must be 'started', got {kinds}"
@@ -184,6 +186,7 @@ def test_run_job_failure_emits_failed_result_and_nonzero(tmp_path, monkeypatch, 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     events = [ProgressEvent.parse_line(line) for line in lines if ProgressEvent.parse_line(line)]
     result_evt = events[-1]
+    assert result_evt is not None
     assert result_evt.kind == "result"
     assert result_evt.success is False
     assert "bad config" in (result_evt.error or "")
@@ -227,6 +230,7 @@ def test_run_job_surfaces_real_log_path(tmp_path, monkeypatch, capsys):
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     events = [ProgressEvent.parse_line(line) for line in lines if ProgressEvent.parse_line(line)]
     result_evt = events[-1]
+    assert result_evt is not None
     assert result_evt.log_path == expected_log
 
 

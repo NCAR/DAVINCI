@@ -122,7 +122,7 @@ class DispatchResult:
         self.success = success
         self.exit_code = 0 if success else 1
         self.log_path = "/tmp/run.md"
-        self.result_summary = {"stages": 7}
+        self.result_summary: dict[str, Any] = {"stages": 7}
         self.output_dir = "/tmp/out"
         self.plots: list[str] = []
         self.error = None if success else "boom"
@@ -450,7 +450,7 @@ class FakeWorkerRunResult:
         return self.exit_code == 0
 
     @property
-    def result_event(self):  # type: ignore[override]
+    def result_event(self):
         return self._result_event
 
 

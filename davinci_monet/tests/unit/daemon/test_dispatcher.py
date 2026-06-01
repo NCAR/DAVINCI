@@ -9,11 +9,11 @@ import textwrap
 from datetime import datetime
 
 from davinci_monet.daemon.config import DaemonConfig, WatchRule
-from davinci_monet.daemon.contracts import JobSpec, TriggerEvent
+from davinci_monet.daemon.contracts import JobSpec, ProgressEvent, SettleMode, TriggerEvent
 from davinci_monet.daemon.dispatcher import build_job_spec
 
 
-def _trigger(name: str, files: list[str], mode: str = "quiescence") -> TriggerEvent:
+def _trigger(name: str, files: list[str], mode: SettleMode = "quiescence") -> TriggerEvent:
     return TriggerEvent(
         watch_name=name,
         new_files=sorted(files),
@@ -100,7 +100,7 @@ def test_build_job_spec_whole_config_ignores_inject_into() -> None:
     assert spec.inject_into is None
 
 
-def test_spawn_worker_reads_progress_lines_and_exit_code(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_spawn_worker_reads_progress_lines_and_exit_code(tmp_path, monkeypatch) -> None:
     from davinci_monet.daemon import dispatcher
 
     # A fake worker script that echoes a started + result JSON line and exits 0.
@@ -125,7 +125,7 @@ def test_spawn_worker_reads_progress_lines_and_exit_code(tmp_path, monkeypatch) 
 
     real_popen = subprocess.Popen
 
-    def fake_popen(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_popen(cmd, **kwargs):
         # Replace the "-m module" invocation with running our fake worker file.
         new_cmd = [sys.executable, str(fake_worker)]
         return real_popen(new_cmd, **kwargs)
@@ -140,7 +140,7 @@ def test_spawn_worker_reads_progress_lines_and_exit_code(tmp_path, monkeypatch) 
         base_env={"PATH": os.environ.get("PATH", "")},
     )
 
-    seen = []
+    seen: list[ProgressEvent] = []
     result = dispatcher.spawn_worker(spec, on_event=seen.append)
 
     assert result.exit_code == 0

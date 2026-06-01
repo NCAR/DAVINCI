@@ -63,8 +63,10 @@ def test_install_signal_handlers_calls_on_drain_with_signal_name() -> None:
         assert received == ["SIGTERM"]
     finally:
         # Restore prior handlers so we don't leak into other tests.
-        signal.signal(signal.SIGTERM, previous[signal.SIGTERM])
-        signal.signal(signal.SIGINT, previous[signal.SIGINT])
+        # previous[...] is typed object (the stored signal handler); the
+        # restore is valid at runtime but mypy can't narrow object here.
+        signal.signal(signal.SIGTERM, previous[signal.SIGTERM])  # type: ignore[arg-type]
+        signal.signal(signal.SIGINT, previous[signal.SIGINT])  # type: ignore[arg-type]
 
 
 def test_install_signal_handlers_accepts_drain_controller() -> None:
@@ -78,5 +80,5 @@ def test_install_signal_handlers_accepts_drain_controller() -> None:
         assert ctrl.draining is True
         assert ctrl.reason == "SIGINT"
     finally:
-        signal.signal(signal.SIGTERM, previous[signal.SIGTERM])
-        signal.signal(signal.SIGINT, previous[signal.SIGINT])
+        signal.signal(signal.SIGTERM, previous[signal.SIGTERM])  # type: ignore[arg-type]
+        signal.signal(signal.SIGINT, previous[signal.SIGINT])  # type: ignore[arg-type]

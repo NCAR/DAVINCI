@@ -59,7 +59,7 @@ def test_parent_of_first_fork_exits(tmp_path: Path) -> None:
     # First fork returns a positive pid -> we are the original parent -> exit.
     hooks = _FakeHooks(fork_results=[123])
     with pytest.raises(SystemExit) as exc:
-        daemonize(tmp_path / "daemon.log", hooks=hooks)
+        daemonize(tmp_path / "daemon.log", hooks=hooks)  # type: ignore[arg-type]
     assert exc.value.code == 0
     assert hooks.exited_with == [0]
     assert hooks.events[0] == "fork"
@@ -69,7 +69,7 @@ def test_intermediate_parent_of_second_fork_exits(tmp_path: Path) -> None:
     # First fork child (0), setsid, second fork returns positive -> exit.
     hooks = _FakeHooks(fork_results=[0, 456])
     with pytest.raises(SystemExit) as exc:
-        daemonize(tmp_path / "daemon.log", hooks=hooks)
+        daemonize(tmp_path / "daemon.log", hooks=hooks)  # type: ignore[arg-type]
     assert exc.value.code == 0
     assert "setsid" in hooks.events
     assert hooks.events.count("fork") == 2
@@ -79,7 +79,7 @@ def test_grandchild_redirects_stdio_and_returns(tmp_path: Path) -> None:
     log_path = tmp_path / "daemon.log"
     # Both forks return 0 -> we are the final daemon process; should NOT exit.
     hooks = _FakeHooks(fork_results=[0, 0])
-    daemonize(log_path, hooks=hooks)  # returns normally
+    daemonize(log_path, hooks=hooks)  # type: ignore[arg-type]  # returns normally
     # stdin(0), stdout(1), stderr(2) all redirected.
     assert sorted(hooks.dup2_targets) == [0, 1, 2]
     # The log file path was opened for stdout/stderr.

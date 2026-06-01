@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -130,17 +131,18 @@ class TestNotificationConfig:
         assert not str(cfg.icloud_dir).startswith("~")
 
     def test_icloud_dir_tilde_expanded(self) -> None:
-        cfg = NotificationConfig(icloud_dir="~/somewhere")
+        # str input is coerced to Path by the field validator (intentional).
+        cfg = NotificationConfig(icloud_dir="~/somewhere")  # type: ignore[arg-type]
         assert str(cfg.icloud_dir) == str(Path.home() / "somewhere")
 
     def test_icloud_dir_env_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ICLOUD_ROOT", "/tmp/icloud")
-        cfg = NotificationConfig(icloud_dir="${ICLOUD_ROOT}/sub")
+        cfg = NotificationConfig(icloud_dir="${ICLOUD_ROOT}/sub")  # type: ignore[arg-type]
         assert str(cfg.icloud_dir) == "/tmp/icloud/sub"
 
     def test_extra_keys_allowed(self) -> None:
         # FlexibleModel -> forward-compat extra keys tolerated
-        cfg = NotificationConfig(slack=True)
+        cfg = NotificationConfig(slack=True)  # type: ignore[call-arg]
         assert cfg.desktop is True
 
 
@@ -159,7 +161,8 @@ class TestWatchRule:
         assert rule.sentinel is None
 
     def test_settle_string_parsed(self) -> None:
-        rule = WatchRule(name="r", watch="/x", run="/c", settle="5m")
+        # str duration is coerced to float seconds by the field validator.
+        rule = WatchRule(name="r", watch="/x", run="/c", settle="5m")  # type: ignore[arg-type]
         assert rule.settle == 300.0
 
     def test_settle_numeric_passthrough(self) -> None:
@@ -187,7 +190,7 @@ class TestWatchRule:
 
     def test_bad_on_fire_rejected(self) -> None:
         with pytest.raises(Exception):  # pydantic ValidationError
-            WatchRule(name="r", watch="/x", run="/c", on_fire="bogus")
+            WatchRule(name="r", watch="/x", run="/c", on_fire="bogus")  # type: ignore[arg-type]
 
     def test_notify_channels(self) -> None:
         rule = WatchRule(name="r", watch="/x", run="/c", notify=["desktop", "log"])
@@ -195,7 +198,7 @@ class TestWatchRule:
 
     def test_bad_notify_channel_rejected(self) -> None:
         with pytest.raises(Exception):
-            WatchRule(name="r", watch="/x", run="/c", notify=["pager"])
+            WatchRule(name="r", watch="/x", run="/c", notify=["pager"])  # type: ignore[list-item]
 
     def test_env_overlay_not_expanded(self) -> None:
         # env is the layer-2 worker overlay; values are stored verbatim
@@ -220,15 +223,17 @@ class TestDaemonConfig:
 
     def test_state_dir_env_expanded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DAEMON_ROOT", "/tmp/dmn")
-        cfg = DaemonConfig(state_dir="${DAEMON_ROOT}/state")
+        # str input is coerced to Path by the field validator (intentional).
+        cfg = DaemonConfig(state_dir="${DAEMON_ROOT}/state")  # type: ignore[arg-type]
         assert str(cfg.state_dir) == "/tmp/dmn/state"
 
     def test_poll_interval_duration_string(self) -> None:
-        cfg = DaemonConfig(poll_interval="10s")
+        # str durations are coerced to float seconds by the field validator.
+        cfg = DaemonConfig(poll_interval="10s")  # type: ignore[arg-type]
         assert cfg.poll_interval == 10.0
 
     def test_max_settle_wait_duration_string(self) -> None:
-        cfg = DaemonConfig(max_settle_wait="30m")
+        cfg = DaemonConfig(max_settle_wait="30m")  # type: ignore[arg-type]
         assert cfg.max_settle_wait == 1800.0
 
     def test_max_settle_wait_none_disables(self) -> None:
@@ -236,11 +241,11 @@ class TestDaemonConfig:
         assert cfg.max_settle_wait is None
 
     def test_worker_timeout_duration_string(self) -> None:
-        cfg = DaemonConfig(worker_timeout="2h")
+        cfg = DaemonConfig(worker_timeout="2h")  # type: ignore[arg-type]
         assert cfg.worker_timeout == 7200.0
 
     def test_derived_paths(self) -> None:
-        cfg = DaemonConfig(state_dir="/tmp/dstate")
+        cfg = DaemonConfig(state_dir="/tmp/dstate")  # type: ignore[arg-type]
         assert cfg.db_path == Path("/tmp/dstate/history.db")
         assert cfg.socket_path == Path("/tmp/dstate/control.sock")
         assert cfg.pid_path == Path("/tmp/dstate/daemon.pid")
@@ -248,7 +253,8 @@ class TestDaemonConfig:
         assert cfg.log_path == Path("/tmp/dstate/daemon.log")
 
     def test_nested_notifications_dict(self) -> None:
-        cfg = DaemonConfig(notifications={"desktop": False})
+        # dict input is coerced to NotificationConfig by pydantic (intentional).
+        cfg = DaemonConfig(notifications={"desktop": False})  # type: ignore[arg-type]
         assert cfg.notifications.desktop is False
 
 
@@ -373,8 +379,12 @@ watches:
 from davinci_monet.daemon.config import merge_rules
 
 
-def _rule(name: str, **kw: object) -> WatchRule:
-    base = {"name": name, "watch": f"/in/{name}/*.nc", "run": f"/cfg/{name}.yaml"}
+def _rule(name: str, **kw: Any) -> WatchRule:
+    base: dict[str, Any] = {
+        "name": name,
+        "watch": f"/in/{name}/*.nc",
+        "run": f"/cfg/{name}.yaml",
+    }
     base.update(kw)
     return WatchRule(**base)
 
