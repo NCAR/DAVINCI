@@ -7,10 +7,7 @@
 #   -> `from davinci_monet.cli.commands import get_data` (partially initialised)
 # and would also pull in xarray/matplotlib/monet at package load time,
 # violating the daemon isolation contract.
-
-__all__ = [
-    "daemon",
-    "get_data",
-    "run",
-    "validate",
-]
+#
+# __all__ is intentionally absent: there are no module-level bindings to
+# export, and declaring names in __all__ that are not bound causes
+# `from ... import *` to raise AttributeError via the circular import above.
