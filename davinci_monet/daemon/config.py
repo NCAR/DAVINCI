@@ -142,9 +142,7 @@ class DaemonConfig(FlexibleModel):
     worker_timeout: Optional[float] = None
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
 
-    @field_validator(
-        "poll_interval", "max_settle_wait", "worker_timeout", mode="before"
-    )
+    @field_validator("poll_interval", "max_settle_wait", "worker_timeout", mode="before")
     @classmethod
     def _parse_durations(cls, v: Any) -> Any:
         """Accept "5s"/"30m"/number via parse_duration; pass None through."""
