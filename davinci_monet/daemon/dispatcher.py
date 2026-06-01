@@ -123,11 +123,13 @@ def spawn_worker(
             on_event(event)
 
     timeout = spec.worker_timeout
+    assert proc.stderr is not None
     try:
-        _out, stderr = proc.communicate(timeout=timeout)
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
-        _out, stderr = proc.communicate()
+        proc.wait()
+    stderr = proc.stderr.read()
 
     return WorkerRunResult(
         job_id=spec.job_id,
