@@ -19,14 +19,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from davinci_monet.daemon.config import WatchRule
 from davinci_monet.daemon.contracts import (
     SCHEMA_DDL,
     JobRecord,
     JobStatus,
     OnFireMode,
-    WatchSource,
-    WatchStatusRecord,
 )
 
 __all__ = ["StateStore"]
@@ -46,6 +43,14 @@ def _parse_dt(value: Any) -> Optional[datetime]:
     return datetime.fromisoformat(str(value))
 
 
+def _require_dt(value: Any) -> datetime:
+    """Like ``_parse_dt`` but raises if the result is None (NOT NULL columns)."""
+    result = _parse_dt(value)
+    if result is None:
+        raise ValueError(f"Expected a non-null datetime, got {value!r}")
+    return result
+
+
 def _loads(value: Any, default: Any) -> Any:
     """json.loads a TEXT column, returning ``default`` for NULL/empty."""
     if value is None or value == "":
@@ -59,9 +64,7 @@ class StateStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(
-            str(self._db_path), check_same_thread=False
-        )
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -107,13 +110,13 @@ class StateStore:
             ),
         )
         self._conn.commit()
-        return int(cur.lastrowid)
+        last = cur.lastrowid
+        assert last is not None, "INSERT did not return a rowid"
+        return int(last)
 
     def get_job(self, job_id: int) -> Optional[JobRecord]:
         """Return the JobRecord for ``job_id`` or None if it does not exist."""
-        row = self._conn.execute(
-            "SELECT * FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             return None
         return self._row_to_job(row)
@@ -129,7 +132,7 @@ class StateStore:
             on_fire=row["on_fire"],
             files=_loads(row["files"], []),
             status=JobStatus(row["status"]),
-            submitted_at=_parse_dt(row["submitted_at"]),
+            submitted_at=_require_dt(row["submitted_at"]),
             started_at=_parse_dt(row["started_at"]),
             ended_at=_parse_dt(row["ended_at"]),
             duration_s=row["duration_s"],

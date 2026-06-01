@@ -27,9 +27,7 @@ def test_init_creates_db_and_schema(db_path: Path) -> None:
     try:
         assert db_path.exists()
         # Both tables exist and are queryable.
-        cur = store._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
+        cur = store._conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = {row[0] for row in cur.fetchall()}
         assert "jobs" in tables
         assert "watch_status" in tables
