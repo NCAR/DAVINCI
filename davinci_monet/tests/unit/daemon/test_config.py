@@ -82,3 +82,62 @@ class TestNotificationConfig:
         # FlexibleModel -> forward-compat extra keys tolerated
         cfg = NotificationConfig(slack=True)
         assert cfg.desktop is True
+
+
+from davinci_monet.daemon.config import WatchRule
+
+
+class TestWatchRule:
+    def test_minimal(self) -> None:
+        rule = WatchRule(name="cam", watch="/in/*.nc", run="/cfg.yaml")
+        assert rule.name == "cam"
+        assert rule.watch == "/in/*.nc"
+        assert rule.run == "/cfg.yaml"
+        assert rule.on_fire == "whole_config"
+        assert rule.settle == 30.0
+        assert rule.enabled is True
+        assert rule.env == {}
+        assert rule.notify is None
+        assert rule.inject_into is None
+        assert rule.sentinel is None
+
+    def test_settle_string_parsed(self) -> None:
+        rule = WatchRule(name="r", watch="/x", run="/c", settle="5m")
+        assert rule.settle == 300.0
+
+    def test_settle_numeric_passthrough(self) -> None:
+        rule = WatchRule(name="r", watch="/x", run="/c", settle=45)
+        assert rule.settle == 45.0
+
+    def test_settle_mode_quiescence_default(self) -> None:
+        rule = WatchRule(name="r", watch="/x", run="/c")
+        assert rule.settle_mode == "quiescence"
+
+    def test_settle_mode_sentinel_when_set(self) -> None:
+        rule = WatchRule(name="r", watch="/x", run="/c", sentinel="/in/DONE")
+        assert rule.settle_mode == "sentinel"
+
+    def test_on_fire_new_files_only_with_inject(self) -> None:
+        rule = WatchRule(
+            name="r", watch="/x", run="/c",
+            on_fire="new_files_only", inject_into="cam",
+        )
+        assert rule.on_fire == "new_files_only"
+        assert rule.inject_into == "cam"
+
+    def test_bad_on_fire_rejected(self) -> None:
+        with pytest.raises(Exception):  # pydantic ValidationError
+            WatchRule(name="r", watch="/x", run="/c", on_fire="bogus")
+
+    def test_notify_channels(self) -> None:
+        rule = WatchRule(name="r", watch="/x", run="/c", notify=["desktop", "log"])
+        assert rule.notify == ["desktop", "log"]
+
+    def test_bad_notify_channel_rejected(self) -> None:
+        with pytest.raises(Exception):
+            WatchRule(name="r", watch="/x", run="/c", notify=["pager"])
+
+    def test_env_overlay_not_expanded(self) -> None:
+        # env is the layer-2 worker overlay; values are stored verbatim
+        rule = WatchRule(name="r", watch="/x", run="/c", env={"DATA": "${HOME}/d"})
+        assert rule.env == {"DATA": "${HOME}/d"}

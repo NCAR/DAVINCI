@@ -95,3 +95,37 @@ class NotificationConfig(FlexibleModel):
         if v is None:
             return v
         return Path(_expand_path_str(str(v)))
+
+
+class WatchRule(FlexibleModel):
+    """A single declarative watch rule (one entry under ``watches:``).
+
+    ``name`` is the rule's mapping key in watches.yaml; the loader injects it.
+    Layer-1 ${VAR} expansion (watch/run/sentinel paths) has already been
+    applied by the time a WatchRule is constructed. ``env`` is the per-rule
+    overlay used for layer-2 (worker-side) expansion and is NOT expanded here.
+    """
+
+    name: str
+    watch: str
+    run: str
+    on_fire: OnFireMode = "whole_config"
+    inject_into: Optional[str] = None
+    settle: float = Field(default=30.0)
+    sentinel: Optional[str] = None
+    env: dict[str, str] = Field(default_factory=dict)
+    notify: Optional[list[NotifyChannel]] = None
+    enabled: bool = True
+
+    @field_validator("settle", mode="before")
+    @classmethod
+    def _parse_settle(cls, v: Any) -> Any:
+        """Accept "30s"/"5m"/number via parse_duration."""
+        if v is None:
+            return 30.0
+        return parse_duration(v)
+
+    @property
+    def settle_mode(self) -> SettleMode:
+        """'sentinel' if a sentinel path is set, else 'quiescence'."""
+        return "sentinel" if self.sentinel else "quiescence"
