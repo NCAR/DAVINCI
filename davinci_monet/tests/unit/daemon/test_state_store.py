@@ -70,3 +70,112 @@ def test_survives_restart(db_path: Path) -> None:
         assert rec.submitted_at is not None
     finally:
         store2.close()
+
+
+def test_mark_running_sets_started_and_status(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        jid = store.create_job("w", "/c.yaml", "whole_config", [])
+        store.mark_running(jid)
+        rec = store.get_job(jid)
+        assert rec is not None
+        assert rec.status is JobStatus.RUNNING
+        assert rec.started_at is not None
+        assert rec.ended_at is None
+    finally:
+        store.close()
+
+
+def test_mark_completed_records_outcome_and_duration(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        jid = store.create_job("w", "/c.yaml", "whole_config", [])
+        store.mark_running(jid)
+        store.mark_completed(
+            jid,
+            exit_code=0,
+            log_path="/logs/run.md",
+            result_summary={"N": 42, "RMSE": 1.5},
+        )
+        rec = store.get_job(jid)
+        assert rec is not None
+        assert rec.status is JobStatus.COMPLETED
+        assert rec.exit_code == 0
+        assert rec.log_path == "/logs/run.md"
+        assert rec.result_summary == {"N": 42, "RMSE": 1.5}
+        assert rec.ended_at is not None
+        assert rec.duration_s is not None and rec.duration_s >= 0.0
+    finally:
+        store.close()
+
+
+def test_mark_failed_records_error(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        jid = store.create_job("w", "/c.yaml", "whole_config", [])
+        store.mark_running(jid)
+        store.mark_failed(jid, exit_code=1, error="boom", log_path="/logs/e.md")
+        rec = store.get_job(jid)
+        assert rec is not None
+        assert rec.status is JobStatus.FAILED
+        assert rec.exit_code == 1
+        assert rec.error == "boom"
+        assert rec.log_path == "/logs/e.md"
+        assert rec.ended_at is not None
+    finally:
+        store.close()
+
+
+def test_mark_skipped(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        jid = store.create_job("w", "/c.yaml", "whole_config", [])
+        store.mark_skipped(jid, error="coalesced")
+        rec = store.get_job(jid)
+        assert rec is not None
+        assert rec.status is JobStatus.SKIPPED
+        assert rec.error == "coalesced"
+        assert rec.ended_at is not None
+    finally:
+        store.close()
+
+
+def test_list_jobs_orders_most_recent_first_and_filters(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        a = store.create_job("alpha", "/c.yaml", "whole_config", [])
+        b = store.create_job("beta", "/c.yaml", "whole_config", [])
+        c = store.create_job("alpha", "/c.yaml", "whole_config", [])
+        store.mark_running(b)
+        store.mark_failed(c, exit_code=2, error="x")
+
+        ids = [r.id for r in store.list_jobs()]
+        assert ids == [c, b, a]  # ORDER BY id DESC
+
+        alpha_ids = [r.id for r in store.list_jobs(watch_name="alpha")]
+        assert alpha_ids == [c, a]
+
+        failed = store.list_jobs(status=JobStatus.FAILED)
+        assert [r.id for r in failed] == [c]
+
+        limited = store.list_jobs(limit=1)
+        assert [r.id for r in limited] == [c]
+    finally:
+        store.close()
+
+
+def test_active_jobs_returns_queued_and_running(db_path: Path) -> None:
+    store = StateStore(db_path)
+    try:
+        q = store.create_job("w", "/c.yaml", "whole_config", [])
+        r = store.create_job("w", "/c.yaml", "whole_config", [])
+        done = store.create_job("w", "/c.yaml", "whole_config", [])
+        store.mark_running(r)
+        store.mark_completed(done, exit_code=0, log_path=None, result_summary=None)
+
+        active_ids = {rec.id for rec in store.active_jobs()}
+        assert active_ids == {q, r}
+        statuses = {rec.status for rec in store.active_jobs()}
+        assert statuses <= {JobStatus.QUEUED, JobStatus.RUNNING}
+    finally:
+        store.close()

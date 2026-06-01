@@ -121,6 +121,134 @@ class StateStore:
             return None
         return self._row_to_job(row)
 
+    def _duration_since_started(self, job_id: int, ended_iso: str) -> Optional[float]:
+        """Compute ended-minus-started in seconds, or None if no start time."""
+        row = self._conn.execute(
+            "SELECT started_at FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None or row["started_at"] in (None, ""):
+            return None
+        started = datetime.fromisoformat(str(row["started_at"]))
+        ended = datetime.fromisoformat(ended_iso)
+        return max(0.0, (ended - started).total_seconds())
+
+    def mark_running(self, job_id: int, started_at: Optional[datetime] = None) -> None:
+        """Transition to RUNNING and stamp started_at (default now)."""
+        started_iso = (started_at or datetime.now()).isoformat()
+        self._conn.execute(
+            "UPDATE jobs SET status = ?, started_at = ? WHERE id = ?",
+            (JobStatus.RUNNING.value, started_iso, job_id),
+        )
+        self._conn.commit()
+
+    def mark_completed(
+        self,
+        job_id: int,
+        exit_code: int,
+        log_path: Optional[str],
+        result_summary: Optional[dict[str, Any]],
+        ended_at: Optional[datetime] = None,
+    ) -> None:
+        """Transition to COMPLETED; record outcome, duration, and summary."""
+        ended_iso = (ended_at or datetime.now()).isoformat()
+        duration = self._duration_since_started(job_id, ended_iso)
+        self._conn.execute(
+            """
+            UPDATE jobs
+               SET status = ?, ended_at = ?, duration_s = ?, exit_code = ?,
+                   log_path = ?, result_summary = ?
+             WHERE id = ?
+            """,
+            (
+                JobStatus.COMPLETED.value,
+                ended_iso,
+                duration,
+                exit_code,
+                log_path,
+                json.dumps(result_summary) if result_summary is not None else None,
+                job_id,
+            ),
+        )
+        self._conn.commit()
+
+    def mark_failed(
+        self,
+        job_id: int,
+        exit_code: Optional[int],
+        error: str,
+        log_path: Optional[str] = None,
+        ended_at: Optional[datetime] = None,
+    ) -> None:
+        """Transition to FAILED; record exit_code, error, duration, log_path."""
+        ended_iso = (ended_at or datetime.now()).isoformat()
+        duration = self._duration_since_started(job_id, ended_iso)
+        self._conn.execute(
+            """
+            UPDATE jobs
+               SET status = ?, ended_at = ?, duration_s = ?, exit_code = ?,
+                   error = ?, log_path = ?
+             WHERE id = ?
+            """,
+            (
+                JobStatus.FAILED.value,
+                ended_iso,
+                duration,
+                exit_code,
+                error,
+                log_path,
+                job_id,
+            ),
+        )
+        self._conn.commit()
+
+    def mark_skipped(self, job_id: int, error: Optional[str] = None) -> None:
+        """Transition to SKIPPED (coalesced/drained); stamp ended_at."""
+        ended_iso = datetime.now().isoformat()
+        duration = self._duration_since_started(job_id, ended_iso)
+        self._conn.execute(
+            """
+            UPDATE jobs
+               SET status = ?, ended_at = ?, duration_s = ?, error = ?
+             WHERE id = ?
+            """,
+            (JobStatus.SKIPPED.value, ended_iso, duration, error, job_id),
+        )
+        self._conn.commit()
+
+    def list_jobs(
+        self,
+        watch_name: Optional[str] = None,
+        status: Optional[JobStatus] = None,
+        limit: int = 50,
+    ) -> list[JobRecord]:
+        """Most-recent-first job rows, optionally filtered by watch/status."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if watch_name is not None:
+            clauses.append("watch_name = ?")
+            params.append(watch_name)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(int(limit))
+        rows = self._conn.execute(
+            f"SELECT * FROM jobs{where} ORDER BY id DESC LIMIT ?", params
+        ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
+    def active_jobs(self) -> list[JobRecord]:
+        """Rows with status in {QUEUED, RUNNING}, most-recent-first."""
+        rows = self._conn.execute(
+            """
+            SELECT * FROM jobs
+             WHERE status IN (?, ?)
+             ORDER BY id DESC
+            """,
+            (JobStatus.QUEUED.value, JobStatus.RUNNING.value),
+        ).fetchall()
+        return [self._row_to_job(r) for r in rows]
+
     # -- decoding helpers --------------------------------------------------
 
     @staticmethod
