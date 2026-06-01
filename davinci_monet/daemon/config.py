@@ -255,6 +255,37 @@ class WatchesFile(StrictModel):
     watches: dict[str, WatchRule] = Field(default_factory=dict)
 
 
+def merge_rules(
+    declared: dict[str, WatchRule],
+    live: dict[str, WatchRule],
+    disabled: set[str],
+) -> dict[str, WatchRule]:
+    """Reconcile file-declared rules with state-store live/runtime state.
+
+    ``declared`` = rules from watches.yaml (source="file"). ``live`` =
+    runtime-added rules from watch_status (source="live"). ``disabled`` = names
+    paused at runtime. File-declared rules win on name collision. Each returned
+    rule's ``enabled`` reflects the ``disabled`` set. Inputs are not mutated.
+    """
+    merged: dict[str, WatchRule] = {}
+
+    # Live-added rules first; declared overrides any same-named live entry.
+    for name, rule in live.items():
+        merged[name] = rule
+    for name, rule in declared.items():
+        merged[name] = rule
+
+    # Apply runtime pause/resume without mutating the source objects.
+    result: dict[str, WatchRule] = {}
+    for name, rule in merged.items():
+        enabled = name not in disabled
+        if rule.enabled != enabled:
+            result[name] = rule.model_copy(update={"enabled": enabled})
+        else:
+            result[name] = rule
+    return result
+
+
 def load_watches(source: str | Path) -> WatchesFile:
     """Load + layer-1 env-expand + validate a watches.yaml into a WatchesFile.
 

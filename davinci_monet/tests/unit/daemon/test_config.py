@@ -368,3 +368,56 @@ watches:
         wf = load_watches(path)
         assert wf.watches == {}
         assert wf.daemon.poll_interval == 5.0
+
+
+from davinci_monet.daemon.config import merge_rules
+
+
+def _rule(name: str, **kw: object) -> WatchRule:
+    base = {"name": name, "watch": f"/in/{name}/*.nc", "run": f"/cfg/{name}.yaml"}
+    base.update(kw)
+    return WatchRule(**base)
+
+
+class TestMergeRules:
+    def test_declared_only(self) -> None:
+        declared = {"a": _rule("a"), "b": _rule("b")}
+        merged = merge_rules(declared, {}, set())
+        assert set(merged) == {"a", "b"}
+        assert all(r.enabled for r in merged.values())
+
+    def test_live_preserved(self) -> None:
+        declared = {"a": _rule("a")}
+        live = {"z": _rule("z")}
+        merged = merge_rules(declared, live, set())
+        assert set(merged) == {"a", "z"}
+
+    def test_declared_wins_on_collision(self) -> None:
+        declared = {"a": _rule("a", run="/cfg/declared.yaml")}
+        live = {"a": _rule("a", run="/cfg/live.yaml")}
+        merged = merge_rules(declared, live, set())
+        assert merged["a"].run == "/cfg/declared.yaml"
+
+    def test_disabled_applied_to_declared(self) -> None:
+        declared = {"a": _rule("a"), "b": _rule("b")}
+        merged = merge_rules(declared, {}, {"a"})
+        assert merged["a"].enabled is False
+        assert merged["b"].enabled is True
+
+    def test_disabled_applied_to_live(self) -> None:
+        live = {"z": _rule("z")}
+        merged = merge_rules({}, live, {"z"})
+        assert merged["z"].enabled is False
+
+    def test_disabled_name_not_present_is_noop(self) -> None:
+        declared = {"a": _rule("a")}
+        merged = merge_rules(declared, {}, {"ghost"})
+        assert set(merged) == {"a"}
+        assert merged["a"].enabled is True
+
+    def test_does_not_mutate_inputs(self) -> None:
+        a = _rule("a", enabled=True)
+        declared = {"a": a}
+        merge_rules(declared, {}, {"a"})
+        # original object must be untouched (returns new instances)
+        assert a.enabled is True
