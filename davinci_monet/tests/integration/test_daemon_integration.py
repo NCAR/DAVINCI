@@ -283,6 +283,11 @@ def test_daemon_whole_config_integration(
     assert job.status == JobStatus.COMPLETED, f"job not completed: {job.status} / {job.error}"
     assert job.exit_code == 0
     assert job.result_summary is not None
+    # Phase-7 persistence contract: notify_outcome's iCloud copy reads these keys
+    # off result_summary, so the supervisor must fold them in (not just the
+    # 'summary' sub-dict). Lock it so a regression can't silently break the copy.
+    assert "output_dir" in job.result_summary
+    assert "plots" in job.result_summary
     assert job.on_fire == "whole_config"
 
     # --- assert: the REAL pipeline produced outputs ---
