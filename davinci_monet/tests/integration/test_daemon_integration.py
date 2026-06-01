@@ -296,3 +296,75 @@ def test_daemon_whole_config_integration(
     assert captured_notifications, "notify hook was not invoked on completion"
 
     store.close()
+
+
+def _glob_model_config_dict(
+    obs_nc: Path, model_glob: str, output_dir: Path, log_dir: Path
+) -> dict[str, Any]:
+    """Like _minimal_point_config_dict but the model files: is a glob that is
+    EMPTY until the daemon injects the newly-arrived file (on_fire=new_files_only)."""
+    cfg = _minimal_point_config_dict(
+        Path("/nonexistent/placeholder.nc"), obs_nc, output_dir, log_dir
+    )
+    cfg["model"]["synthetic"]["files"] = model_glob
+    return cfg
+
+
+def test_daemon_new_files_only_injection_integration(
+    tmp_path: Path, captured_notifications: list[dict[str, Any]]
+) -> None:
+    # --- synthetic data: obs lives outside the watched dir; model arrives later ---
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    model_nc, obs_nc = _write_synthetic_point_pair(data_dir)
+
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    output_dir = tmp_path / "run_output"
+    log_dir = tmp_path / "run_logs"
+
+    # Model source files: is a glob into the (initially empty) watched dir.
+    model_glob = str(incoming / "*.nc")
+    run_cfg = _glob_model_config_dict(obs_nc, model_glob, output_dir, log_dir)
+    run_cfg_path = tmp_path / "run.yaml"
+    run_cfg_path.write_text(yaml.safe_dump(run_cfg))
+
+    watches_path = _build_watches_yaml(
+        tmp_path,
+        run_cfg_path,
+        str(incoming / "*.nc"),
+        on_fire="new_files_only",
+        inject_into="synthetic",
+    )
+
+    watches_file = load_watches(watches_path)
+    store = StateStore(watches_file.daemon.db_path)
+    store.init_schema()
+
+    clock = FakeClock()
+    supervisor = build_supervisor(watches_file, state=store, clock=clock)
+
+    # Drop the model file into the watched dir -> this is the injected new file.
+    injected = incoming / "cam_model.nc"
+    xr.open_dataset(model_nc).to_netcdf(injected)
+    clock.advance(10.0)
+
+    _drain_supervisor(supervisor, store)
+
+    jobs = store.list_jobs(watch_name="realtime", limit=10)
+    assert jobs, "no job recorded for the injection watch"
+    job = jobs[0]
+    assert job.on_fire == "new_files_only"
+    resolved = {str(Path(f).resolve()) for f in job.files}
+    assert str(injected.resolve()) in resolved, "injected file not on job"
+    assert job.status == JobStatus.COMPLETED, f"injection run failed: {job.error}"
+    assert job.exit_code == 0
+
+    # The real pipeline ran with the injected file -> outputs exist.
+    assert list(output_dir.rglob("statistics_summary.csv")), "no stats CSV from injected run"
+    assert list(output_dir.rglob("*.png")), "no plots from injected run"
+    assert list(log_dir.glob("pipeline_*.md")), "no per-run markdown log"
+
+    assert captured_notifications, "notify hook not invoked for injection run"
+
+    store.close()

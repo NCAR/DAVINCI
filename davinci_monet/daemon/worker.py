@@ -32,18 +32,40 @@ def inject_new_files(
     with the sorted ``new_files`` list and clear any ``filename:`` so the glob is
     not also read. ``inject_into is None`` is a no-op (whole_config). An unknown
     source name raises KeyError. The input config is not mutated in place.
+
+    Supports both the unified ``sources:`` schema and the legacy ``model:``/
+    ``obs:`` schema: if ``inject_into`` is found in ``sources`` that dict is
+    updated; otherwise the legacy ``model:`` dict is checked (the typical case
+    when the config was loaded via ``load_config().model_dump()`` without a
+    prior ``migrate_to_sources`` call).
     """
     if inject_into is None:
         return config
     sources = config.get("sources") or {}
-    if inject_into not in sources:
+    legacy_model = config.get("model") or {}
+    legacy_obs = config.get("obs") or {}
+    if (
+        inject_into not in sources
+        and inject_into not in legacy_model
+        and inject_into not in legacy_obs
+    ):
+        all_labels = sorted(set(list(sources) + list(legacy_model) + list(legacy_obs)))
         raise KeyError(
-            f"inject_into source '{inject_into}' not found in config sources " f"{sorted(sources)}"
+            f"inject_into source '{inject_into}' not found in config sources {all_labels}"
         )
     out = copy.deepcopy(config)
-    target = out["sources"][inject_into]
-    target["files"] = sorted(new_files)
-    target["filename"] = None
+    if inject_into in (out.get("sources") or {}):
+        target = out["sources"][inject_into]
+        target["files"] = sorted(new_files)
+        target["filename"] = None
+    elif inject_into in (out.get("model") or {}):
+        target = out["model"][inject_into]
+        target["files"] = sorted(new_files)
+        target.pop("filename", None)
+    else:
+        target = out["obs"][inject_into]
+        target["files"] = sorted(new_files)
+        target.pop("filename", None)
     return out
 
 
