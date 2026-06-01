@@ -159,9 +159,10 @@ class StateStore(Protocol):
     """SQLite-backed job history + watch runtime-status persistence.
 
     stdlib sqlite3 only. Single connection, check_same_thread=False, accessed
-    only from the supervisor thread/loop. Opens/creates the DB and applies the
-    DDL (see ``SCHEMA_DDL`` below) on construction. All timestamps written as
-    ISO-8601 (datetime.isoformat()); all dict/list fields json.dumps'd.
+    only from the supervisor thread/loop. Conforming implementations must create
+    or open the DB and apply the DDL (see ``SCHEMA_DDL`` below) before any
+    other method is called. All timestamps written as ISO-8601
+    (datetime.isoformat()); all dict/list fields json.dumps'd.
     """
 
     def init_schema(self) -> None: ...  # idempotent CREATE TABLE IF NOT EXISTS ...

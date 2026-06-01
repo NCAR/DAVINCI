@@ -13,7 +13,7 @@ identically — the attribute is resolved on first access.
 from __future__ import annotations
 
 __all__ = [
-    # Schema classes
+    # Schema classes (including Pydantic base classes used by daemon and others)
     "MonetConfig",
     "Config",
     "AnalysisConfig",
@@ -26,6 +26,8 @@ __all__ = [
     "StatsConfig",
     "VariableConfig",
     "DataProcConfig",
+    "StrictModel",
+    "FlexibleModel",
     # Parser functions
     "load_config",
     "load_yaml",
@@ -64,6 +66,11 @@ _SCHEMA_ATTRS = {
     "StatsConfig",
     "VariableConfig",
     "DataProcConfig",
+    # Pydantic base classes — exported so daemon/config.py (and others) can
+    # write `from davinci_monet.config import StrictModel` and have both mypy
+    # (via the .pyi stub) and the runtime agree.
+    "StrictModel",
+    "FlexibleModel",
 }
 
 _PARSER_ATTRS = {
