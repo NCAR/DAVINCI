@@ -9,6 +9,7 @@ launches. Keep imports stdlib + daemon-pure.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -575,7 +576,13 @@ def build_supervisor(
                 self.error = run_result.stderr.strip() or "worker exited without result"
 
     def _dispatch(spec: JobSpec, daemon_cfg: DaemonConfig, *, on_event: Any = None) -> Any:
-        run_result = spawn_worker(spec, on_event=on_event)
+        # Attached when serve runs in a real terminal (foreground `daemon serve`):
+        # the worker inherits this TTY and renders the pipeline's native animated
+        # progress. Background `daemon start` (no TTY) -> attached=False -> the
+        # original headless JSON-on-stdout behavior. isatty() keeps this module
+        # free of any pipeline/matplotlib import (isolation invariant).
+        attached = sys.stdout.isatty()
+        run_result = spawn_worker(spec, on_event=on_event, attached=attached)
         return _WorkerResultAdapter(run_result)
 
     return Supervisor(

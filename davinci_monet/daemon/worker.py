@@ -48,8 +48,21 @@ def inject_new_files(
 
 
 def _emit(event: dict[str, Any]) -> None:
-    """Write one compact JSON progress line to stdout and flush."""
-    sys.stdout.write(json.dumps(event, separators=(",", ":")))
+    """Write one compact JSON progress line to the active event sink and flush.
+
+    If ``DAEMON_EVENTS_PATH`` is set (attached mode), append the line to that
+    file so stdout stays free for the pipeline's native animated progress
+    display, which is inherited by the dispatcher's serve terminal. Otherwise
+    (headless mode) write to stdout, which the dispatcher pipes and parses.
+    """
+    line = json.dumps(event, separators=(",", ":"))
+    events_path = os.environ.get("DAEMON_EVENTS_PATH")
+    if events_path:
+        with open(events_path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.write("\n")
+        return
+    sys.stdout.write(line)
     sys.stdout.write("\n")
     sys.stdout.flush()
 
@@ -136,7 +149,13 @@ def run_job(spec_json: str) -> int:
         if spec.log_dir is not None:
             config.setdefault("analysis", {})["log_dir"] = spec.log_dir
 
-        runner = PipelineRunner(show_progress=False, show_plots=False)
+        # Attached mode (DAEMON_EVENTS_PATH set): stdout is inherited from the
+        # serve terminal and progress JSON goes to the events file, so let the
+        # pipeline animate its native progress display to that TTY. Headless
+        # mode keeps stdout reserved for the JSON event stream the dispatcher
+        # parses, so the pipeline must not write to it.
+        attached = bool(os.environ.get("DAEMON_EVENTS_PATH"))
+        runner = PipelineRunner(show_progress=attached, show_plots=False)
         context = PipelineContext(config=config)
         context.metadata["config_path"] = spec.config_path
         context.progress_callback = _make_progress_callback(job_id)

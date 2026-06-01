@@ -170,6 +170,59 @@ def test_run_job_emits_started_progress_result_and_sets_env(tmp_path, monkeypatc
     assert result_evt.plots == ["/out/a.png"]
 
 
+def test_run_job_attached_writes_events_to_file_and_enables_progress(tmp_path, monkeypatch, capsys):
+    """When DAEMON_EVENTS_PATH is set (attached mode), run_job writes its JSON
+    event lines to that FILE (not stdout) and builds PipelineRunner with
+    show_progress=True so the pipeline animates to the inherited terminal."""
+    from davinci_monet.daemon import worker
+    from davinci_monet.pipeline import runner as _runner
+    from davinci_monet.pipeline import stages as _stages
+
+    events_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DAEMON_EVENTS_PATH", str(events_path))
+
+    captured: dict = {}
+
+    class _FakeLoaded:
+        def model_dump(self):
+            return {"analysis": {"output_dir": "/out"}, "sources": {"cam": {"files": "/x/*.nc"}}}
+
+    monkeypatch.setattr(worker, "_now", lambda: "2026-05-31T00:00:00")
+    monkeypatch.setattr("davinci_monet.config.parser.load_config", lambda p: _FakeLoaded())
+
+    class _FakeRunner:
+        def __init__(self, *a, **k):
+            captured["show_progress"] = k.get("show_progress")
+
+        def run(self, context):
+            if context.progress_callback:
+                context.progress_callback("Loading model: cam (1/1)")
+            return _FakeResult(_FakeContext(context.config), success=True)
+
+    monkeypatch.setattr(_runner, "PipelineRunner", _FakeRunner)
+    monkeypatch.setattr(_stages, "PipelineContext", _FakeContext)
+
+    code = worker.run_job(_spec(tmp_path).to_json())
+
+    assert code == 0
+    # Attached mode -> pipeline animates its native progress display.
+    assert captured["show_progress"] is True
+
+    # stdout stays free for the (inherited) pipeline animation: no JSON there.
+    assert capsys.readouterr().out.strip() == ""
+
+    # The event stream was written to the events FILE instead, same shapes.
+    lines = [line for line in events_path.read_text().splitlines() if line.strip()]
+    parsed = [ProgressEvent.parse_line(line) for line in lines]
+    events = [e for e in parsed if e is not None]
+    kinds = [e.kind for e in events]
+    assert kinds[0] == "started"
+    assert kinds[-1] == "result"
+    assert "progress" in kinds
+    assert events[-1].success is True
+    assert events[-1].output_dir == "/out"
+
+
 def test_run_job_failure_emits_failed_result_and_nonzero(tmp_path, monkeypatch, capsys):
     """run_job must return exit-code 1 and emit a result event with success=False on error."""
     from davinci_monet.daemon import worker

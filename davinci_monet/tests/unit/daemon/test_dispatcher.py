@@ -150,3 +150,82 @@ def test_spawn_worker_reads_progress_lines_and_exit_code(tmp_path, monkeypatch) 
     assert [e.kind for e in seen] == ["started", "result"]
     assert result.result_event is not None
     assert result.result_event.success is True
+
+
+def test_spawn_worker_attached_uses_events_file_and_inherits_stdout(tmp_path, monkeypatch) -> None:
+    """attached=True: env carries DAEMON_EVENTS_PATH, stdout is inherited, and
+    events are read back from the temp file (not from a stdout PIPE)."""
+    from davinci_monet.daemon import dispatcher
+
+    captured: dict = {}
+
+    class _FakeProc:
+        """Stand-in for a worker that writes its events to DAEMON_EVENTS_PATH."""
+
+        def __init__(self, env, stdout, stderr):
+            self.returncode = None
+            self._env = env
+            captured["env"] = env
+            captured["stdout"] = stdout
+            captured["stderr"] = stderr
+
+            class _Stdin:
+                def write(self, _s):
+                    pass
+
+                def flush(self):
+                    pass
+
+                def close(self):
+                    pass
+
+            self.stdin = _Stdin()
+
+        def wait(self, timeout=None):
+            # Simulate the worker writing started + result lines to the events
+            # file, then exiting 0.
+            events_path = self._env["DAEMON_EVENTS_PATH"]
+            with open(events_path, "w", encoding="utf-8") as handle:
+                handle.write('{"kind":"started","job_id":5,"ts":"2026-05-31T00:00:00","pid":1}\n')
+                handle.write("not json — ignored by the parser\n")
+                handle.write(
+                    '{"kind":"result","job_id":5,"success":true,'
+                    '"total_duration_seconds":0.2,"plots":["/out/x.png"],'
+                    '"output_dir":"/out","summary":{},"ts":"2026-05-31T00:00:01"}\n'
+                )
+            self.returncode = 0
+            return 0
+
+    def fake_popen(cmd, **kwargs):
+        return _FakeProc(kwargs["env"], kwargs.get("stdout"), kwargs.get("stderr"))
+
+    monkeypatch.setattr(dispatcher.subprocess, "Popen", fake_popen)
+
+    spec = build_job_spec(
+        WatchRule(name="w", watch="/d/*.nc", run="/c.yaml"),
+        _trigger("w", ["/d/x.nc"]),
+        DaemonConfig(hdf5_file_locking=False),
+        job_id=5,
+        base_env={"PATH": os.environ.get("PATH", "")},
+    )
+
+    seen: list[ProgressEvent] = []
+    result = dispatcher.spawn_worker(spec, on_event=seen.append, attached=True)
+
+    # Worker env carried the events-file path that both sides agree on.
+    assert "DAEMON_EVENTS_PATH" in captured["env"]
+    # Attached mode inherits the serve terminal: stdout/stderr are NOT piped.
+    assert captured["stdout"] is None
+    assert captured["stderr"] is None
+
+    # The temp events file is parsed exactly like headless stdout would be.
+    assert result.exit_code == 0
+    assert result.success is True
+    assert [e.kind for e in result.events] == ["started", "result"]  # non-JSON dropped
+    assert [e.kind for e in seen] == ["started", "result"]
+    assert result.result_event is not None
+    assert result.result_event.output_dir == "/out"
+    assert result.result_event.plots == ["/out/x.png"]
+
+    # The temp file is cleaned up after the run.
+    assert not os.path.exists(captured["env"]["DAEMON_EVENTS_PATH"])
