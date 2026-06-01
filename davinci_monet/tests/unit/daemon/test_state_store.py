@@ -7,11 +7,13 @@ StateStore opened on the same db_path sees previously-committed rows).
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from davinci_monet.daemon.contracts import JobStatus
+from davinci_monet.daemon.config import WatchRule
+from davinci_monet.daemon.contracts import JobStatus, WatchStatusRecord
 from davinci_monet.daemon.state import StateStore
 
 
@@ -181,10 +183,6 @@ def test_active_jobs_returns_queued_and_running(db_path: Path) -> None:
         store.close()
 
 
-from davinci_monet.daemon.config import WatchRule
-from davinci_monet.daemon.contracts import WatchStatusRecord
-
-
 def _live_rule(name: str = "modis_stream") -> WatchRule:
     return WatchRule(
         name=name,
@@ -210,19 +208,21 @@ def test_set_enabled_and_disabled_names(db_path: Path) -> None:
 
 
 def test_upsert_replaces_existing_row(db_path: Path) -> None:
-    from datetime import datetime
-
     store = StateStore(db_path)
     try:
         store.upsert_watch_status(
             WatchStatusRecord(
-                watch_name="w", enabled=True, source="file",
+                watch_name="w",
+                enabled=True,
+                source="file",
                 updated_at=datetime.now(),
             )
         )
         store.upsert_watch_status(
             WatchStatusRecord(
-                watch_name="w", enabled=False, source="file",
+                watch_name="w",
+                enabled=False,
+                source="file",
                 updated_at=datetime.now(),
             )
         )
@@ -268,13 +268,13 @@ def test_add_live_rule_roundtrips(db_path: Path) -> None:
 
 
 def test_live_rules_excludes_file_rules(db_path: Path) -> None:
-    from datetime import datetime
-
     store = StateStore(db_path)
     try:
         store.upsert_watch_status(
             WatchStatusRecord(
-                watch_name="declared", enabled=True, source="file",
+                watch_name="declared",
+                enabled=True,
+                source="file",
                 updated_at=datetime.now(),
             )
         )

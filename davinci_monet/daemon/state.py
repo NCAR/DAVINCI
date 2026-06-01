@@ -296,9 +296,7 @@ class StateStore:
 
     def list_watch_status(self) -> list[WatchStatusRecord]:
         """Return every watch_status row (name-ordered)."""
-        rows = self._conn.execute(
-            "SELECT * FROM watch_status ORDER BY watch_name"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM watch_status ORDER BY watch_name").fetchall()
         return [self._row_to_watch_status(r) for r in rows]
 
     def add_live_rule(self, rule: WatchRule) -> None:
@@ -315,9 +313,7 @@ class StateStore:
 
     def remove_watch(self, watch_name: str) -> None:
         """Delete the watch_status row (drops a live rule / runtime overrides)."""
-        self._conn.execute(
-            "DELETE FROM watch_status WHERE watch_name = ?", (watch_name,)
-        )
+        self._conn.execute("DELETE FROM watch_status WHERE watch_name = ?", (watch_name,))
         self._conn.commit()
 
     def disabled_names(self) -> set[str]:
@@ -368,5 +364,5 @@ class StateStore:
             enabled=bool(row["enabled"]),
             source=row["source"],
             rule_json=_loads(row["rule_json"], None),
-            updated_at=_parse_dt(row["updated_at"]),
+            updated_at=_require_dt(row["updated_at"]),
         )
