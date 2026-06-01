@@ -1,8 +1,9 @@
 """`daemon top` live dashboard renderers.
 
 Pure render functions build Rich panels from a ``DashboardState`` snapshot so
-they are unit-testable without the live loop. Colors come from the project's
-single styling source of truth, ``davinci_monet.plots.style.NCAR_COLORS``.
+they are unit-testable without the live loop. NCAR brand colors are inlined below
+to keep this module import-clean — importing it must not pull in matplotlib/xarray
+(see the supervisor isolation invariant).
 """
 
 from __future__ import annotations
@@ -15,14 +16,16 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from davinci_monet.plots.style import NCAR_COLORS
-
-_BLUE = NCAR_COLORS["ncar_blue"]
-_AQUA = NCAR_COLORS["aqua"]
-_GREEN = NCAR_COLORS["green"]
-_RED = NCAR_COLORS["red"]
-_GRAY = NCAR_COLORS["gray"]
-_ORANGE = NCAR_COLORS["orange"]
+# NSF NCAR brand hex values, inlined from davinci_monet.plots.style.NCAR_COLORS so
+# this client module stays import-clean: importing it must NOT pull in
+# matplotlib/xarray/cartopy (which plots.style does), or the supervisor isolation
+# invariant breaks if the CLI imports the dashboard at module load.
+_BLUE = "#0A5DDA"  # ncar_blue
+_AQUA = "#00A2B4"  # aqua
+_GREEN = "#2E8B57"  # green
+_RED = "#D62839"  # red
+_GRAY = "#58595B"  # gray
+_ORANGE = "#FF8C00"  # orange
 
 _STATUS_STYLE = {
     "completed": _GREEN,
