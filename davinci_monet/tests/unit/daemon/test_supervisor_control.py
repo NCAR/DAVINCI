@@ -62,6 +62,10 @@ class FakeWatcher:
     def poll(self):
         return []
 
+    def set_rules(self, rules) -> None:
+        # Satisfies the WatcherLike Protocol (set_rules added for `reload`).
+        self.rules = list(rules)
+
 
 def _sup(**overrides):
     from davinci_monet.daemon.supervisor import Supervisor

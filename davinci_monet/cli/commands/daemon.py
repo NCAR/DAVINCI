@@ -78,7 +78,7 @@ def serve(
     from davinci_monet.daemon.supervisor import build_supervisor
 
     wf = _load_daemon_config(watches)
-    supervisor = build_supervisor(wf)
+    supervisor = build_supervisor(wf, watches_path=watches)
     server = ControlServer(wf.daemon.socket_path, supervisor.handle_command)
     typer.secho(f"DAVINCI daemon serving ({len(wf.watches)} watches)...", fg=INFO_COLOR)
     lifecycle.install_signal_handlers(supervisor.request_shutdown)
@@ -100,7 +100,7 @@ def start(
         from davinci_monet.daemon.control import ControlServer
         from davinci_monet.daemon.supervisor import build_supervisor
 
-        supervisor = build_supervisor(wf)
+        supervisor = build_supervisor(wf, watches_path=watches)
         server = ControlServer(wf.daemon.socket_path, supervisor.handle_command)
         lifecycle.install_signal_handlers(supervisor.request_shutdown)
         supervisor.serve(control_server=server)

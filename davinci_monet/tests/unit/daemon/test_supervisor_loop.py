@@ -33,6 +33,10 @@ class FakeWatcher:
         out, self._pending = self._pending, []
         return out
 
+    def set_rules(self, rules) -> None:
+        # Satisfies the WatcherLike Protocol (set_rules added for `reload`).
+        self.rules = list(rules)
+
 
 class FakeQueue:
     """Coalescing FIFO: repeat submits for the same watch_name union new_files."""

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 from davinci_monet.daemon.config import DaemonConfig, WatchesFile, WatchRule
@@ -18,7 +19,6 @@ from davinci_monet.daemon.contracts import (
     PROTOCOL_VERSION,
     Clock,
     ControlResponse,
-    JobRecord,
     JobSpec,
     JobStatus,
     TriggerEvent,
@@ -39,6 +39,8 @@ class _RealClock:
 
 class WatcherLike(Protocol):
     def poll(self) -> list[TriggerEvent]: ...
+
+    def set_rules(self, rules: list[WatchRule]) -> None: ...
 
 
 class QueueLike(Protocol):
@@ -72,10 +74,15 @@ class Supervisor:
         state: Any,  # StateStore (duck-typed for tests)
         notifier: Any = None,
         clock: Optional[Clock] = None,
+        watches_path: Optional[Path | str] = None,
     ) -> None:
         self.watches_file = watches_file
         self.daemon_cfg: DaemonConfig = watches_file.daemon
         self.rules: dict[str, WatchRule] = dict(watches_file.watches)
+        # Path to the watches.yaml on disk, threaded in so `reload` can re-read
+        # it. None for older/test callers that build a Supervisor from an
+        # in-memory WatchesFile; `reload` then returns a clear error.
+        self.watches_path: Optional[Path] = Path(watches_path) if watches_path is not None else None
         self.watcher = watcher
         self.queue = queue
         self.dispatcher = dispatcher
@@ -234,6 +241,7 @@ class Supervisor:
         return {
             "ping": self._cmd_ping,
             "status": self._cmd_status,
+            "reload": self._cmd_reload,
             "watch_list": self._cmd_watch_list,
             "watch_pause": self._cmd_watch_pause,
             "watch_resume": self._cmd_watch_resume,
@@ -348,6 +356,93 @@ class Supervisor:
     def _cmd_status(self, args: dict[str, Any]) -> ControlResponse:
         return ControlResponse(ok=True, data=self.build_status())
 
+    def _cmd_reload(self, args: dict[str, Any]) -> ControlResponse:
+        """Re-read watches.yaml and reconcile declared vs. live/runtime rules.
+
+        Reconciliation reuses the daemon-wide helpers so reload behaves exactly
+        like startup:
+
+        * ``load_watches(path)`` re-parses the file from disk (layer-1 env
+          expansion + validation) into a fresh ``WatchesFile``.
+        * ``state.live_rules()`` reconstructs the runtime-added (source="live")
+          rules and ``state.disabled_names()`` lists names paused at runtime.
+        * ``merge_rules(declared, live, disabled)`` produces the reconciled rule
+          set: file-declared rules win on name collision and each rule's
+          ``enabled`` reflects the runtime pause/resume set.
+
+        The reconciled rules become ``self.rules`` AND are pushed into the live
+        ``PollingWatcher`` via ``set_rules`` (preserving settle state for
+        surviving rules). Each freshly-declared rule is upserted into the state
+        store as source="file" so its declared status survives a restart.
+
+        Older callers that built the Supervisor from an in-memory WatchesFile
+        (no ``watches_path``) get a clear error instead of a crash.
+        """
+        if self.watches_path is None:
+            return ControlResponse(
+                ok=False,
+                error="reload unavailable: this daemon was not started from a watches.yaml path",
+                code="unsupported",
+            )
+
+        from davinci_monet.daemon.config import ConfigurationError, load_watches, merge_rules
+
+        try:
+            wf = load_watches(self.watches_path)
+        except ConfigurationError as exc:
+            return ControlResponse(ok=False, error=f"reload failed: {exc}", code="invalid_args")
+
+        declared: dict[str, WatchRule] = dict(wf.watches)
+        live: dict[str, WatchRule] = self.state.live_rules()
+        disabled: set[str] = self.state.disabled_names()
+        merged = merge_rules(declared, live, disabled)
+
+        previous = set(self.rules)
+        new_names = set(merged)
+        added = sorted(new_names - previous)
+        removed = sorted(previous - new_names)
+        kept = previous & new_names
+        updated = sorted(
+            name for name in kept if self.rules[name].model_dump() != merged[name].model_dump()
+        )
+
+        # Refresh the daemon policy too (poll_interval/max_concurrent/etc.) so a
+        # live edit to the daemon block takes effect on reload.
+        self.watches_file = wf
+        self.daemon_cfg = wf.daemon
+        self.rules = merged
+
+        # Push the reconciled rule set into the live watcher (state for surviving
+        # rules is preserved by PollingWatcher.set_rules).
+        self.watcher.set_rules(list(merged.values()))
+
+        # Persist each declared rule's status row as source="file" so a restart
+        # rebuilds the same declared set (runtime pause state is preserved by
+        # set_enabled rows already present).
+        from davinci_monet.daemon.contracts import WatchStatusRecord
+
+        for name, rule in declared.items():
+            self.state.upsert_watch_status(
+                WatchStatusRecord(
+                    watch_name=name,
+                    enabled=name not in disabled,
+                    source="file",
+                    rule_json=None,
+                    updated_at=datetime.now(),
+                )
+            )
+
+        return ControlResponse(
+            ok=True,
+            data={
+                "reloaded": True,
+                "watches": self.watch_summaries(),
+                "added": added,
+                "removed": removed,
+                "updated": updated,
+            },
+        )
+
     def _cmd_history(self, args: dict[str, Any]) -> ControlResponse:
         jobs = self.state.list_jobs(
             watch_name=args.get("watch"),
@@ -416,6 +511,7 @@ def build_supervisor(
     state: Any = None,
     clock: Optional[Clock] = None,
     notifier: Any = None,
+    watches_path: Optional[Path | str] = None,
 ) -> Supervisor:
     """Production wiring: construct the real watcher/queue/dispatcher/state/notify
     from a parsed WatchesFile. Imported lazily so the module-level import graph
@@ -425,6 +521,10 @@ def build_supervisor(
     Supervisor so settle/quiescence and uptime share one time source; tests pass a
     FakeClock here. ``state``/``notifier`` may be injected (integration tests pass
     a StateStore); otherwise the production StateStore + Notifier are built.
+
+    ``watches_path`` is the on-disk path the WatchesFile was loaded from; it is
+    threaded into the Supervisor so the ``reload`` control command can re-read
+    and reconcile the file. When omitted, ``reload`` returns a clear error.
     """
     from davinci_monet.daemon.dispatcher import spawn_worker
     from davinci_monet.daemon.notify import Notifier
@@ -486,4 +586,5 @@ def build_supervisor(
         state=state,
         notifier=notifier,
         clock=the_clock,
+        watches_path=watches_path,
     )
