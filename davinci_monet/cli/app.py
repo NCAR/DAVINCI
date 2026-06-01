@@ -311,10 +311,11 @@ def main(
 def register_commands() -> None:
     """Register all CLI commands."""
     # Import command modules
-    from davinci_monet.cli.commands import get_data, run, validate
+    from davinci_monet.cli.commands import daemon, get_data, run, validate
 
     # Register subcommands
     app.add_typer(get_data.app, name="get")
+    app.add_typer(daemon.app, name="daemon")
 
 
 # Register commands when module loads
