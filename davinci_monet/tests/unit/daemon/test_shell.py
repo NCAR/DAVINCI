@@ -118,3 +118,72 @@ class TestParseCommand:
     def test_watch_missing_name_raises(self) -> None:
         with pytest.raises(ValueError, match="requires a watch name"):
             parse_command("watch pause")
+
+
+from unittest.mock import MagicMock
+
+from davinci_monet.daemon.contracts import ControlResponse, StreamEvent
+from davinci_monet.daemon.shell import DaemonShell
+
+
+class TestDaemonShellDispatch:
+    def _shell(self) -> tuple[DaemonShell, MagicMock]:
+        client = MagicMock()
+        client.call.return_value = ControlResponse(ok=True, data={"pong": True})
+        return DaemonShell(client), client
+
+    def test_status_calls_client_call(self) -> None:
+        shell, client = self._shell()
+        resp = shell.execute("status")
+        client.call.assert_called_once_with("status")
+        client.stream.assert_not_called()
+        assert resp is not None and resp.ok is True
+
+    def test_watch_pause_dispatches_name(self) -> None:
+        shell, client = self._shell()
+        shell.execute("watch pause cam_realtime")
+        client.call.assert_called_once_with("watch_pause", name="cam_realtime")
+
+    def test_watch_trigger_dispatches_files(self) -> None:
+        shell, client = self._shell()
+        shell.execute("watch trigger cam /a.nc /b.nc")
+        client.call.assert_called_once_with("watch_trigger", name="cam", files=["/a.nc", "/b.nc"])
+
+    def test_history_flags_dispatched(self) -> None:
+        shell, client = self._shell()
+        shell.execute("history --watch cam --failed --limit 5")
+        client.call.assert_called_once_with("history", watch="cam", failed=True, limit=5)
+
+    def test_logs_oneshot_uses_call(self) -> None:
+        shell, client = self._shell()
+        shell.execute("logs 7")
+        client.call.assert_called_once_with("logs", target="7", kind="job")
+        client.stream.assert_not_called()
+
+    def test_logs_tail_uses_stream(self) -> None:
+        shell, client = self._shell()
+        client.stream.return_value = iter(
+            [StreamEvent(event="log_line", data={"message": "hello"})]
+        )
+        resp = shell.execute("logs 7 --tail")
+        client.stream.assert_called_once_with("logs_tail", target="7", kind="job")
+        client.call.assert_not_called()
+        assert resp is None  # streaming returns None after draining
+
+    def test_local_quit_does_not_touch_client(self) -> None:
+        shell, client = self._shell()
+        resp = shell.execute("quit")
+        client.call.assert_not_called()
+        client.stream.assert_not_called()
+        assert resp is None
+
+    def test_local_help_does_not_touch_client(self) -> None:
+        shell, client = self._shell()
+        shell.execute("help")
+        client.call.assert_not_called()
+
+    def test_is_quit(self) -> None:
+        shell, _ = self._shell()
+        assert shell.is_quit("quit") is True
+        assert shell.is_quit("exit") is True
+        assert shell.is_quit("status") is False
