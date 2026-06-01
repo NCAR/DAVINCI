@@ -190,3 +190,126 @@ class TestDaemonConfig:
     def test_nested_notifications_dict(self) -> None:
         cfg = DaemonConfig(notifications={"desktop": False})
         assert cfg.notifications.desktop is False
+
+
+from davinci_monet.config.parser import expand_env_vars  # noqa: F401  (parity check)
+from davinci_monet.core.exceptions import ConfigurationError
+from davinci_monet.daemon.config import WatchesFile, load_watches
+
+
+def _write(tmp_path: "Path", text: str) -> "Path":
+    p = tmp_path / "watches.yaml"
+    p.write_text(text)
+    return p
+
+
+class TestLoadWatches:
+    def test_minimal_file(self, tmp_path: "Path") -> None:
+        path = _write(
+            tmp_path,
+            """
+daemon:
+  poll_interval: 5s
+watches:
+  cam:
+    watch: /in/cam/*.nc
+    run: /cfg/asia-aq.yaml
+""",
+        )
+        wf = load_watches(path)
+        assert isinstance(wf, WatchesFile)
+        assert wf.daemon.poll_interval == 5.0
+        assert set(wf.watches) == {"cam"}
+        rule = wf.watches["cam"]
+        assert rule.name == "cam"  # key injected as name
+        assert rule.watch == "/in/cam/*.nc"
+        assert rule.run == "/cfg/asia-aq.yaml"
+        assert rule.on_fire == "whole_config"
+
+    def test_layer1_env_expansion_on_paths(
+        self, tmp_path: "Path", monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        monkeypatch.setenv("DATA", "/scratch/cam")
+        path = _write(
+            tmp_path,
+            """
+watches:
+  cam:
+    watch: ${DATA}/incoming/*.nc
+    run: ${DATA}/cfg.yaml
+    sentinel: ${DATA}/DONE
+""",
+        )
+        rule = load_watches(path).watches["cam"]
+        assert rule.watch == "/scratch/cam/incoming/*.nc"
+        assert rule.run == "/scratch/cam/cfg.yaml"
+        assert rule.sentinel == "/scratch/cam/DONE"
+
+    def test_per_rule_env_not_layer1_expanded(
+        self, tmp_path: "Path", monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
+        monkeypatch.setenv("DATA", "/scratch/cam")
+        path = _write(
+            tmp_path,
+            """
+watches:
+  cam:
+    watch: /in/*.nc
+    run: /cfg.yaml
+    env:
+      DATA: ${OTHER}/root
+""",
+        )
+        rule = load_watches(path).watches["cam"]
+        # env overlay is layer-2 (worker-side) -> stays verbatim
+        assert rule.env == {"DATA": "${OTHER}/root"}
+
+    def test_new_files_only_requires_inject_into(self, tmp_path: "Path") -> None:
+        path = _write(
+            tmp_path,
+            """
+watches:
+  modis:
+    watch: /in/*.hdf
+    run: /cfg.yaml
+    on_fire: new_files_only
+""",
+        )
+        with pytest.raises(ConfigurationError, match="inject_into"):
+            load_watches(path)
+
+    def test_new_files_only_with_inject_into_ok(self, tmp_path: "Path") -> None:
+        path = _write(
+            tmp_path,
+            """
+watches:
+  modis:
+    watch: /in/*.hdf
+    run: /cfg.yaml
+    on_fire: new_files_only
+    inject_into: modis_src
+""",
+        )
+        rule = load_watches(path).watches["modis"]
+        assert rule.on_fire == "new_files_only"
+        assert rule.inject_into == "modis_src"
+
+    def test_bad_on_fire_value_raises(self, tmp_path: "Path") -> None:
+        path = _write(
+            tmp_path,
+            """
+watches:
+  r:
+    watch: /in/*.nc
+    run: /cfg.yaml
+    on_fire: sometimes
+""",
+        )
+        with pytest.raises(ConfigurationError):
+            load_watches(path)
+
+    def test_empty_file_defaults(self, tmp_path: "Path") -> None:
+        path = _write(tmp_path, "watches: {}\n")
+        wf = load_watches(path)
+        assert wf.watches == {}
+        assert wf.daemon.poll_interval == 5.0

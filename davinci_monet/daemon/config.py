@@ -18,7 +18,9 @@ from typing import Any, Optional
 
 from pydantic import Field, field_validator
 
+from davinci_monet.config.parser import expand_env_vars, load_yaml
 from davinci_monet.config.schema import FlexibleModel, StrictModel
+from davinci_monet.core.exceptions import ConfigurationError
 from davinci_monet.daemon.contracts import (
     NotifyChannel,
     OnFireMode,
@@ -177,3 +179,69 @@ class DaemonConfig(FlexibleModel):
     @property
     def log_path(self) -> Path:
         return self.state_dir / "daemon.log"
+
+
+class WatchesFile(StrictModel):
+    """The fully-parsed watches.yaml (daemon policy + the declared rules).
+
+    ``watches`` is keyed by rule name; each value is a fully-constructed
+    WatchRule whose ``name`` matches its key.
+    """
+
+    daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    watches: dict[str, WatchRule] = Field(default_factory=dict)
+
+
+def load_watches(source: str | Path) -> WatchesFile:
+    """Load + layer-1 env-expand + validate a watches.yaml into a WatchesFile.
+
+    Reuses load_yaml + expand_env_vars for ${VAR} expansion against the
+    DAEMON's os.environ, then constructs DaemonConfig and each WatchRule
+    (injecting the mapping key as ``name``). on_fire == "new_files_only" with
+    no ``inject_into`` is a validation error.
+    """
+    raw = load_yaml(source)
+
+    daemon_raw = raw.get("daemon") or {}
+    if not isinstance(daemon_raw, dict):
+        raise ConfigurationError("watches.yaml 'daemon' block must be a mapping")
+    # Layer-1: expand the whole daemon policy block (paths, icloud_dir, ...).
+    daemon_raw = expand_env_vars(daemon_raw)
+
+    watches_raw = raw.get("watches") or {}
+    if not isinstance(watches_raw, dict):
+        raise ConfigurationError("watches.yaml 'watches' block must be a mapping")
+
+    try:
+        daemon = DaemonConfig.model_validate(daemon_raw)
+    except Exception as exc:  # pydantic ValidationError
+        raise ConfigurationError(f"Invalid daemon config: {exc}") from exc
+
+    rules: dict[str, WatchRule] = {}
+    for name, rule_raw in watches_raw.items():
+        if rule_raw is None:
+            rule_raw = {}
+        if not isinstance(rule_raw, dict):
+            raise ConfigurationError(f"watch '{name}' must be a mapping")
+
+        # Layer-1: expand path-bearing string fields only; preserve env verbatim
+        # (env is the layer-2 worker overlay and is expanded inside the worker).
+        rule_data: dict[str, Any] = dict(rule_raw)
+        env_overlay = rule_data.pop("env", None)
+        rule_data = expand_env_vars(rule_data)
+        if env_overlay is not None:
+            rule_data["env"] = env_overlay
+        rule_data["name"] = str(name)
+
+        try:
+            rule = WatchRule.model_validate(rule_data)
+        except Exception as exc:  # pydantic ValidationError (e.g. bad on_fire)
+            raise ConfigurationError(f"Invalid watch '{name}': {exc}") from exc
+
+        if rule.on_fire == "new_files_only" and not rule.inject_into:
+            raise ConfigurationError(
+                f"watch '{name}': on_fire 'new_files_only' requires 'inject_into'"
+            )
+        rules[str(name)] = rule
+
+    return WatchesFile(daemon=daemon, watches=rules)
