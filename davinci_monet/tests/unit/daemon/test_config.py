@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from davinci_monet.daemon.config import NotificationConfig, parse_duration
+from davinci_monet.daemon.config import NotificationConfig, WatchRule, parse_duration
 
 
 class TestParseDuration:
@@ -84,9 +84,6 @@ class TestNotificationConfig:
         assert cfg.desktop is True
 
 
-from davinci_monet.daemon.config import WatchRule
-
-
 class TestWatchRule:
     def test_minimal(self) -> None:
         rule = WatchRule(name="cam", watch="/in/*.nc", run="/cfg.yaml")
@@ -119,8 +116,11 @@ class TestWatchRule:
 
     def test_on_fire_new_files_only_with_inject(self) -> None:
         rule = WatchRule(
-            name="r", watch="/x", run="/c",
-            on_fire="new_files_only", inject_into="cam",
+            name="r",
+            watch="/x",
+            run="/c",
+            on_fire="new_files_only",
+            inject_into="cam",
         )
         assert rule.on_fire == "new_files_only"
         assert rule.inject_into == "cam"
