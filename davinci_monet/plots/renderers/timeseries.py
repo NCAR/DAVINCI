@@ -263,7 +263,7 @@ class TimeSeriesPlotter(BasePlotter):
         self.add_legend(ax)
 
         # Rotate x-axis labels for readability
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
 
         # Grid
         ax.grid(True, alpha=0.3)
@@ -396,7 +396,7 @@ class TimeSeriesPlotter(BasePlotter):
             title_q = labeling.quantity_label(ds, s.var_name)
             self.set_title(ax, labeling.sourced_title(s.source_label, title_q))
         ax.grid(True, alpha=0.3)
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
 
         if show_altitude and alt_coord in ds.coords:
             ax2 = ax.twinx()
@@ -463,7 +463,7 @@ class TimeSeriesPlotter(BasePlotter):
         else:
             self.set_title(ax, labeling.quantity_label(first.dataset, first.var_name))
         ax.grid(True, alpha=0.3)
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
         return fig
 
     def _plot_individual_sites(
@@ -582,7 +582,7 @@ class TimeSeriesPlotter(BasePlotter):
         else:
             ax.legend(fontsize=self.config.text.legend)
 
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
         ax.grid(True, alpha=0.3)
 
         return fig
