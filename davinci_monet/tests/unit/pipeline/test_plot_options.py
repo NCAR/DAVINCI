@@ -63,6 +63,58 @@ def test_single_source_options_move_trailing_date_to_subtitle() -> None:
     assert kwargs["subtitle"] == "2012-05-29 – 2012-05-30"
 
 
+def test_single_source_spatial_inherits_analysis_domain() -> None:
+    """Analysis-level `domain` is forwarded to spatial maps as domain_type so
+    every map shares the same fixed extent."""
+    from davinci_monet.pipeline.stages.plot_options import single_source_plot_kwargs
+
+    kw = single_source_plot_kwargs(
+        {"type": "spatial", "source": "airnow", "variable": "o3"},
+        analysis_config={"domain": "asia_aq"},
+    )
+    assert kw["domain_type"] == "asia_aq"
+
+
+def test_single_source_default_domain_type_yields_analysis_domain() -> None:
+    """The schema's default domain_type ('all' / ['all']) means 'no restriction'
+    and must be treated as unset, so the analysis-level domain still applies."""
+    from davinci_monet.pipeline.stages.plot_options import single_source_plot_kwargs
+
+    kw = single_source_plot_kwargs(
+        {
+            "type": "spatial",
+            "source": "airnow",
+            "variable": "o3",
+            "domain_type": ["all"],
+            "domain_name": ["all"],
+        },
+        analysis_config={"domain": "asia_aq"},
+    )
+    assert kw["domain_type"] == "asia_aq"
+
+
+def test_single_source_per_plot_domain_overrides_analysis() -> None:
+    """A per-plot domain_type wins over the analysis-level domain."""
+    from davinci_monet.pipeline.stages.plot_options import single_source_plot_kwargs
+
+    kw = single_source_plot_kwargs(
+        {"type": "spatial", "source": "airnow", "variable": "o3", "domain_type": "conus"},
+        analysis_config={"domain": "asia_aq"},
+    )
+    assert kw["domain_type"] == "conus"
+
+
+def test_non_spatial_single_source_ignores_analysis_domain() -> None:
+    """Non-spatial plots (e.g. timeseries) do not get a map domain."""
+    from davinci_monet.pipeline.stages.plot_options import single_source_plot_kwargs
+
+    kw = single_source_plot_kwargs(
+        {"type": "timeseries", "source": "airnow", "variable": "o3"},
+        analysis_config={"domain": "asia_aq"},
+    )
+    assert "domain_type" not in kw
+
+
 def test_single_source_flight_date_label_stays_out_of_title() -> None:
     from davinci_monet.pipeline.stages.plot_options import single_source_flight_plot_kwargs
 

@@ -76,6 +76,28 @@ def single_source_plot_kwargs(
     if plot_spec.get("display_level") is not None:
         kwargs["display_level"] = plot_spec["display_level"]
 
+    # Forward a fixed map domain to spatial maps so every map shares one extent
+    # (sparse-data maps otherwise auto-clip to their few sites). Per-plot
+    # domain_type wins; otherwise the analysis-level `domain` applies. domain_type
+    # is otherwise filtered out of render kwargs (SINGLE_SOURCE_SCHEMA_KEYS), so it
+    # is re-injected here for the renderer's _resolve_extent.
+    if str(plot_spec.get("type", "")).startswith("spatial"):
+        per_plot = plot_spec.get("domain_type")
+        if isinstance(per_plot, (list, tuple)):
+            per_plot = per_plot[0] if per_plot else None
+        # The schema defaults domain_type to "all" (no restriction); treat that
+        # (and None/empty) as "unset" so the analysis-level `domain` can apply.
+        if per_plot in (None, "", "all"):
+            per_plot = None
+        domain = per_plot or (analysis_config or {}).get("domain")
+        if domain:
+            kwargs["domain_type"] = domain
+            dname = plot_spec.get("domain_name")
+            if isinstance(dname, (list, tuple)):
+                dname = dname[0] if dname else None
+            if dname and dname != "all":
+                kwargs["domain_name"] = dname
+
     return kwargs
 
 

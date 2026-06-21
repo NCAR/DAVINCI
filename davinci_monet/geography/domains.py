@@ -29,6 +29,7 @@ STANDARD_DOMAINS: dict[str, Extent] = {
     "north_america": (-170.0, -50.0, 10.0, 75.0),
     "europe": (-15.0, 45.0, 35.0, 72.0),
     "asia": (60.0, 150.0, 0.0, 55.0),
+    "asia_aq": (90.0, 140.0, 0.0, 45.0),  # ASIA-AQ campaign domain
 }
 
 
