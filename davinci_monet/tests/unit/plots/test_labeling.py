@@ -217,6 +217,27 @@ def test_subtitle_empty():
 
 
 # ---------------------------------------------------------------------------
+# sourced_title: single-source title with the SOURCE NAME FIRST (not in parens)
+# ---------------------------------------------------------------------------
+
+
+def test_sourced_title_source_first():
+    # Source leads the title; no parenthesised "(AERONET)" suffix.
+    assert L.sourced_title("aeronet", r"AOD (500 nm)") == r"AERONET AOD (500 nm)"
+    assert L.sourced_title("airnow", r"O$_3$") == r"AirNow O$_3$"
+
+
+def test_sourced_title_dedup():
+    # Source key embeds the quantity -> only the distinctive token leads.
+    assert L.sourced_title("cesm_no2_column", r"NO$_2$ Column") == r"CESM NO$_2$ Column"
+
+
+def test_sourced_title_no_source():
+    assert L.sourced_title(None, "O3") == "O3"
+    assert L.sourced_title("", "O3") == "O3"
+
+
+# ---------------------------------------------------------------------------
 # Task 8: labels.format_units delegates to SI labeling
 # ---------------------------------------------------------------------------
 

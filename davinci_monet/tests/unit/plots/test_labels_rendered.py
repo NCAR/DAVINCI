@@ -393,7 +393,26 @@ class TestTimeseriesTitleRendered:
         ax = fig.axes[0]
         title = ax.get_title()
         assert title, "Single-source timeseries must render a non-empty title (not just subtitle)"
-        assert "Pandora" in title, f"Single-source title must name the source, got: {title!r}"
+        # Source name leads the title (not a parenthesised suffix).
+        assert title.startswith("Pandora"), f"Source name must lead the title, got: {title!r}"
+        assert "(Pandora)" not in title, f"Source must not be parenthesised, got: {title!r}"
+        plt.close(fig)
+
+    def test_single_source_timeseries_exact_xlim(self, paired_no2_mol_m2: xr.Dataset) -> None:
+        """Single-source timeseries x-axis spans exactly the data range (no padding)."""
+        import matplotlib.dates as mdates
+
+        from davinci_monet.plots import TimeSeriesPlotter
+
+        fig = TimeSeriesPlotter().render(
+            build_series(paired_no2_mol_m2, "pandora_no2_column"),
+            aggregate_dim="site",
+        )
+        ax = fig.axes[0]
+        t = pd.to_datetime(paired_no2_mol_m2["time"].values)
+        lo, hi = ax.get_xlim()
+        assert lo == pytest.approx(mdates.date2num(t.min()))
+        assert hi == pytest.approx(mdates.date2num(t.max()))
         plt.close(fig)
 
     def test_overlay_timeseries_has_title(self, paired_no2_mol_m2: xr.Dataset) -> None:
