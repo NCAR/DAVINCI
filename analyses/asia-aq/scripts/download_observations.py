@@ -8,7 +8,7 @@ This script downloads/processes:
 - Pandora NO2 column data (from local raw files)
 
 Domain: 0-45N, 90-140E
-Period: February 1-28, 2024
+Period: full ASIA-AQ campaign window, 2024-01-29 to 2024-04-01
 """
 
 import os
@@ -37,9 +37,9 @@ BBOX = {
     "lon_max": 140,
 }
 
-# Date range
-START_DATE = "2024-02-01"
-END_DATE = "2024-02-29"
+# Date range — full ASIA-AQ campaign (Philippines -> Korea -> Thailand)
+START_DATE = "2024-01-29"
+END_DATE = "2024-04-01"
 
 
 def download_airnow():
@@ -207,7 +207,10 @@ def aeronet_to_dataset(df: pd.DataFrame) -> xr.Dataset:
     data_dict = {}
     for var in available_vars:
         pivoted = df.pivot_table(index="time", columns="siteid", values=var, aggfunc="first")
-        pivoted = pivoted.reindex(columns=site_ids)
+        # pivot_table drops all-NaN hours (dropna=True), which can differ per
+        # wavelength; reindex to the full time/site axes so every variable has a
+        # consistent (time, site) shape matching the dataset coords.
+        pivoted = pivoted.reindex(index=times, columns=site_ids)
         data_dict[var] = pivoted.values
 
     ds = xr.Dataset(
