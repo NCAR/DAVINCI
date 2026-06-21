@@ -38,6 +38,21 @@ def _has(ax: plt.Axes, cls: type) -> bool:
     return any(isinstance(c, cls) for c in ax.collections)
 
 
+def test_domain_type_sets_fixed_map_extent():
+    """A named domain pins the map extent so sparse-data maps aren't auto-clipped
+    to their few sites — every map shares the same fixed extent."""
+    ds = create_point_geometries()
+    fig = SpatialPlotter().render(build_series(ds, "O3"), domain_type="asia_aq")
+    ax = fig.axes[0]
+    # GeoAxes get_extent() -> (lon_min, lon_max, lat_min, lat_max) in PlateCarree.
+    # cartopy may pad one axis to preserve aspect, so assert the box is pinned to
+    # the ASIA-AQ domain (NOT auto-scaled to the synthetic data) with a margin.
+    lon0, lon1, lat0, lat1 = ax.get_extent()
+    assert lon0 == pytest.approx(90.0, abs=2.0) and lon1 == pytest.approx(140.0, abs=2.0)
+    assert lat0 == pytest.approx(0.0, abs=4.0) and lat1 == pytest.approx(45.0, abs=4.0)
+    plt.close(fig)
+
+
 @pytest.mark.parametrize(
     "maker,var",
     [

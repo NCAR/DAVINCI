@@ -92,6 +92,10 @@ class AnalysisConfig(StrictSchema):
     city_labels
         Optional mapping of ``city name -> [lat, lon]`` annotated on spatial
         and 3-D track plots (forwarded to renderers via the plotting stage).
+    domain
+        Optional named map domain (e.g. ``asia_aq``) applied as the fixed extent
+        of every spatial map, so sparse-data maps are not auto-clipped to their
+        few sites. A per-plot ``domain_type`` overrides it.
     """
 
     start_time: datetime | str | None = None
@@ -101,6 +105,7 @@ class AnalysisConfig(StrictSchema):
     debug: bool = False
     style: PlotStyleConfig | dict[str, Any] | None = None
     city_labels: dict[str, list[float]] | None = None
+    domain: str | None = None
 
     @field_validator("style", mode="before")
     @classmethod

@@ -17,6 +17,13 @@ def test_domain_extent_catalog_is_not_plot_owned() -> None:
     assert get_domain_extent("conus") == (-130, -60, 20, 55)
 
 
+def test_asia_aq_domain_registered() -> None:
+    """ASIA-AQ campaign domain is a named domain: lon 90-140E, lat 0-45N."""
+    from davinci_monet.geography.domains import get_domain_extent
+
+    assert get_domain_extent("asia_aq") == (90.0, 140.0, 0.0, 45.0)
+
+
 def _paired_point_dataset() -> xr.Dataset:
     """Build a synthetic paired Dataset with sites spanning multiple regions."""
     times = pd.date_range("2024-01-01", periods=6, freq="h")
