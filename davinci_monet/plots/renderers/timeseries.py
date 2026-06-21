@@ -263,7 +263,7 @@ class TimeSeriesPlotter(BasePlotter):
         self.add_legend(ax)
 
         # Rotate x-axis labels for readability
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
 
         # Grid
         ax.grid(True, alpha=0.3)
@@ -378,13 +378,25 @@ class TimeSeriesPlotter(BasePlotter):
                     linewidth=0,
                 )
 
+        # Exact date range: pin the x-axis to the data extent (no auto-padding),
+        # matching the paired _plot() path.
+        if len(time_values):
+            ax.set_xlim(time_values.min(), time_values.max())
+
         units = ds[s.var_name].attrs.get("units") or None
         var_label = get_variable_label(ds, s.var_name, include_prefix=False)
         ax.set_ylabel(labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize)
         ax.set_xlabel("Time", fontsize=self.config.text.fontsize)
-        self.set_title(ax, title)
+        # Synthesise a title when none is configured (mirrors the spatial
+        # renderer): source name first, then quantity, so a single-source series
+        # shows e.g. "AirNow O3" rather than only the date subtitle.
+        if title or self.config.title:
+            self.set_title(ax, title)
+        else:
+            title_q = labeling.quantity_label(ds, s.var_name)
+            self.set_title(ax, labeling.sourced_title(s.source_label, title_q))
         ax.grid(True, alpha=0.3)
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
 
         if show_altitude and alt_coord in ds.coords:
             ax2 = ax.twinx()
@@ -433,14 +445,25 @@ class TimeSeriesPlotter(BasePlotter):
             )
         ax.legend(fontsize=self.config.text.legend)
 
+        # Exact date range across all overlaid series (no auto-padding).
+        all_times = [pd.to_datetime(s.dataset[time_dim].values) for s in series]
+        all_times = [t for t in all_times if len(t)]
+        if all_times:
+            ax.set_xlim(min(t.min() for t in all_times), max(t.max() for t in all_times))
+
         first = series[0]
         units = first.dataset[first.var_name].attrs.get("units") or None
         var_label = get_variable_label(first.dataset, first.var_name, include_prefix=False)
         ax.set_ylabel(labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize)
         ax.set_xlabel("Time", fontsize=self.config.text.fontsize)
-        self.set_title(ax, title)
+        # Overlay sources are distinguished by the legend, so the synthesised
+        # title carries the quantity only (no single source name).
+        if title or self.config.title:
+            self.set_title(ax, title)
+        else:
+            self.set_title(ax, labeling.quantity_label(first.dataset, first.var_name))
         ax.grid(True, alpha=0.3)
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
         return fig
 
     def _plot_individual_sites(
@@ -559,7 +582,7 @@ class TimeSeriesPlotter(BasePlotter):
         else:
             ax.legend(fontsize=self.config.text.legend)
 
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=self.config.text.annotation_small)
         ax.grid(True, alpha=0.3)
 
         return fig

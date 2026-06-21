@@ -6,7 +6,8 @@ AirNow provides data from US Embassy/Consulate air quality monitors
 in Asian cities. No API key required for this access method.
 
 Domain: 0-45°N, 90-140°E
-Period: February 1-28, 2024
+Period: full ASIA-AQ campaign window, 2024-01-29 to 2024-04-01
+        (one 00 UTC hourly snapshot per day; daily cadence, not 24 h mean)
 
 Coverage includes:
 - Beijing, Guangzhou, Shenyang (China)
@@ -40,9 +41,11 @@ BBOX = {
     "lon_max": 140,
 }
 
-# Date range
-START_DATE = "2024-02-01"
-END_DATE = "2024-02-29"  # 2024 is a leap year
+# Date range — full ASIA-AQ campaign (Philippines -> Korea -> Thailand).
+# pd.date_range defaults to daily freq, so add_data fetches the 00 UTC hour of
+# each day: one daily snapshot per site (matches the original Feb file cadence).
+START_DATE = "2024-01-29"
+END_DATE = "2024-04-01"
 
 
 def download_airnow():

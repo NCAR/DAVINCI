@@ -370,3 +370,78 @@ class TestTimeseriesLabelsClean:
             assert "(x)" not in text.lower(), f"x/y role token in legend: {text!r}"
             assert "(y)" not in text.lower(), f"x/y role token in legend: {text!r}"
         plt.close(fig)
+
+
+class TestTimeseriesTitleRendered:
+    """A timeseries with no explicit ``title:`` must still render an auto title
+    (quantity, + source for a single series) — not just the date subtitle.
+
+    Regression: single-source / overlay timeseries left ``config.title`` empty,
+    so ``set_title`` drew nothing while the pipeline-injected date subtitle still
+    appeared — the spatial renderer synthesises a title in this case but the
+    timeseries single/overlay paths did not.
+    """
+
+    def test_single_source_timeseries_has_title(self, paired_no2_mol_m2: xr.Dataset) -> None:
+        """Single-source timeseries: non-empty axes title naming the source."""
+        from davinci_monet.plots import TimeSeriesPlotter
+
+        fig = TimeSeriesPlotter().render(
+            build_series(paired_no2_mol_m2, "pandora_no2_column"),
+            aggregate_dim="site",
+        )
+        ax = fig.axes[0]
+        title = ax.get_title()
+        assert title, "Single-source timeseries must render a non-empty title (not just subtitle)"
+        # Source name leads the title (not a parenthesised suffix).
+        assert title.startswith("Pandora"), f"Source name must lead the title, got: {title!r}"
+        assert "(Pandora)" not in title, f"Source must not be parenthesised, got: {title!r}"
+        plt.close(fig)
+
+    def test_single_source_timeseries_exact_xlim(self, paired_no2_mol_m2: xr.Dataset) -> None:
+        """Single-source timeseries x-axis spans exactly the data range (no padding)."""
+        import matplotlib.dates as mdates
+
+        from davinci_monet.plots import TimeSeriesPlotter
+
+        fig = TimeSeriesPlotter().render(
+            build_series(paired_no2_mol_m2, "pandora_no2_column"),
+            aggregate_dim="site",
+        )
+        ax = fig.axes[0]
+        t = pd.to_datetime(paired_no2_mol_m2["time"].values)
+        lo, hi = ax.get_xlim()
+        assert lo == pytest.approx(mdates.date2num(t.min()))
+        assert hi == pytest.approx(mdates.date2num(t.max()))
+        plt.close(fig)
+
+    def test_overlay_timeseries_has_title(self, paired_no2_mol_m2: xr.Dataset) -> None:
+        """Overlay (>2 series) timeseries: non-empty quantity title."""
+        from davinci_monet.plots import TimeSeriesPlotter
+
+        # Add a third source variable to force the overlay path (N>2).
+        ds = paired_no2_mol_m2.copy()
+        ds["geosfp_no2_column"] = ds["pandora_no2_column"].copy()
+        ds["geosfp_no2_column"].attrs.update({"axis": "y", "source_label": "geosfp_no2_column"})
+        fig = TimeSeriesPlotter().render(
+            build_series(ds, "pandora_no2_column", "cesm_no2_column", "geosfp_no2_column"),
+        )
+        ax = fig.axes[0]
+        title = ax.get_title()
+        assert title, "Overlay timeseries must render a non-empty quantity title"
+        plt.close(fig)
+
+    def test_explicit_config_title_still_wins(self, paired_no2_mol_m2: xr.Dataset) -> None:
+        """An explicit configured title must override the synthesised one."""
+        from davinci_monet.plots import PlotConfig, TimeSeriesPlotter
+
+        plotter = TimeSeriesPlotter(PlotConfig(title="Custom Column Title"))
+        fig = plotter.render(
+            build_series(paired_no2_mol_m2, "pandora_no2_column"),
+            aggregate_dim="site",
+        )
+        ax = fig.axes[0]
+        assert (
+            ax.get_title() == "Custom Column Title"
+        ), f"Config title must win, got: {ax.get_title()!r}"
+        plt.close(fig)

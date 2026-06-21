@@ -296,6 +296,21 @@ def title_text(quantity: str, operation: str | None = None) -> str:
     return f"{q} {operation}".strip() if operation else q
 
 
+def sourced_title(source_label: str | None, quantity: str) -> str:
+    """Single-source plot title with the SOURCE NAME FIRST: ``<Source> <Quantity>``.
+
+    The source's distinctive tokens (vs the quantity) lead the title, so a
+    single-source map/timeseries reads ``AERONET AOD (500 nm)`` or ``AirNow O3``
+    rather than ``AOD (500 nm) (AERONET)``. Mirrors :func:`axis_label`'s
+    source-first, de-duplicated ordering. Falls back to the bare quantity when
+    no source is given.
+    """
+    if not source_label:
+        return quantity
+    src = distinctive_source_name(source_label, quantity)
+    return f"{src} {quantity}" if src else quantity
+
+
 def subtitle_text(start: Any, end: Any) -> str:
     """Date-range subtitle: 'YYYY-MM-DD – YYYY-MM-DD' or single date or ''."""
     if not start:
@@ -314,5 +329,6 @@ __all__ = [
     "legend_label",
     "bias_label",
     "title_text",
+    "sourced_title",
     "subtitle_text",
 ]

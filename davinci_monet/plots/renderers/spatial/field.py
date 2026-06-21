@@ -185,13 +185,10 @@ class SpatialPlotter(BaseSpatialPlotter):
         if self.config.title:
             self.set_title(ax, self.config.title)
         else:
+            # Source name leads the title, de-duped against the quantity, e.g.
+            # "AERONET AOD (500 nm)" / "CESM NO2 Column" (not "… (CESM)").
             title_q = labeling.quantity_label(ds, variable)
-            # Source de-duped against the quantity so e.g. a "cesm_no2_column"
-            # source beside "NO2 Column" reads "(CESM)", not "(CESM NO2 Column)".
-            src_display = (
-                labeling.distinctive_source_name(source_label, title_q) if source_label else ""
-            )
-            self.set_title(ax, f"{title_q} ({src_display})" if src_display else title_q)
+            self.set_title(ax, labeling.sourced_title(source_label, title_q))
         return fig
 
     # -- helpers ---------------------------------------------------------------

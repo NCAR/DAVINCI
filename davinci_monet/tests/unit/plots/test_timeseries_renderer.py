@@ -47,6 +47,19 @@ class TestTimeseriesRenderSingleSource:
         assert fig.axes[0].get_lines()[0].get_color() == NCAR_PRIMARY
         plt.close(fig)
 
+    def test_date_tick_labels_use_compact_size(self) -> None:
+        """Rotated date tick labels use the compact annotation_small size — not the
+        larger, context-driven default tick size (which overflows in presentation)."""
+        from davinci_monet.plots.plot_config import TextConfig
+
+        cfg = PlotConfig(text=TextConfig(annotation_small=7.0, tick_fontsize=20.0))
+        fig = TimeSeriesPlotter(cfg).render([_multisite_series()])
+        ax = fig.axes[0]
+        fig.canvas.draw()
+        sizes = {round(t.get_fontsize(), 1) for t in ax.get_xticklabels()}
+        assert sizes == {7.0}, f"x date ticks must use annotation_small (7.0), got {sizes}"
+        plt.close(fig)
+
     def test_single_dataset_labelled_by_source(self) -> None:
         fig = TimeSeriesPlotter().render([_multisite_series(source_label="pandora")])
         # labeling.legend_label("pandora") -> "Pandora" (friendly display name)
