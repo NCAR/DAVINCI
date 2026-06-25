@@ -78,6 +78,18 @@ Directory convention:
 /glade/work/fillmore/Data/ASIA-AQ/<platform>/<YYYYMMDD>/<PI-or-product>/<filename>
 ```
 
+Full-campaign DC-8 merge files that were previously in the legacy
+platform-only path `/glade/work/fillmore/Data/DC8` have been moved into the
+campaign tree:
+
+```text
+/glade/work/fillmore/Data/ASIA-AQ/DC8_MERGES/full_campaign
+```
+
+That directory contains 71 ASIA-AQ DC-8 merge files, about 733M, spanning
+2024-02-06 through 2024-04-01. No compatibility symlink was left at the old
+path.
+
 Each downloaded day also has a manifest and log in the data root:
 
 - `manifest_YYYYMMDD.tsv` with platform, date, product/group, filename,
