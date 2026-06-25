@@ -35,7 +35,7 @@ from davinci_monet.io.reader_utils import (
 _JD_EPOCH = 2440587.5  # Julian Date of 1970-01-01T00
 
 # HDF4 coordinate SDS names (Edition4A).
-_H4_TIME = "Time of dataset"
+_H4_TIME_ALIASES = ("Time of dataset", "Time of observation")
 _H4_COLAT = "Colatitude of CERES FOV at surface"
 _H4_LON = "Longitude of CERES FOV at surface"
 
@@ -266,7 +266,14 @@ class CERESSSFReader:
                 sds.endaccess()
                 return values
 
-            time = _jd_to_datetime64(_read(_H4_TIME))
+            time_name = next((name for name in _H4_TIME_ALIASES if name in available), None)
+            if time_name is None:
+                raise ValueError(
+                    f"CERES SSF time SDS not found in {path.name!r}: "
+                    f"expected one of {_H4_TIME_ALIASES!r}"
+                )
+
+            time = _jd_to_datetime64(_read(time_name))
             lat = 90.0 - _read(_H4_COLAT)
             lon = _wrap_lon(_read(_H4_LON))
 
@@ -317,6 +324,18 @@ class CERESSSFReader:
             grp = xr.open_dataset(str(path), group=group, decode_times=False)
             try:
                 missing = [v for v in mapping.values() if v not in grp.data_vars]
+                if missing:
+                    mapping = {
+                        name: (
+                            model_b_var
+                            if var not in grp.data_vars
+                            and (model_b_var := var.replace("dataset_b_", "model_b_"))
+                            in grp.data_vars
+                            else var
+                        )
+                        for name, var in mapping.items()
+                    }
+                    missing = [v for v in mapping.values() if v not in grp.data_vars]
                 if missing and not scan:
                     raise ValueError(
                         f"SSF variable(s) not found in {path.name!r} group "
@@ -363,6 +382,10 @@ class CERESSSFReader:
             entry = SSF_CATALOG.get(name)
             if fmt == "hdf4":
                 src = entry.hdf4_sds if entry is not None else name
+                if available is not None and src not in available and "Dataset B" in src:
+                    model_b_src = src.replace("Dataset B", "Model B")
+                    if model_b_src in available:
+                        src = model_b_src
             else:
                 src = f"{entry.nc_group}/{entry.nc_var}" if entry is not None else name
             resolved[name] = src
