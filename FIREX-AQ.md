@@ -80,17 +80,20 @@ Local data root:
 Directory convention:
 
 ```text
-/glade/work/fillmore/Data/FIREX-AQ/<dataset>/<YYYYMMDD>/<group>/<filename>
+/glade/work/fillmore/Data/FIREX-AQ/<family>/<YYYYMMDD>/<group>/<filename>
 ```
 
-For the selected rows, the LaRC archive IDs resolve to:
+For these downloads, `<family>` is the first manifest column, such as `DC8`,
+`ER2`, `MERGE`, `SATELLITE`, `ANALYSIS`, `MOBILE`, `N46`, or `GROUND`.
+The `group` column is usually `FIREXAQ`, so a typical path is:
 
 ```text
-/glade/work/fillmore/Data/FIREX-AQ/XFS/<YYYYMMDD>/FIREXAQ/<filename>
+/glade/work/fillmore/Data/FIREX-AQ/DC8/<YYYYMMDD>/FIREXAQ/<filename>
 ```
 
-The per-row archive family is preserved in the manifests, so filter the first
-manifest column for `DC8`, `ER2`, `MERGE`, `SATELLITE`, and related families.
+The direct LaRC archive URLs encode the archive dataset key as `XFS`; the files
+were initially downloaded under `XFS/<YYYYMMDD>/FIREXAQ/` and then reorganized
+by manifest family for easier discovery.
 
 Each selected day has:
 
@@ -108,6 +111,19 @@ Completed on 2026-06-24:
 The local subset currently occupies about **32G** and completed cleanly with
 zero `.part` files remaining. A manifest-to-file audit found zero missing
 files.
+
+Current family-level local inventory:
+
+| Family | Files | On-Disk Size |
+|---|---:|---:|
+| ANALYSIS | 28 | 153M |
+| DC8 | 355 | 2.0G |
+| ER2 | 36 | 16G |
+| GROUND | 2 | 5.1M |
+| MERGE | 30 | 1.5G |
+| MOBILE | 11 | 453M |
+| N46 | 10 | 1.2G |
+| SATELLITE | 12 | 11G |
 
 Satellite products included for each selected day are:
 
