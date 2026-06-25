@@ -129,30 +129,35 @@ Completed on 2026-06-24:
 | Product Block | Files | Size | Status |
 |---|---:|---:|---|
 | Aerosol products | 1,085 | 9.23 GiB | Downloaded and audited with zero missing files and zero size mismatches |
-| MODIS cloud products | 409 | 24.09 GiB | Not bulk-downloaded; one MODIS cloud HDF4 probe downloaded successfully |
+| MODIS cloud products | 409 | 24.09 GiB | Downloaded and audited with zero missing files and zero size mismatches |
 | VIIRS `CLDPROP` cloud products | 301 | 70.24 GiB | Not bulk-downloaded; one VIIRS cloud NetCDF/HDF5 probe downloaded successfully |
 
-Downloaded aerosol files live beside their manifests:
+Downloaded aerosol and MODIS cloud files live beside their manifests:
 
 ```text
-/glade/work/fillmore/Data/<CAMPAIGN>/MODIS_VIIRS_L2/<aerosol-dataset>/<YYYYMMDD>/<filename>
+/glade/work/fillmore/Data/<CAMPAIGN>/MODIS_VIIRS_L2/<dataset>/<YYYYMMDD>/<filename>
 ```
 
-Aerosol download log:
+Download logs:
 
 ```text
 /glade/work/fillmore/Data/MODIS_VIIRS_L2_aerosol_download.log
+/glade/work/fillmore/Data/MODIS_VIIRS_L2_modis_cloud_download.log
 ```
 
 ## Download Plan
 
-Recommended first tranche once a token is available:
+Completed:
 
-1. Download all aerosol products first. This has been completed.
-2. Download MODIS cloud products next. They add about **24.09 GiB** and use
-   the same HDF-EOS family as the existing MODIS AOD reader path.
-3. Download VIIRS `CLDPROP` last. It adds about **70.24 GiB** and is the
-   largest block by far.
+1. Aerosol products.
+2. MODIS cloud products.
+
+Remaining:
+
+1. Download VIIRS `CLDPROP` if the additional cloud context is worth the
+   storage cost. It adds about **70.24 GiB** and is the largest block by far.
+2. Start reader/catalog work with the downloaded MODIS cloud HDF-EOS files
+   before pulling VIIRS cloud in bulk.
 
 The manifest `download_url` column already contains the API archive URL for
 each granule.
