@@ -34,6 +34,7 @@ def _write_ssf_hdf4(
     n: int = 6,
     base_iso: str = "2026-04-01T00:30:00",
     flux_name: str = "CERES LW TOA flux - upwards",
+    time_name: str = "Time of dataset",
     fill_flux_idx: int | None = None,
     fill_coord_idx: int | None = None,
 ) -> Path:
@@ -59,7 +60,7 @@ def _write_ssf_hdf4(
         s.attr("valid_range").set(typ, vr)
         s.endaccess()
 
-    _sds("Time of dataset", times, SDC.FLOAT64, 1.7976931348623157e308, [2440000.0, 2480000.0])
+    _sds(time_name, times, SDC.FLOAT64, 1.7976931348623157e308, [2440000.0, 2480000.0])
     _sds("Colatitude of CERES FOV at surface", colat, SDC.FLOAT32, _FILL32, [0.0, 180.0])
     _sds("Longitude of CERES FOV at surface", lon, SDC.FLOAT32, _FILL32, [0.0, 360.0])
     _sds(flux_name, flux, SDC.FLOAT32, _FILL32, [0.0, 500.0])
@@ -105,6 +106,30 @@ def test_hdf4_canonical_open_and_coords(tmp_path: Path) -> None:
     # Julian time decoded: first footprint at base time (10 s spacing after)
     assert ds["time"].values[0] == np.datetime64("2026-04-01T00:30:00")
     assert ds["time"].values[1] - ds["time"].values[0] == np.timedelta64(10, "s")
+
+
+def test_hdf4_accepts_time_of_observation_alias(tmp_path: Path) -> None:
+    p = _write_ssf_hdf4(
+        tmp_path / "CER_SSF_Terra-FM1-MODIS_Edition4A_410406.2026040100",
+        time_name="Time of observation",
+    )
+
+    ds = CERESSSFReader().open([p], variables=["toa_lw_up"])
+
+    assert ds.sizes["time"] == 6
+    assert ds["time"].values[0] == np.datetime64("2026-04-01T00:30:00")
+
+
+def test_hdf4_resolves_model_b_surface_flux_alias(tmp_path: Path) -> None:
+    p = _write_ssf_hdf4(
+        tmp_path / "CER_SSF_Terra-FM1-MODIS_Edition4A_410406.2026040100",
+        flux_name="CERES downward SW surface flux - Model B",
+    )
+
+    ds = CERESSSFReader().open([p], variables=["sfc_sw_down"])
+
+    assert set(ds.data_vars) == {"sfc_sw_down"}
+    np.testing.assert_allclose(ds["sfc_sw_down"].values, np.linspace(150.0, 300.0, 6))
 
 
 def test_hdf4_flux_fill_masked_but_footprint_kept(tmp_path: Path) -> None:
@@ -257,6 +282,18 @@ def test_netcdf_canonical_open_matches_hdf4_semantics(tmp_path: Path) -> None:
     np.testing.assert_allclose(ds["lat"].values[[0, -1]], [30.0, -30.0])
     assert float(ds["lon"].values[-1]) == pytest.approx(-10.0)
     assert ds["time"].values[0] == np.datetime64("2026-04-01T00:30:00")
+
+
+def test_netcdf_resolves_model_b_surface_flux_alias(tmp_path: Path) -> None:
+    p = _write_ssf_netcdf(
+        tmp_path / "CER_SSF_NOAA20-FM6-VIIRS_Edition1C_103103.2026040100.nc",
+        nc_var="model_b_surface_shortwave_downward_flux",
+    )
+
+    ds = CERESSSFReader().open([p], variables=["sfc_sw_down"])
+
+    assert set(ds.data_vars) == {"sfc_sw_down"}
+    np.testing.assert_allclose(ds["sfc_sw_down"].values, np.linspace(150.0, 300.0, 6))
 
 
 def test_netcdf_invalid_coord_footprint_dropped(tmp_path: Path) -> None:
