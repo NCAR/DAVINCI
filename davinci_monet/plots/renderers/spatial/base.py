@@ -143,9 +143,10 @@ def draw_spatial_field(
     lons: np.ndarray,
     *,
     plot_type: str,
-    cmap: str,
-    vmin: float,
-    vmax: float,
+    cmap: Any,
+    vmin: float | None,
+    vmax: float | None,
+    norm: Any | None = None,
     marker_size: float,
     alpha: float,
 ) -> Any:
@@ -185,15 +186,20 @@ def draw_spatial_field(
     lats_flat = lats_flat[mask]
     lons_flat = lons_flat[mask]
 
+    color_kwargs: dict[str, Any] = {"cmap": cmap}
+    if norm is not None:
+        color_kwargs["norm"] = norm
+    else:
+        color_kwargs["vmin"] = vmin
+        color_kwargs["vmax"] = vmax
+
     if plot_type == "pcolormesh" and lats.ndim == 2:
         # Curvilinear grid (e.g. swath) — pcolormesh with 2-D coords
         return ax.pcolormesh(
             lons,
             lats,
             data,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
+            **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
         )
@@ -203,9 +209,7 @@ def draw_spatial_field(
             lons,
             lats,
             data.T if data.shape[0] == len(lons) else data,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
+            **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
         )
@@ -215,9 +219,7 @@ def draw_spatial_field(
         lats_flat,
         c=data_flat,
         s=marker_size**2,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        **color_kwargs,
         transform=ccrs.PlateCarree(),
         alpha=alpha,
         edgecolors="none",

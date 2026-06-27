@@ -8,8 +8,11 @@ spatial plot.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 
 from davinci_monet.plots import labeling
@@ -26,7 +29,7 @@ from davinci_monet.plots.renderers.spatial.base import (
     resolve_spatial_coords,
     surface_level_index,
 )
-from davinci_monet.plots.style import get_sequential_cmap
+from davinci_monet.plots.style import geosit_aod_levels, get_geosit_aod_cmap, get_sequential_cmap
 
 if TYPE_CHECKING:
     import matplotlib.axes
@@ -88,6 +91,9 @@ class SpatialPlotter(BaseSpatialPlotter):
         cmap: str | None = None,
         vmin: float | None = None,
         vmax: float | None = None,
+        levels: Sequence[float] | np.ndarray | None = None,
+        extend: str | None = None,
+        style_preset: str | None = None,
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -136,9 +142,38 @@ class SpatialPlotter(BaseSpatialPlotter):
                 fontsize=self.config.text.fontsize,
             )
             return fig
-        if vmin is None:
+        norm = None
+        if style_preset is not None:
+            if style_preset != "geosit_aod":
+                raise ValueError(f"Unknown spatial style_preset: {style_preset}")
+            if levels is None:
+                levels = geosit_aod_levels(finite)
+            if cmap is None:
+                cmap = get_geosit_aod_cmap()
+            if extend is None:
+                extend = "max"
+
+        if levels is not None:
+            levels_arr = np.asarray(levels, dtype=float)
+            if (
+                levels_arr.ndim != 1
+                or levels_arr.size < 2
+                or not np.all(np.isfinite(levels_arr))
+                or not np.all(np.diff(levels_arr) > 0)
+            ):
+                raise ValueError("levels must be a 1-D sequence of at least two increasing values")
+            cmap_obj = plt.get_cmap(cmap or get_sequential_cmap())
+            norm = mcolors.BoundaryNorm(
+                levels_arr,
+                ncolors=cmap_obj.N,
+                extend=extend or "neither",
+            )
+            cmap = cmap_obj
+            vmin = float(levels_arr[0])
+            vmax = float(levels_arr[-1])
+        elif vmin is None:
             vmin = float(np.nanmin(finite))
-        if vmax is None:
+        if levels is None and vmax is None:
             vmax = float(np.nanmax(finite))
 
         cmap = cmap or get_sequential_cmap()
@@ -168,6 +203,7 @@ class SpatialPlotter(BaseSpatialPlotter):
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
+            norm=norm,
             marker_size=ms,
             alpha=a,
         )
@@ -175,11 +211,13 @@ class SpatialPlotter(BaseSpatialPlotter):
         units = get_variable_units(ds, variable)
         # Colorbar carries units only; the title carries the quantity (+ source),
         # so the quantity is not repeated in both places.
+        colorbar_kwargs = {"extend": extend} if norm is not None and extend else {}
         self.add_colorbar(
             fig,
             mappable,
             ax,
             label=labeling.format_units(units),
+            **colorbar_kwargs,
         )
 
         if self.config.title:

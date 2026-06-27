@@ -1,6 +1,7 @@
 """Tests for davinci_monet.plots.style module."""
 
 import matplotlib
+import numpy as np
 import pytest
 
 matplotlib.use("Agg")  # Use non-interactive backend for testing
@@ -211,6 +212,30 @@ class TestColorUtilities:
 
 class TestColormapUtilities:
     """Tests for colormap utility functions."""
+
+    def test_geosit_aod_levels_cap_at_one_with_low_end_detail(self):
+        """GEOSIT AOD levels use fine low-end bins and cap plotted range at 1."""
+        from davinci_monet.plots.style import geosit_aod_levels
+
+        levels = geosit_aod_levels(np.array([0.0, 0.012, 0.4, 2.3, np.nan]))
+
+        np.testing.assert_allclose(levels[:7], [0.0, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05])
+        assert levels[-1] == pytest.approx(1.0)
+        np.testing.assert_allclose(np.diff(levels[6:]), 0.05, atol=1e-12)
+
+    @pytest.mark.parametrize("values", [np.array([]), np.array([np.nan]), np.array([-1.0, 0.0])])
+    def test_geosit_aod_levels_fall_back_for_empty_or_nonpositive_data(self, values):
+        from davinci_monet.plots.style import geosit_aod_levels
+
+        np.testing.assert_allclose(geosit_aod_levels(values), np.linspace(0.0, 1.0, 11))
+
+    def test_get_geosit_aod_cmap(self):
+        """GEOSIT AOD style uses the same color table as the reference plots."""
+        from davinci_monet.plots.style import get_geosit_aod_cmap
+
+        cmap_name = get_geosit_aod_cmap()
+        assert cmap_name == "turbo"
+        plt.get_cmap(cmap_name)
 
     def test_get_bias_cmap(self):
         """get_bias_cmap should return a diverging colormap name."""

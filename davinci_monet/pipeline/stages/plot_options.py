@@ -54,6 +54,9 @@ FORWARDED_COMPARISON_OPTION_KEYS = {
     "split_by_flight",
     "flight_coord",
     "min_points",
+    "style_preset",
+    "levels",
+    "extend",
 }
 
 

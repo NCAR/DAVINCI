@@ -139,11 +139,19 @@ class TestVariableConfig:
                 "vmax_plot": 50.0,
                 "vdiff_plot": 10.0,
                 "nlevels_plot": 20,
+                "style_preset": "geosit_aod",
+                "levels_plot": [0.0, 0.1, 0.5, 1.0],
+                "cmap_plot": "turbo",
+                "extend_plot": "max",
             },
         )
         assert config.unit_scale == 1000.0
         assert config.unit_scale_method == "+"
         assert config.nan_value == -1.0
+        assert config.style_preset == "geosit_aod"
+        assert config.levels_plot == [0.0, 0.1, 0.5, 1.0]
+        assert config.cmap_plot == "turbo"
+        assert config.extend_plot == "max"
 
 
 class TestSourceConfig:

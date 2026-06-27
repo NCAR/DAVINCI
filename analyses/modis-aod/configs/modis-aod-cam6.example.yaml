@@ -118,7 +118,7 @@ plots:
     source: terra_modis
     variable: AOD_550
     title: "MODIS Terra AOD (550 nm)"
-    cmap: turbo
+    style_preset: geosit_aod
 
   aod_bias_base_terra:
     type: spatial_bias

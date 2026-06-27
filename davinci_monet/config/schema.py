@@ -194,6 +194,14 @@ class VariableConfig(StrictSchema):
         +/- range for bias plots.
     nlevels_plot
         Number of contour levels.
+    style_preset
+        Named renderer style preset, e.g. "geosit_aod" for AOD maps.
+    levels_plot
+        Explicit contour or color-bin boundaries for plots.
+    cmap_plot
+        Matplotlib colormap name for plots.
+    extend_plot
+        Colorbar extension mode: "neither", "both", "min", or "max".
     LLOD_value
         Lower limit of detection value.
     LLOD_setvalue
@@ -217,6 +225,10 @@ class VariableConfig(StrictSchema):
     vmax_plot: float | None = None
     vdiff_plot: float | None = None
     nlevels_plot: int | None = None
+    style_preset: str | None = None
+    levels_plot: list[float] | None = None
+    cmap_plot: str | None = None
+    extend_plot: Literal["neither", "both", "min", "max"] | None = None
     LLOD_value: float | None = None
     LLOD_setvalue: float | None = None
     need: bool | None = None

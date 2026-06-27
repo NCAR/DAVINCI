@@ -17,6 +17,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 import xarray as xr  # noqa: E402
 from matplotlib.collections import PathCollection, QuadMesh  # noqa: E402
+from matplotlib.colors import BoundaryNorm  # noqa: E402
 
 from davinci_monet.plots.base import build_series  # noqa: E402
 from davinci_monet.plots.renderers.spatial.field import SpatialPlotter  # noqa: E402
@@ -36,6 +37,17 @@ def _render(ds: xr.Dataset, var: str) -> tuple[plt.Figure, plt.Axes]:
 
 def _has(ax: plt.Axes, cls: type) -> bool:
     return any(isinstance(c, cls) for c in ax.collections)
+
+
+def _aod_grid() -> xr.Dataset:
+    lat = np.array([-1.0, 1.0])
+    lon = np.array([0.0, 90.0, 180.0, 270.0])
+    aod = np.array([[0.0, 0.012, 0.4, 1.4], [0.005, 0.03, 0.8, 1.2]])
+    return xr.Dataset(
+        {"aod": (("latitude", "longitude"), aod, {"units": "1"})},
+        coords={"latitude": lat, "longitude": lon},
+        attrs={"geometry": "grid"},
+    )
 
 
 def test_domain_type_sets_fixed_map_extent():
@@ -121,6 +133,46 @@ def test_grid_slices_surface_not_toa():
     assert np.nanmin(arr) == pytest.approx(2.0)
     assert np.nanmax(arr) == pytest.approx(2.0)
     plt.close(fig)
+
+
+def test_geosit_aod_style_preset_uses_boundary_norm_and_turbo_colormap():
+    fig = SpatialPlotter().render(build_series(_aod_grid(), "aod"), style_preset="geosit_aod")
+    ax = fig.axes[0]
+    qm = next(c for c in ax.collections if isinstance(c, QuadMesh))
+
+    assert isinstance(qm.norm, BoundaryNorm)
+    assert qm.cmap.name == "turbo"
+    np.testing.assert_allclose(
+        qm.norm.boundaries[:7],
+        [0.0, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05],
+    )
+    assert qm.norm.boundaries[-1] == pytest.approx(1.0)
+    assert len(fig.axes) >= 2, "expected a colorbar axes"
+    plt.close(fig)
+
+
+def test_spatial_plot_accepts_explicit_discrete_levels_and_colorbar_extend():
+    levels = [0.0, 0.1, 0.5, 1.0]
+
+    fig = SpatialPlotter().render(
+        build_series(_aod_grid(), "aod"),
+        levels=levels,
+        cmap="turbo",
+        extend="max",
+    )
+    ax = fig.axes[0]
+    qm = next(c for c in ax.collections if isinstance(c, QuadMesh))
+
+    assert isinstance(qm.norm, BoundaryNorm)
+    np.testing.assert_allclose(qm.norm.boundaries, levels)
+    assert qm.cmap.name == "turbo"
+    assert len(fig.axes) >= 2, "expected a colorbar axes"
+    plt.close(fig)
+
+
+def test_unknown_spatial_style_preset_is_rejected():
+    with pytest.raises(ValueError, match="Unknown spatial style_preset"):
+        SpatialPlotter().render(build_series(_aod_grid(), "aod"), style_preset="not-a-style")
 
 
 @pytest.mark.integration

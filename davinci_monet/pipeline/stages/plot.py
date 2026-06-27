@@ -370,6 +370,10 @@ class PlottingStage(BaseStage):
         vmax = var_config.get("vmax_plot")
         vdiff = var_config.get("vdiff_plot")
         nlevels = var_config.get("nlevels_plot")
+        style_preset = var_config.get("style_preset")
+        levels = var_config.get("levels_plot")
+        cmap = var_config.get("cmap_plot")
+        extend = var_config.get("extend_plot")
 
         # Build plotter config
         plotter_config: dict[str, Any] = {"title": title}
@@ -393,6 +397,14 @@ class PlottingStage(BaseStage):
             analysis_config,
             nlevels=nlevels,
         )
+        if style_preset is not None:
+            plot_options.setdefault("style_preset", style_preset)
+        if levels is not None:
+            plot_options.setdefault("levels", levels)
+        if cmap is not None:
+            plot_options.setdefault("cmap", cmap)
+        if extend is not None:
+            plot_options.setdefault("extend", extend)
 
         # spatial_overlay needs the raw gridded y field for the
         # contour layer; the paired dataset usually carries sampled
