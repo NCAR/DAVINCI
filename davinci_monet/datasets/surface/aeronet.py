@@ -150,8 +150,12 @@ class AERONETReader:
         mio_kwargs.update(kwargs)
 
         try:
+            # monetio's add_data(dates, product, ...) takes a SINGLE array-like `dates`
+            # (it uses its min/max for the query window). Passing start_date AND end_date
+            # as two positionals binds end_date to `product` -> "multiple values for
+            # 'product'". Pass them as one list instead.
             df: pd.DataFrame = aeronet_module.add_data(
-                start_date, end_date, product=product, **mio_kwargs
+                [start_date, end_date], product=product, **mio_kwargs
             )
         except Exception as e:
             raise DataFormatError(f"Failed to query AERONET data: {e}") from e
