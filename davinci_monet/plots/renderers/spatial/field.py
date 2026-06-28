@@ -94,6 +94,8 @@ class SpatialPlotter(BaseSpatialPlotter):
         levels: Sequence[float] | np.ndarray | None = None,
         extend: str | None = None,
         style_preset: str | None = None,
+        robust: bool = False,
+        robust_pct: Sequence[float] = (2.0, 98.0),
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -171,6 +173,8 @@ class SpatialPlotter(BaseSpatialPlotter):
             cmap = cmap_obj
             vmin = float(levels_arr[0])
             vmax = float(levels_arr[-1])
+        elif vmin is None and vmax is None and robust:
+            vmin, vmax = (float(v) for v in np.nanpercentile(finite, robust_pct))
         elif vmin is None:
             vmin = float(np.nanmin(finite))
         if levels is None and vmax is None:

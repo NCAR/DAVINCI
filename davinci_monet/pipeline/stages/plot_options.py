@@ -57,6 +57,8 @@ FORWARDED_COMPARISON_OPTION_KEYS = {
     "style_preset",
     "levels",
     "extend",
+    "robust",
+    "robust_pct",
 }
 
 

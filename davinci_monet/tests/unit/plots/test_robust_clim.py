@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
+import xarray as xr  # noqa: E402
+from matplotlib.collections import QuadMesh  # noqa: E402
+
+from davinci_monet.plots.base import build_series  # noqa: E402
+from davinci_monet.plots.renderers.spatial.field import SpatialPlotter  # noqa: E402
+
+
+def _heavy_tailed_grid() -> xr.Dataset:
+    data = np.array([0.1] * 100 + [50.0], dtype=float).reshape(1, 101)
+    return xr.Dataset(
+        {"aod": (("latitude", "longitude"), data, {"units": "1"})},
+        coords={
+            "latitude": np.array([0.0]),
+            "longitude": np.arange(101.0),
+        },
+        attrs={"geometry": "grid"},
+    )
+
+
+def _quadmesh_clim(fig):
+    ax = fig.axes[0]
+    mesh = next(c for c in ax.collections if isinstance(c, QuadMesh))
+    return mesh.get_clim()
+
+
+def test_spatial_plotter_robust_color_limits_ignore_outlier():
+    fig = SpatialPlotter().render(build_series(_heavy_tailed_grid(), "aod"), robust=True)
+    _, vmax = _quadmesh_clim(fig)
+    assert vmax < 1.0
+    plt.close(fig)
+
+
+def test_spatial_plotter_default_color_limits_use_full_data_range():
+    fig = SpatialPlotter().render(build_series(_heavy_tailed_grid(), "aod"), robust=False)
+    _, vmax = _quadmesh_clim(fig)
+    assert vmax == pytest.approx(50.0)
+    plt.close(fig)
