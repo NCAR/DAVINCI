@@ -1,6 +1,11 @@
 import numpy as np
 
 from davinci_monet.pairing.grid_binning import bin_points_to_grid_4d, normalize_grid
+from davinci_monet.pairing.grid_binning import (
+    bin_swath_to_grid,
+    bin_swath_to_grid_uncertainty,
+    normalize_uncertainty_grid,
+)
 
 
 def test_bin_points_to_grid_4d_accumulates_by_cell():
@@ -20,3 +25,97 @@ def test_bin_points_to_grid_4d_accumulates_by_cell():
     assert count[0, 0, 0, 0] == 2 and acc[0, 0, 0, 0] == 3.0  # mean(2,4)
     assert count[1, 1, 1, 1] == 1 and acc[1, 1, 1, 1] == 9.0
     assert np.isnan(acc[0, 1, 0, 1])  # empty cell
+
+
+def test_uncertainty_binning_inverse_variance_mean_and_sigma():
+    edges = np.array([0.0, 1.0, 2.0])
+    time = np.array([0.5, 0.5])
+    lon = np.array([0.5, 0.5])
+    lat = np.array([0.5, 0.5])
+    data = np.array([0.4, 0.8])
+    sigma = np.array([0.1, 0.2])
+    count = np.zeros((1, 2, 2), dtype=np.int64)
+    weight = np.zeros((1, 2, 2))
+    weighted_sum = np.zeros((1, 2, 2))
+    bin_swath_to_grid_uncertainty(
+        np.array([0.0, 1.0]),
+        edges,
+        edges,
+        time,
+        lon,
+        lat,
+        data,
+        sigma,
+        count,
+        weight,
+        weighted_sum,
+    )
+    mean, combined_sigma = normalize_uncertainty_grid(count, weight, weighted_sum)
+    w1, w2 = 1 / 0.1**2, 1 / 0.2**2
+    assert count[0, 0, 0] == 2
+    assert np.isclose(mean[0, 0, 0], (w1 * 0.4 + w2 * 0.8) / (w1 + w2))
+    assert np.isclose(combined_sigma[0, 0, 0], np.sqrt(1 / (w1 + w2)))
+    assert np.isnan(mean[0, 1, 1])
+    assert np.isnan(combined_sigma[0, 1, 1])
+
+
+def test_uncertainty_binning_skips_bad_sigma_and_matches_base_count():
+    edges = np.array([0.0, 1.0, 2.0])
+    time = np.array([0.5, 0.5, 0.5])
+    lon = np.array([0.5, 0.5, 1.5])
+    lat = np.array([0.5, 0.5, 1.5])
+    data = np.array([0.4, 0.6, 0.9])
+    sigma = np.array([0.1, -1.0, 0.2])
+    count = np.zeros((1, 2, 2), dtype=np.int64)
+    weight = np.zeros((1, 2, 2))
+    weighted_sum = np.zeros((1, 2, 2))
+    bin_swath_to_grid_uncertainty(
+        np.array([0.0, 1.0]),
+        edges,
+        edges,
+        time,
+        lon,
+        lat,
+        data,
+        sigma,
+        count,
+        weight,
+        weighted_sum,
+    )
+    assert count[0, 0, 0] == 1
+    assert count[0, 1, 1] == 1
+    mean, _ = normalize_uncertainty_grid(count, weight, weighted_sum)
+    assert np.isclose(mean[0, 0, 0], 0.4)
+
+    base_count = np.zeros((1, 2, 2), dtype=np.int64)
+    base_sum = np.zeros((1, 2, 2))
+    bin_swath_to_grid(
+        np.array([0.0, 1.0]),
+        edges,
+        edges,
+        np.array([0.5, 0.5]),
+        np.array([0.5, 0.5]),
+        np.array([0.5, 0.5]),
+        np.array([0.4, 0.8]),
+        base_count,
+        base_sum,
+    )
+    unc_count = np.zeros((1, 2, 2), dtype=np.int64)
+    unc_weight = np.zeros((1, 2, 2))
+    unc_weighted_sum = np.zeros((1, 2, 2))
+    bin_swath_to_grid_uncertainty(
+        np.array([0.0, 1.0]),
+        edges,
+        edges,
+        np.array([0.5, 0.5]),
+        np.array([0.5, 0.5]),
+        np.array([0.5, 0.5]),
+        np.array([0.4, 0.8]),
+        np.full(2, 0.1),
+        unc_count,
+        unc_weight,
+        unc_weighted_sum,
+    )
+    assert np.array_equal(base_count, unc_count)
+    unc_mean, _ = normalize_uncertainty_grid(unc_count, unc_weight, unc_weighted_sum)
+    assert np.isclose(unc_mean[0, 0, 0], (0.4 + 0.8) / 2)

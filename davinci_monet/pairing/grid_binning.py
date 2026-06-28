@@ -113,6 +113,77 @@ def normalize_grid(
 
 
 @numba.jit(nopython=True)
+def bin_swath_to_grid_uncertainty(
+    time_edges: np.ndarray,
+    lon_edges: np.ndarray,
+    lat_edges: np.ndarray,
+    time_values: np.ndarray,
+    lon_values: np.ndarray,
+    lat_values: np.ndarray,
+    data_values: np.ndarray,
+    sigma_values: np.ndarray,
+    count_grid: np.ndarray,
+    weight_grid: np.ndarray,
+    weighted_sum_grid: np.ndarray,
+) -> None:
+    """Accumulate inverse-variance swath pixels into grid cells."""
+
+    dt = time_edges[1] - time_edges[0]
+    dx = lon_edges[1] - lon_edges[0]
+    dy = lat_edges[1] - lat_edges[0]
+    nt, nx, ny = count_grid.shape
+    for i in range(len(data_values)):
+        if (
+            math.isfinite(data_values[i])
+            and math.isfinite(sigma_values[i])
+            and sigma_values[i] > 0.0
+            and math.isfinite(time_values[i])
+            and math.isfinite(lon_values[i])
+            and math.isfinite(lat_values[i])
+            and time_values[i] >= time_edges[0]
+            and time_values[i] <= time_edges[-1]
+            and lon_values[i] >= lon_edges[0]
+            and lon_values[i] <= lon_edges[-1]
+            and lat_values[i] >= lat_edges[0]
+            and lat_values[i] <= lat_edges[-1]
+        ):
+            it = int((time_values[i] - time_edges[0]) / dt)
+            ix = int((lon_values[i] - lon_edges[0]) / dx)
+            iy = int((lat_values[i] - lat_edges[0]) / dy)
+            if it < 0:
+                it = 0
+            elif it >= nt:
+                it = nt - 1
+            if ix < 0:
+                ix = 0
+            elif ix >= nx:
+                ix = nx - 1
+            if iy < 0:
+                iy = 0
+            elif iy >= ny:
+                iy = ny - 1
+            weight = 1.0 / (sigma_values[i] * sigma_values[i])
+            count_grid[it, ix, iy] += 1
+            weight_grid[it, ix, iy] += weight
+            weighted_sum_grid[it, ix, iy] += weight * data_values[i]
+
+
+def normalize_uncertainty_grid(
+    count_grid: np.ndarray,
+    weight_grid: np.ndarray,
+    weighted_sum_grid: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Convert inverse-variance sums to mean and combined sigma grids."""
+
+    mask = (count_grid > 0) & (weight_grid > 0.0)
+    mean_grid = np.full(weighted_sum_grid.shape, np.nan, dtype=np.float64)
+    sigma_grid = np.full(weight_grid.shape, np.nan, dtype=np.float64)
+    mean_grid[mask] = weighted_sum_grid[mask] / weight_grid[mask]
+    sigma_grid[mask] = np.sqrt(1.0 / weight_grid[mask])
+    return mean_grid, sigma_grid
+
+
+@numba.jit(nopython=True)
 def bin_points_to_grid_4d(
     time_edges: np.ndarray,
     lon_edges: np.ndarray,
