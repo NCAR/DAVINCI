@@ -20,6 +20,7 @@ from matplotlib.collections import PathCollection, QuadMesh  # noqa: E402
 from matplotlib.colors import BoundaryNorm  # noqa: E402
 
 from davinci_monet.plots.base import build_series  # noqa: E402
+from davinci_monet.plots.renderers.spatial.base import MapConfig  # noqa: E402
 from davinci_monet.plots.renderers.spatial.field import SpatialPlotter  # noqa: E402
 from davinci_monet.tests.synthetic.geometries import (  # noqa: E402
     create_gridded_geometries,
@@ -148,6 +149,28 @@ def test_geosit_aod_style_preset_uses_boundary_norm_and_turbo_colormap():
     )
     assert qm.norm.boundaries[-1] == pytest.approx(1.0)
     assert len(fig.axes) >= 2, "expected a colorbar axes"
+    plt.close(fig)
+
+
+def test_map_config_controls_gridline_style(monkeypatch):
+    plotter = SpatialPlotter(map_config=MapConfig(show_gridlines=True, gridline_style="-"))
+    fig, ax = plotter.create_map_figure()
+    captured = {}
+
+    def fake_gridlines(**kwargs):
+        captured.update(kwargs)
+
+        class FakeGridliner:
+            top_labels = True
+            right_labels = True
+
+        return FakeGridliner()
+
+    monkeypatch.setattr(ax, "gridlines", fake_gridlines)
+
+    plotter.add_map_features(ax)
+
+    assert captured["linestyle"] == "-"
     plt.close(fig)
 
 
