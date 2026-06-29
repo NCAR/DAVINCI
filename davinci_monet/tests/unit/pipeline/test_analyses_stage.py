@@ -83,7 +83,7 @@ def test_stage_registers_derived_sources_in_order(_fake_eof_registered) -> None:
     assert ctx.sources["pc1_wav"].geometry is DataGeometry.SPECTRUM
 
 
-def test_stage_defaults_gridded_analysis_source_label_to_analysis_key() -> None:
+def test_stage_defaults_gridded_analysis_source_label_to_analysis_key(tmp_path) -> None:
     time = np.array(["2008-07-01T00:00", "2008-07-01T03:00"], dtype="datetime64[ns]")
     cam = SourceData(
         data=xr.Dataset(
@@ -99,6 +99,7 @@ def test_stage_defaults_gridded_analysis_source_label_to_analysis_key() -> None:
     )
     ctx = PipelineContext(
         config={
+            "analysis": {"output_dir": str(tmp_path)},
             "sources": {
                 "cam": {"type": "generic", "files": "cam.nc", "variables": {"AOD": {}, "MASK": {}}}
             },
