@@ -193,6 +193,7 @@ class TestGeometryOnlyPipelineDetection:
             "plotting",
             "save_results",
             "summary",
+            "manifest",
         ]
 
     @pytest.mark.integration

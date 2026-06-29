@@ -20,6 +20,8 @@ The implementation is split across submodules for maintainability; this
 - module `~davinci_monet.pipeline.stages.plot` — :class:`PlottingStage`.
 - module `~davinci_monet.pipeline.stages.io` — :class:`SaveResultsStage`.
 - module `~davinci_monet.pipeline.stages.summary` — :class:`SummaryStage`.
+- module `~davinci_monet.pipeline.stages.manifest` —
+  :class:`ManifestStage`.
 - module `~davinci_monet.pipeline.stages.factory` — pipeline constructors.
 """
 
@@ -48,6 +50,7 @@ from davinci_monet.pipeline.stages.helpers import (
 )
 from davinci_monet.pipeline.stages.io import SaveResultsStage
 from davinci_monet.pipeline.stages.load import LoadSourcesStage
+from davinci_monet.pipeline.stages.manifest import ManifestStage
 from davinci_monet.pipeline.stages.pair import PairingStage
 from davinci_monet.pipeline.stages.plot import PlottingStage
 from davinci_monet.pipeline.stages.stats import StatisticsStage
@@ -76,6 +79,7 @@ __all__ = [
     "PlottingStage",
     "SaveResultsStage",
     "SummaryStage",
+    "ManifestStage",
     # Pipeline factories
     "create_standard_pipeline",
     "create_geometry_pipeline",
