@@ -189,6 +189,7 @@ class TestGeometryOnlyPipelineDetection:
         assert stage_names == [
             "load_sources",
             "analyses",
+            "plot_suites",
             "statistics",
             "plotting",
             "save_results",

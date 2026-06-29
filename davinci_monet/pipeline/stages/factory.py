@@ -12,6 +12,7 @@ from davinci_monet.pipeline.stages.load import LoadSourcesStage
 from davinci_monet.pipeline.stages.manifest import ManifestStage
 from davinci_monet.pipeline.stages.pair import PairingStage
 from davinci_monet.pipeline.stages.plot import PlottingStage
+from davinci_monet.pipeline.stages.plot_suites import PlotSuiteStage
 from davinci_monet.pipeline.stages.stats import StatisticsStage
 from davinci_monet.pipeline.stages.summary import SummaryStage
 
@@ -28,6 +29,7 @@ def create_standard_pipeline() -> list[BaseStage]:
     return [
         LoadSourcesStage(),
         AnalysesStage(),
+        PlotSuiteStage(),
         PairingStage(),
         StatisticsStage(),
         PlottingStage(),
@@ -48,6 +50,7 @@ def create_geometry_pipeline() -> list[BaseStage]:
     return [
         LoadSourcesStage(),
         AnalysesStage(),
+        PlotSuiteStage(),
         StatisticsStage(),
         PlottingStage(),
         SaveResultsStage(),

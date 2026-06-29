@@ -9,7 +9,7 @@ spatial plot.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -17,6 +17,7 @@ import numpy as np
 
 from davinci_monet.plots import labeling
 from davinci_monet.plots.base import (
+    calculate_symmetric_limits,
     get_variable_label,
     get_variable_units,
 )
@@ -47,6 +48,7 @@ _LEVEL_DIMS = ["lev", "level", "z", "vertical"]
 _MESH_SHAPES = {"grid", "swath", "regular_grid", "curvilinear_grid"}
 # Shapes whose ``time`` dim is the sampling path, not something to average over.
 _PATH_SHAPES = {"track", "profile"}
+_ColorbarExtend = Literal["neither", "both", "min", "max"]
 
 
 @register_plotter("spatial")
@@ -96,6 +98,7 @@ class SpatialPlotter(BaseSpatialPlotter):
         style_preset: str | None = None,
         robust: bool = False,
         robust_pct: Sequence[float] = (2.0, 98.0),
+        symmetric: bool = False,
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -124,12 +127,12 @@ class SpatialPlotter(BaseSpatialPlotter):
         if ax is None:
             fig, ax = self.create_map_figure()
         else:
-            fig = ax.get_figure()  # type: ignore[assignment]
+            fig = ax.get_figure()
         self.add_map_features(ax)
 
         extent = self._resolve_extent(domain_type, domain_name)
         if extent is not None:
-            ax.set_extent(extent)  # type: ignore[attr-defined]
+            getattr(ax, "set_extent")(extent)
 
         values = field.values
         finite = values[np.isfinite(values)]
@@ -144,7 +147,7 @@ class SpatialPlotter(BaseSpatialPlotter):
                 fontsize=self.config.text.fontsize,
             )
             return fig
-        norm = None
+        norm: mcolors.Normalize | None = None
         if style_preset is not None:
             if style_preset != "geosit_aod":
                 raise ValueError(f"Unknown spatial style_preset: {style_preset}")
@@ -168,17 +171,31 @@ class SpatialPlotter(BaseSpatialPlotter):
             norm = mcolors.BoundaryNorm(
                 levels_arr,
                 ncolors=cmap_obj.N,
-                extend=extend or "neither",
+                extend=cast(_ColorbarExtend, extend or "neither"),
             )
             cmap = cmap_obj
             vmin = float(levels_arr[0])
             vmax = float(levels_arr[-1])
         elif vmin is None and vmax is None and robust:
-            vmin, vmax = (float(v) for v in np.nanpercentile(finite, robust_pct))
+            if symmetric:
+                percentile = float(max(robust_pct)) if robust_pct else 98.0
+                vmin, vmax = calculate_symmetric_limits(finite, percentile=percentile)
+            else:
+                robust_limits = np.asarray(np.nanpercentile(finite, robust_pct), dtype=float)
+                vmin = float(robust_limits[0])
+                vmax = float(robust_limits[1])
         elif vmin is None:
             vmin = float(np.nanmin(finite))
         if levels is None and vmax is None:
             vmax = float(np.nanmax(finite))
+        if (
+            levels is None
+            and symmetric
+            and vmin is not None
+            and vmax is not None
+            and vmin < 0 < vmax
+        ):
+            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
         cmap = cmap or get_sequential_cmap()
         style = self.config.style

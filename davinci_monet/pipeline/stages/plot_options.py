@@ -19,6 +19,7 @@ SINGLE_SOURCE_SCHEMA_KEYS = {
     "domain_name",
     "pairs",
     "data_proc",
+    "output_subdir",
 }
 
 

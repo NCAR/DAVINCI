@@ -15,6 +15,8 @@ The implementation is split across submodules for maintainability; this
 - module `~davinci_monet.pipeline.stages.helpers` — module-level helpers
   (dataset labels, variable resolution, formatters).
 - module `~davinci_monet.pipeline.stages.load` — :class:`LoadSourcesStage`.
+- module `~davinci_monet.pipeline.stages.plot_suites` —
+  :class:`PlotSuiteStage`.
 - module `~davinci_monet.pipeline.stages.pair` — :class:`PairingStage`.
 - module `~davinci_monet.pipeline.stages.stats` — :class:`StatisticsStage`.
 - module `~davinci_monet.pipeline.stages.plot` — :class:`PlottingStage`.
@@ -53,6 +55,7 @@ from davinci_monet.pipeline.stages.load import LoadSourcesStage
 from davinci_monet.pipeline.stages.manifest import ManifestStage
 from davinci_monet.pipeline.stages.pair import PairingStage
 from davinci_monet.pipeline.stages.plot import PlottingStage
+from davinci_monet.pipeline.stages.plot_suites import PlotSuiteStage
 from davinci_monet.pipeline.stages.stats import StatisticsStage
 from davinci_monet.pipeline.stages.summary import SummaryStage
 
@@ -74,6 +77,7 @@ __all__ = [
     # Stage classes
     "AnalysesStage",
     "LoadSourcesStage",
+    "PlotSuiteStage",
     "PairingStage",
     "StatisticsStage",
     "PlottingStage",

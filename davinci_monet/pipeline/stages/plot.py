@@ -122,6 +122,7 @@ class PlottingStage(BaseStage):
         advancing the shared preview ``file_index`` for mixed dispatch runs.
         """
         import logging
+        from pathlib import Path
 
         import matplotlib.pyplot as plt
         import numpy as np
@@ -154,6 +155,12 @@ class PlottingStage(BaseStage):
             plot_spec,
             analysis_config=analysis_config,
         )
+        plot_output_dir = output_dir
+        output_subdir = plot_spec.get("output_subdir")
+        if output_subdir:
+            subdir = Path(str(output_subdir))
+            plot_output_dir = subdir if subdir.is_absolute() else output_dir / subdir
+        plot_output_dir.mkdir(parents=True, exist_ok=True)
 
         has_flights = "flight" in ds.coords
         flight_ids = sorted(set(np.unique(ds["flight"].values).tolist())) if has_flights else [None]
@@ -204,11 +211,11 @@ class PlottingStage(BaseStage):
                     figures = [(None, result)]
                 for fig_label, fig in figures:
                     fig_suffix = f"_{fig_label}" if fig_label else ""
-                    out_path = output_dir / f"{plot_name}{suffix}{fig_suffix}.png"
+                    out_path = plot_output_dir / f"{plot_name}{suffix}{fig_suffix}.png"
                     plotter.save(fig, out_path)
                     plots_generated.append(str(out_path))
                     # Also save PDF (parity with the comparison path)
-                    pdf_path = output_dir / f"{plot_name}{suffix}{fig_suffix}.pdf"
+                    pdf_path = plot_output_dir / f"{plot_name}{suffix}{fig_suffix}.pdf"
                     plotter.save(fig, pdf_path)
                     plots_generated.append(str(pdf_path))
                     plt.close(fig)
