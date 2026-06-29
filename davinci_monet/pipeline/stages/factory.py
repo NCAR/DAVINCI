@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from davinci_monet.pipeline.stages.analyses import AnalysesStage
 from davinci_monet.pipeline.stages.base import BaseStage
+from davinci_monet.pipeline.stages.inspection import InspectionStage
 from davinci_monet.pipeline.stages.io import SaveResultsStage
 from davinci_monet.pipeline.stages.load import LoadSourcesStage
 from davinci_monet.pipeline.stages.manifest import ManifestStage
@@ -35,6 +36,7 @@ def create_standard_pipeline() -> list[BaseStage]:
         PlottingStage(),
         SaveResultsStage(),
         SummaryStage(),
+        InspectionStage(),
         ManifestStage(),
     ]
 
@@ -55,5 +57,6 @@ def create_geometry_pipeline() -> list[BaseStage]:
         PlottingStage(),
         SaveResultsStage(),
         SummaryStage(),
+        InspectionStage(),
         ManifestStage(),
     ]

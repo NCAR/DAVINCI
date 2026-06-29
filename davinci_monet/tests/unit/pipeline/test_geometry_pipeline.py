@@ -194,6 +194,7 @@ class TestGeometryOnlyPipelineDetection:
             "plotting",
             "save_results",
             "summary",
+            "inspection",
             "manifest",
         ]
 
