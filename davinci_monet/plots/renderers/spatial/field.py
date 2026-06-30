@@ -8,7 +8,8 @@ spatial plot.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import re
+from collections.abc import Hashable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import matplotlib.colors as mcolors
@@ -74,13 +75,25 @@ class SpatialPlotter(BaseSpatialPlotter):
         series: list[PlotSeries],
         ax: matplotlib.axes.Axes | None = None,
         **kwargs: Any,
-    ) -> matplotlib.figure.Figure:
+    ) -> matplotlib.figure.Figure | list[tuple[str, matplotlib.figure.Figure]]:
         """Render a single source's field on a map (exactly 1 series)."""
         if len(series) != 1:
             raise NotImplementedError(
                 f"SpatialPlotter.render requires exactly 1 series; got {len(series)}."
             )
         s = series[0]
+        split_dim = self._split_dim_for_field(s.dataset, s.var_name, **kwargs)
+        if split_dim is not None:
+            figures: list[tuple[str, matplotlib.figure.Figure]] = []
+            for idx, label in self._iter_split_labels(s.dataset, split_dim):
+                subset = s.dataset.isel({split_dim: idx}, drop=True)
+                figures.append(
+                    (
+                        self._format_split_label(label),
+                        self._plot(subset, s.var_name, s.source_label, ax=ax, **kwargs),
+                    )
+                )
+            return figures
         return self._plot(s.dataset, s.var_name, s.source_label, ax=ax, **kwargs)
 
     def _plot(
@@ -120,6 +133,7 @@ class SpatialPlotter(BaseSpatialPlotter):
         field = self._reduce_vertical(field, level_index)
         # Collapse time unless it is the sampling path (track/profile).
         field = self._reduce_time(field, shape, time_average, time_index)
+        field = self._squeeze_singleton_non_spatial_dims(ds, field, lat_var, lon_var)
 
         lats, lons, field = self._resolve_coords(ds, field, lat_var, lon_var)
         plot_type = "pcolormesh" if shape in _MESH_SHAPES else "scatter"
@@ -303,6 +317,83 @@ class SpatialPlotter(BaseSpatialPlotter):
         if time_average:
             return field.mean(dim="time")
         return field
+
+    def _squeeze_singleton_non_spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> xr.DataArray:
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        indexers = {
+            dim: 0 for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim) == 1
+        }
+        if not indexers:
+            return field
+        return field.isel(indexers, drop=True)
+
+    def _split_dim_for_field(
+        self,
+        ds: xr.Dataset,
+        variable: str,
+        *,
+        time_average: bool = True,
+        time_index: int | None = None,
+        level_index: int | str = "surface",
+        lat_var: str = "latitude",
+        lon_var: str = "longitude",
+        **_: Any,
+    ) -> Hashable | None:
+        field = ds[variable]
+        shape = self._resolve_shape(ds, variable, field, lat_var, lon_var)
+        field = self._reduce_vertical(field, level_index)
+        field = self._reduce_time(field, shape, time_average, time_index)
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        split_dims = [
+            dim for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim, 0) > 1
+        ]
+        if not split_dims:
+            return None
+        if len(split_dims) > 1:
+            dims = ", ".join(str(dim) for dim in split_dims)
+            raise NotImplementedError(
+                f"SpatialPlotter can split over one non-spatial dimension; got {dims}."
+            )
+        return split_dims[0]
+
+    def _spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> set[Hashable]:
+        spatial_dims: set[Hashable] = set()
+        for coord_name in (
+            self._resolve_coord_name(ds, _LAT_CANDIDATES, lat_var),
+            self._resolve_coord_name(ds, _LON_CANDIDATES, lon_var),
+        ):
+            if coord_name is None:
+                continue
+            if coord_name in field.dims:
+                spatial_dims.add(coord_name)
+            if coord_name in ds:
+                spatial_dims.update(dim for dim in ds[coord_name].dims if dim in field.dims)
+        return spatial_dims
+
+    @staticmethod
+    def _iter_split_labels(ds: xr.Dataset, dim: Hashable) -> list[tuple[int, Any]]:
+        size = ds.sizes[dim]
+        if dim in ds.coords:
+            return list(enumerate(ds.coords[dim].values))
+        return [(idx, idx) for idx in range(size)]
+
+    @staticmethod
+    def _format_split_label(label: Any) -> str:
+        text = str(label)
+        text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip("-")
+        return text or "group"
 
     def _resolve_coords(
         self,

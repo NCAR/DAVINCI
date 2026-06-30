@@ -48,8 +48,8 @@ def _paired() -> xr.Dataset:
     return ds
 
 
-def test_plotting_stage_renders_pairwise_and_single_source_specs(tmp_path) -> None:
-    context = PipelineContext(
+def _context(tmp_path, plots: dict[str, dict[str, object]]) -> PipelineContext:
+    return PipelineContext(
         config={
             "analysis": {"output_dir": str(tmp_path)},
             "sources": {
@@ -62,10 +62,7 @@ def test_plotting_stage_renders_pairwise_and_single_source_specs(tmp_path) -> No
                     "y": {"source": "model", "variable": "O3"},
                 }
             },
-            "plots": {
-                "scatter_o3": {"type": "scatter", "pairs": ["model_vs_obs"]},
-                "obs_map": {"type": "spatial", "source": "obs", "variable": "O3"},
-            },
+            "plots": plots,
         },
         sources={
             "obs": _source("obs", np.array([[30.0, 32.0], [31.0, 33.0]])),
@@ -74,9 +71,39 @@ def test_plotting_stage_renders_pairwise_and_single_source_specs(tmp_path) -> No
         paired={"model_vs_obs": _paired()},
     )
 
+
+def test_plotting_stage_renders_pairwise_and_single_source_specs(tmp_path) -> None:
+    context = _context(
+        tmp_path,
+        {
+            "scatter_o3": {"type": "scatter", "pairs": ["model_vs_obs"]},
+            "obs_map": {"type": "spatial", "source": "obs", "variable": "O3"},
+        },
+    )
+
     result = PlottingStage().execute(context)
 
     assert result.status.name == "COMPLETED"
     generated = result.data["plots_generated"]
     assert any("scatter_o3" in path for path in generated)
     assert any("obs_map" in path for path in generated)
+
+
+def test_plotting_stage_honors_pairwise_plot_formats(tmp_path) -> None:
+    context = _context(
+        tmp_path,
+        {"scatter.o3": {"type": "scatter", "pairs": ["model_vs_obs"], "formats": ["pdf"]}},
+    )
+    stale_png = tmp_path / "obs" / "00_scatter.o3.png"
+    stale_png.parent.mkdir(parents=True, exist_ok=True)
+    stale_png.write_text("stale")
+
+    result = PlottingStage().execute(context)
+
+    assert result.status.name == "COMPLETED"
+    generated = result.data["plots_generated"]
+    assert any(path.endswith("scatter.o3.pdf") for path in generated)
+    assert not any(path.endswith("scatter.o3.png") for path in generated)
+    assert not stale_png.exists()
+    assert not (tmp_path / "obs" / "00_scatter.pdf").exists()
+    assert list(tmp_path.rglob("*.png")) == []

@@ -31,8 +31,13 @@ from davinci_monet.tests.synthetic.geometries import (  # noqa: E402
 )
 
 
+def _single_figure(result: plt.Figure | list[tuple[str, plt.Figure]]) -> plt.Figure:
+    assert not isinstance(result, list)
+    return result
+
+
 def _render(ds: xr.Dataset, var: str) -> tuple[plt.Figure, plt.Axes]:
-    fig = SpatialPlotter().render(build_series(ds, var))
+    fig = _single_figure(SpatialPlotter().render(build_series(ds, var)))
     return fig, fig.axes[0]  # GeoAxes is created first; colorbar is a later axes
 
 
@@ -55,12 +60,12 @@ def test_domain_type_sets_fixed_map_extent():
     """A named domain pins the map extent so sparse-data maps aren't auto-clipped
     to their few sites — every map shares the same fixed extent."""
     ds = create_point_geometries()
-    fig = SpatialPlotter().render(build_series(ds, "O3"), domain_type="asia_aq")
+    fig = _single_figure(SpatialPlotter().render(build_series(ds, "O3"), domain_type="asia_aq"))
     ax = fig.axes[0]
     # GeoAxes get_extent() -> (lon_min, lon_max, lat_min, lat_max) in PlateCarree.
     # cartopy may pad one axis to preserve aspect, so assert the box is pinned to
     # the ASIA-AQ domain (NOT auto-scaled to the synthetic data) with a margin.
-    lon0, lon1, lat0, lat1 = ax.get_extent()
+    lon0, lon1, lat0, lat1 = getattr(ax, "get_extent")()
     assert lon0 == pytest.approx(90.0, abs=2.0) and lon1 == pytest.approx(140.0, abs=2.0)
     assert lat0 == pytest.approx(0.0, abs=4.0) and lat1 == pytest.approx(45.0, abs=4.0)
     plt.close(fig)
@@ -136,12 +141,64 @@ def test_grid_slices_surface_not_toa():
     plt.close(fig)
 
 
+def test_grid_squeezes_singleton_product_group_dimension():
+    ds = xr.Dataset(
+        {
+            "aod": (
+                ("group", "lat", "lon"),
+                np.ones((1, 2, 2)),
+                {"units": "1"},
+            )
+        },
+        coords={
+            "group": ["2008-07-01"],
+            "lat": [-1.0, 1.0],
+            "lon": [0.0, 90.0],
+        },
+        attrs={"geometry": "grid"},
+    )
+
+    fig, ax = _render(ds, "aod")
+
+    assert _has(ax, QuadMesh)
+    plt.close(fig)
+
+
+def test_grid_splits_multiple_product_groups_into_labeled_figures():
+    ds = xr.Dataset(
+        {
+            "aod": (
+                ("group", "lat", "lon"),
+                np.ones((2, 2, 2)),
+                {"units": "1"},
+            )
+        },
+        coords={
+            "group": ["2008-07-01", "2008-07-02"],
+            "lat": [-1.0, 1.0],
+            "lon": [0.0, 90.0],
+        },
+        attrs={"geometry": "grid"},
+    )
+
+    result = SpatialPlotter().render(build_series(ds, "aod"))
+
+    assert isinstance(result, list)
+    assert [label for label, _fig in result] == ["2008-07-01", "2008-07-02"]
+    for _label, fig in result:
+        assert _has(fig.axes[0], QuadMesh)
+        plt.close(fig)
+
+
 def test_geosit_aod_style_preset_uses_boundary_norm_and_turbo_colormap():
-    fig = SpatialPlotter().render(build_series(_aod_grid(), "aod"), style_preset="geosit_aod")
+    fig = _single_figure(
+        SpatialPlotter().render(build_series(_aod_grid(), "aod"), style_preset="geosit_aod")
+    )
     ax = fig.axes[0]
     qm = next(c for c in ax.collections if isinstance(c, QuadMesh))
 
     assert isinstance(qm.norm, BoundaryNorm)
+    assert qm.cmap is not None
     assert qm.cmap.name == "turbo"
     np.testing.assert_allclose(
         qm.norm.boundaries[:7],
@@ -177,17 +234,20 @@ def test_map_config_controls_gridline_style(monkeypatch):
 def test_spatial_plot_accepts_explicit_discrete_levels_and_colorbar_extend():
     levels = [0.0, 0.1, 0.5, 1.0]
 
-    fig = SpatialPlotter().render(
-        build_series(_aod_grid(), "aod"),
-        levels=levels,
-        cmap="turbo",
-        extend="max",
+    fig = _single_figure(
+        SpatialPlotter().render(
+            build_series(_aod_grid(), "aod"),
+            levels=levels,
+            cmap="turbo",
+            extend="max",
+        )
     )
     ax = fig.axes[0]
     qm = next(c for c in ax.collections if isinstance(c, QuadMesh))
 
     assert isinstance(qm.norm, BoundaryNorm)
     np.testing.assert_allclose(qm.norm.boundaries, levels)
+    assert qm.cmap is not None
     assert qm.cmap.name == "turbo"
     assert len(fig.axes) >= 2, "expected a colorbar axes"
     plt.close(fig)

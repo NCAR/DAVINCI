@@ -20,6 +20,8 @@ SINGLE_SOURCE_SCHEMA_KEYS = {
     "pairs",
     "data_proc",
     "output_subdir",
+    "formats",
+    "output_formats",
 }
 
 

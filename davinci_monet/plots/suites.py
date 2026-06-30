@@ -69,6 +69,7 @@ def expand_plot_suite(
             "variable": variable,
             "title": title,
             "domain_type": ["all"],
+            "formats": ["pdf"],
             **_aod_plot_options(field),
             **_plot_overrides(overrides, field),
         }

@@ -30,6 +30,7 @@ def test_gridded_aod_suite_expands_absolute_and_difference_plots() -> None:
     assert plots["daily_aod_analysis_increment_aod"]["symmetric"] is True
     assert plots["daily_aod_nudge_fraction"]["vmin"] == 0.0
     assert plots["daily_aod_nudge_fraction"]["vmax"] == 1.0
+    assert plots["daily_aod_analyzed_aod"]["formats"] == ["pdf"]
     assert plots["daily_aod_nudge_fraction"]["output_subdir"] == "plots/daily"
 
 
