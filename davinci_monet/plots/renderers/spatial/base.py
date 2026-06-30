@@ -244,6 +244,8 @@ class MapConfig:
         Show coastlines.
     show_gridlines : bool
         Show lat/lon gridlines.
+    gridline_style : str
+        Matplotlib linestyle for lat/lon gridlines.
     resolution : str
         Feature resolution ('10m', '50m', '110m').
     land_color : str
@@ -258,6 +260,7 @@ class MapConfig:
     show_countries: bool = True
     show_coastlines: bool = True
     show_gridlines: bool = True
+    gridline_style: str = "-"
     resolution: str = "50m"
     land_color: str = "lightgray"
     ocean_color: str = "lightblue"
@@ -410,7 +413,7 @@ class BaseSpatialPlotter(BasePlotter):
                 draw_labels=True,
                 linewidth=0.5,
                 alpha=0.5,
-                linestyle="--",
+                linestyle=cfg.gridline_style,
             )
             gl.top_labels = False
             gl.right_labels = False

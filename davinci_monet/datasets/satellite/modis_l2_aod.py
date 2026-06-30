@@ -16,6 +16,7 @@ all MODIS-specific features (HDF-EOS, swath geometry).
 from __future__ import annotations
 
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -38,6 +39,16 @@ MODIS_AOD_VARIABLE_MAPPING: dict[str, str] = {
     "aod_ocean": "Effective_Optical_Depth_Best_Ocean",
     "angstrom": "Deep_Blue_Angstrom_Exponent_Land",
     "qa": "Land_Ocean_Quality_Flag",
+}
+_EPOCH_1993_SECONDS = int(datetime(1993, 1, 1, tzinfo=timezone.utc).timestamp())
+DEFAULT_MODIS_AOD_VARIABLE_DICT: dict[str, dict[str, Any]] = {
+    "AOD_550_Dark_Target_Deep_Blue_Combined": {
+        "minimum": 0.0,
+        "maximum": 10.0,
+        "scale": 0.001,
+    },
+    "AOD_550_Dark_Target_Deep_Blue_Combined_QA_Flag": {},
+    "AOD_550_Dark_Target_Deep_Blue_Combined_Algorithm_Flag": {},
 }
 
 
@@ -129,13 +140,41 @@ class MODISL2AODReader:
         import monetio.sat._modis_l2_mm as modis_module
 
         files = [str(f) for f in file_paths]
+        variable_dict = kwargs.pop("variable_dict", None)
+        if variable_dict is None:
+            variable_dict = self._variable_dict_for(variables)
 
         if len(files) == 1:
-            ds: xr.Dataset = modis_module.read_dataset(files[0], **kwargs)
+            ds: xr.Dataset = modis_module.read_dataset(files[0], variable_dict, **kwargs)
         else:
-            ds = modis_module.read_mfdataset(files, **kwargs)
+            granules = modis_module.read_mfdataset(files, variable_dict, **kwargs)
+            if isinstance(granules, dict):
+                ds = xr.concat(list(granules.values()), dim="granule")
+            else:
+                ds = granules
 
+        ds = self._add_scan_start_time(ds)
         return select_variables(ds, variables)
+
+    def _variable_dict_for(
+        self,
+        variables: Sequence[str] | None,
+    ) -> dict[str, dict[str, Any]]:
+        if variables is None:
+            return dict(DEFAULT_MODIS_AOD_VARIABLE_DICT)
+        variable_dict: dict[str, dict[str, Any]] = {}
+        for name in variables:
+            source_name = MODIS_AOD_VARIABLE_MAPPING.get(str(name), str(name))
+            variable_dict[source_name] = dict(DEFAULT_MODIS_AOD_VARIABLE_DICT.get(source_name, {}))
+        return variable_dict
+
+    def _add_scan_start_time(self, ds: xr.Dataset) -> xr.Dataset:
+        if "Scan_Start_Time" in ds:
+            return ds
+        if "time" not in ds.coords:
+            return ds
+        scan = ds.coords["time"].astype("float64") - float(_EPOCH_1993_SECONDS)
+        return ds.assign(Scan_Start_Time=scan)
 
     def _open_with_xarray(
         self,

@@ -815,17 +815,20 @@ class TestCreateStandardPipeline:
         """Test all standard stages are created."""
         stages = create_standard_pipeline()
 
-        assert len(stages) == 7
+        assert len(stages) == 10
 
         stage_names = [s.name for s in stages]
         assert stage_names == [
             "load_sources",
             "analyses",
+            "plot_suites",
             "pairing",
             "statistics",
             "plotting",
             "save_results",
             "summary",
+            "inspection",
+            "manifest",
         ]
 
     def test_stages_are_in_order(self):
@@ -834,9 +837,12 @@ class TestCreateStandardPipeline:
 
         assert stages[0].name == "load_sources"
         assert stages[1].name == "analyses"
-        assert stages[2].name == "pairing"
-        assert stages[3].name == "statistics"
-        assert stages[4].name == "plotting"
+        assert stages[2].name == "plot_suites"
+        assert stages[3].name == "pairing"
+        assert stages[4].name == "statistics"
+        assert stages[5].name == "plotting"
+        assert stages[-2].name == "inspection"
+        assert stages[-1].name == "manifest"
 
 
 # =============================================================================
@@ -852,8 +858,9 @@ class TestPipelineRunner:
         runner = PipelineRunner()
 
         # Unified pipeline (geometry/paired stage fork collapsed): load_sources,
-        # analyses, pairing, statistics, plotting, save_results, summary.
-        assert len(runner.stages) == 7
+        # analyses, plot_suites, pairing, statistics, plotting, save_results,
+        # summary, inspection, manifest.
+        assert len(runner.stages) == 10
 
     def test_custom_stages(self):
         """Test runner accepts custom stages."""
@@ -1016,6 +1023,39 @@ class TestPipelineRunner:
 
         assert result.success is False
         assert len(result.stage_results) == 1  # Only first stage ran
+
+    def test_fail_fast_still_runs_manifest_stage(self, tmp_path):
+        """The final manifest is written even when fail_fast stops normal stages."""
+        import json
+
+        from davinci_monet.pipeline.stages import ManifestStage
+
+        class FailStage(BaseStage):
+            def execute(self, context: PipelineContext) -> StageResult:
+                return self._create_result(StageStatus.FAILED, error="Failed")
+
+        class SuccessStage(BaseStage):
+            def execute(self, context: PipelineContext) -> StageResult:
+                return self._create_result(StageStatus.COMPLETED)
+
+        ctx = PipelineContext(config={"analysis": {"output_dir": str(tmp_path)}})
+        runner = PipelineRunner(
+            stages=[FailStage(name="fail"), SuccessStage(name="success"), ManifestStage()],
+            fail_fast=True,
+            show_progress=False,
+        )
+
+        result = runner.run(ctx)
+
+        assert result.success is False
+        assert [stage.stage_name for stage in result.stage_results] == ["fail", "manifest"]
+        assert "success" not in ctx.results
+        manifest = tmp_path / "manifest.json"
+        assert manifest.exists()
+        data = json.loads(manifest.read_text())
+        assert data["status"] == "failed"
+        assert data["failed_stages"] == ["fail"]
+        assert data["stages"]["fail"] == "failed"
 
     def test_continue_on_failure(self):
         """Test pipeline continues when fail_fast is False."""

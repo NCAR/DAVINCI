@@ -86,13 +86,34 @@ class AnalysesStage(BaseStage):
                 out_ds.attrs["derived"] = True
                 out_ds.attrs.setdefault("source_label", key)
 
+                artifact_config: dict[str, Any] = {}
+                if getattr(spec, "type", None) == "gridded_analysis":
+                    from davinci_monet.analysis.artifacts import (
+                        load_product_dataset,
+                        write_product_artifacts,
+                    )
+
+                    artifact = write_product_artifacts(
+                        context.analysis_config().output_dir or ".", key, out_ds
+                    )
+                    out_ds = load_product_dataset(artifact.analysis_path)
+                    artifact_config = {
+                        "artifact_path": str(artifact.analysis_path),
+                        "summary_path": str(artifact.summary_path),
+                    }
+                    context.metadata.setdefault("product_artifacts", {})[key] = artifact_config
+
+                out_ds.attrs["geometry"] = geometry.name.lower()
+                out_ds.attrs["derived"] = True
+                out_ds.attrs.setdefault("source_label", key)
+
                 context.sources[key] = SourceData(
                     data=out_ds,
                     label=key,
                     source_type=spec.type,
                     geometry=geometry,
                     variables={},
-                    config=spec.model_dump(),
+                    config={**spec.model_dump(), **artifact_config},
                 )
                 summary[key] = {
                     "type": spec.type,

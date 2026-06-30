@@ -12,6 +12,7 @@ dependencies:
   # Additional I/O support
   - pyhdf  # HDF4/HDF-EOS for MODIS
   - wrf-python  # WRF/WRF-Chem reader (used by monetio for mech-aware decoding)
+  - uxarray  # Unstructured grid support
 
   # Progress display
   - tqdm

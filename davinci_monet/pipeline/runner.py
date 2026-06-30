@@ -213,9 +213,9 @@ class PipelineRunner:
             Position to insert at. If None, appends to end.
         """
         if position is None:
-            self._stages.append(stage)  # type: ignore[arg-type]
+            self._stages.append(stage)
         else:
-            self._stages.insert(position, stage)  # type: ignore[arg-type]
+            self._stages.insert(position, stage)
 
     def remove_stage(self, stage_name: str) -> bool:
         """Remove a stage by name.
@@ -351,50 +351,50 @@ class PipelineRunner:
         start_time = time.time()
         self._call_hook("on_start", context)
 
+        def run_stage(stage: Stage) -> StageResult:
+            formatter.stage_start(stage.name)
+            if log_collector:
+                log_collector.start_stage(stage.name)
+
+            stage_result = self._execute_stage(stage, context)
+            result.stage_results.append(stage_result)
+            context.results[stage.name] = stage_result
+
+            if log_collector:
+                log_collector.finalize_items()
+
+            if stage_result.status == StageStatus.FAILED:
+                result.success = False
+                formatter.stage_end(stage.name, False, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "failed", stage_result.duration_seconds)
+                    if stage_result.error:
+                        log_collector.log_error(
+                            stage_name=stage.name,
+                            error_type=stage_result.error_type or "Exception",
+                            error_message=stage_result.error,
+                            traceback_str=stage_result.traceback_str,
+                        )
+            elif stage_result.status == StageStatus.SKIPPED:
+                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "skipped", stage_result.duration_seconds)
+            elif stage_result.status == StageStatus.COMPLETED:
+                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "completed", stage_result.duration_seconds)
+            return stage_result
+
         try:
             for stage in self._stages:
-                # Start stage in formatter and collector
-                formatter.stage_start(stage.name)
-                if log_collector:
-                    log_collector.start_stage(stage.name)
+                stage_result = run_stage(stage)
+                if stage_result.status == StageStatus.FAILED and self._fail_fast:
+                    break
 
-                stage_result = self._execute_stage(stage, context)
-                result.stage_results.append(stage_result)
-
-                # Store result in context
-                context.results[stage.name] = stage_result
-
-                # Finalize any open items before ending stage
-                if log_collector:
-                    log_collector.finalize_items()
-
-                if stage_result.status == StageStatus.FAILED:
-                    result.success = False
-                    formatter.stage_end(stage.name, False, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(stage.name, "failed", stage_result.duration_seconds)
-                        # Log the error with traceback for the Markdown report
-                        if stage_result.error:
-                            log_collector.log_error(
-                                stage_name=stage.name,
-                                error_type=stage_result.error_type or "Exception",
-                                error_message=stage_result.error,
-                                traceback_str=stage_result.traceback_str,
-                            )
-                    if self._fail_fast:
-                        break
-                elif stage_result.status == StageStatus.SKIPPED:
-                    formatter.stage_end(stage.name, True, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(
-                            stage.name, "skipped", stage_result.duration_seconds
-                        )
-                elif stage_result.status == StageStatus.COMPLETED:
-                    formatter.stage_end(stage.name, True, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(
-                            stage.name, "completed", stage_result.duration_seconds
-                        )
+            if self._fail_fast and result.failed_stages:
+                for stage in self._stages:
+                    if stage.name == "manifest" and stage.name not in context.results:
+                        run_stage(stage)
 
         finally:
             # Print footer

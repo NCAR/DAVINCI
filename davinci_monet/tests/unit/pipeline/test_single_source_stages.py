@@ -85,6 +85,38 @@ class TestUnifiedPlottingStage:
         pngs = list((tmp_path / "out").glob("*.png"))
         assert any("o3_hist" in p.name for p in pngs)
 
+    def test_execute_honors_single_source_output_subdir(self, tmp_path: Any) -> None:
+        ctx = _geometry_ctx(tmp_path)
+        ctx.config["plots"]["o3_hist"]["output_subdir"] = "plots/daily"
+
+        res = PlottingStage().execute(ctx)
+
+        assert res.status == StageStatus.COMPLETED
+        generated = [str(path) for path in res.data["plots_generated"]]
+        expected = tmp_path / "out" / "plots" / "daily" / "o3_hist.png"
+        assert str(expected) in generated
+        assert expected.exists()
+        assert not (tmp_path / "out" / "o3_hist.png").exists()
+
+    def test_execute_honors_single_source_plot_formats(self, tmp_path: Any) -> None:
+        ctx = _geometry_ctx(tmp_path)
+        plot = ctx.config["plots"].pop("o3_hist")
+        plot["formats"] = ["pdf"]
+        ctx.config["plots"]["o3.hist"] = plot
+        stale_png = tmp_path / "out" / "o3.hist.png"
+        stale_png.parent.mkdir(parents=True, exist_ok=True)
+        stale_png.write_text("stale")
+
+        res = PlottingStage().execute(ctx)
+
+        assert res.status == StageStatus.COMPLETED
+        generated = [str(path) for path in res.data["plots_generated"]]
+        expected = tmp_path / "out" / "o3.hist.pdf"
+        assert str(expected) in generated
+        assert expected.exists()
+        assert not stale_png.exists()
+        assert not (tmp_path / "out" / "o3.pdf").exists()
+
 
 class TestSaveResultsDescriptive:
     def test_descriptive_writes_separate_csv_not_summary(self, tmp_path: Any) -> None:

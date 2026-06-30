@@ -40,6 +40,17 @@ def _make_tiny_nc(path: Path, value: float, time_offset_days: int = 0) -> None:
     ds.to_netcdf(path)
 
 
+def _make_scalar_time_grid_nc(path: Path, value: float, timestamp: str) -> None:
+    """Write a tiny gridded NetCDF file with scalar time metadata."""
+    lat = np.array([0.0, 1.0])
+    lon = np.array([0.0, 1.0])
+    ds = xr.Dataset(
+        {"aod": (("lat", "lon"), np.full((2, 2), value))},
+        coords={"time": pd.Timestamp(timestamp), "lat": lat, "lon": lon},
+    )
+    ds.to_netcdf(path)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -100,6 +111,56 @@ def test_generic_no_callback_uses_default_path(tmp_path: Path) -> None:
     assert "temp" in ds.data_vars
     # 3 files × 2 time steps each = 6 combined time steps along time dim.
     assert ds.sizes["time"] == 6
+
+
+def test_generic_nested_concat_uses_requested_concat_dim_for_scalar_time_files(
+    tmp_path: Path,
+) -> None:
+    """Scalar-time grids can be stacked along the requested concat dimension."""
+    file_a = tmp_path / "aod_a.nc"
+    file_b = tmp_path / "aod_b.nc"
+    _make_scalar_time_grid_nc(file_a, 1.0, "2024-01-01T00:00:00")
+    _make_scalar_time_grid_nc(file_b, 2.0, "2024-01-01T03:00:00")
+
+    ds = GenericReader().open(
+        [file_a, file_b],
+        variables=["aod"],
+        combine="nested",
+        concat_dim="time",
+    )
+
+    assert ds["aod"].dims == ("time", "lat", "lon")
+    assert ds.sizes["time"] == 2
+    np.testing.assert_allclose(ds["aod"].isel(time=0), 1.0)
+    np.testing.assert_allclose(ds["aod"].isel(time=1), 2.0)
+
+
+def test_generic_nested_concat_with_progress_callback_stacks_scalar_time_files(
+    tmp_path: Path,
+) -> None:
+    """Nested scalar-time concat also works on the callback-enabled path."""
+    file_a = tmp_path / "aod_a.nc"
+    file_b = tmp_path / "aod_b.nc"
+    _make_scalar_time_grid_nc(file_a, 1.0, "2024-01-01T00:00:00")
+    _make_scalar_time_grid_nc(file_b, 2.0, "2024-01-01T03:00:00")
+    calls: list[tuple[int, int, str]] = []
+
+    def _cb(i: int, total: int, name: str) -> None:
+        calls.append((i, total, name))
+
+    ds = GenericReader().open(
+        [file_a, file_b],
+        variables=["aod"],
+        combine="nested",
+        concat_dim="time",
+        progress_callback=_cb,
+    )
+
+    assert ds["aod"].dims == ("time", "lat", "lon")
+    assert ds.sizes["time"] == 2
+    assert calls == [(1, 2, file_a.name), (2, 2, file_b.name)]
+    np.testing.assert_allclose(ds["aod"].isel(time=0), 1.0)
+    np.testing.assert_allclose(ds["aod"].isel(time=1), 2.0)
 
 
 @pytest.mark.parametrize(

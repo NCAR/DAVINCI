@@ -60,3 +60,16 @@ def test_catalog_unknown_product_suggests_matches():
     with pytest.raises(UnknownProductError) as exc:
         cat.resolve("MOD08_X3")
     assert "MOD08_M3" in str(exc.value)  # close-match suggestion
+
+
+def test_catalog_resolves_viirs_aerdb_l2():
+    cat = get_catalog()
+    product = cat.resolve("AERDB_L2_VIIRS_NOAA20")
+    assert product.level == "L2"
+    assert product.geometry == "SWATH"
+    assert product.instrument == "VIIRS"
+    assert product.platform == "NOAA-20"
+    land = product.variable_by_display("aod_550_land")
+    assert land is not None
+    assert land.wavelength_nm == 550
+    assert cat.resolve("viirs_aerdb_noaa20").product_id == "AERDB_L2_VIIRS_NOAA20"

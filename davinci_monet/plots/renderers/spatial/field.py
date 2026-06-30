@@ -8,8 +8,9 @@ spatial plot.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+import re
+from collections.abc import Hashable, Sequence
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ import numpy as np
 
 from davinci_monet.plots import labeling
 from davinci_monet.plots.base import (
+    calculate_symmetric_limits,
     get_variable_label,
     get_variable_units,
 )
@@ -47,6 +49,7 @@ _LEVEL_DIMS = ["lev", "level", "z", "vertical"]
 _MESH_SHAPES = {"grid", "swath", "regular_grid", "curvilinear_grid"}
 # Shapes whose ``time`` dim is the sampling path, not something to average over.
 _PATH_SHAPES = {"track", "profile"}
+_ColorbarExtend = Literal["neither", "both", "min", "max"]
 
 
 @register_plotter("spatial")
@@ -72,13 +75,25 @@ class SpatialPlotter(BaseSpatialPlotter):
         series: list[PlotSeries],
         ax: matplotlib.axes.Axes | None = None,
         **kwargs: Any,
-    ) -> matplotlib.figure.Figure:
+    ) -> matplotlib.figure.Figure | list[tuple[str, matplotlib.figure.Figure]]:
         """Render a single source's field on a map (exactly 1 series)."""
         if len(series) != 1:
             raise NotImplementedError(
                 f"SpatialPlotter.render requires exactly 1 series; got {len(series)}."
             )
         s = series[0]
+        split_dim = self._split_dim_for_field(s.dataset, s.var_name, **kwargs)
+        if split_dim is not None:
+            figures: list[tuple[str, matplotlib.figure.Figure]] = []
+            for idx, label in self._iter_split_labels(s.dataset, split_dim):
+                subset = s.dataset.isel({split_dim: idx}, drop=True)
+                figures.append(
+                    (
+                        self._format_split_label(label),
+                        self._plot(subset, s.var_name, s.source_label, ax=ax, **kwargs),
+                    )
+                )
+            return figures
         return self._plot(s.dataset, s.var_name, s.source_label, ax=ax, **kwargs)
 
     def _plot(
@@ -94,6 +109,9 @@ class SpatialPlotter(BaseSpatialPlotter):
         levels: Sequence[float] | np.ndarray | None = None,
         extend: str | None = None,
         style_preset: str | None = None,
+        robust: bool = False,
+        robust_pct: Sequence[float] = (2.0, 98.0),
+        symmetric: bool = False,
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -115,6 +133,7 @@ class SpatialPlotter(BaseSpatialPlotter):
         field = self._reduce_vertical(field, level_index)
         # Collapse time unless it is the sampling path (track/profile).
         field = self._reduce_time(field, shape, time_average, time_index)
+        field = self._squeeze_singleton_non_spatial_dims(ds, field, lat_var, lon_var)
 
         lats, lons, field = self._resolve_coords(ds, field, lat_var, lon_var)
         plot_type = "pcolormesh" if shape in _MESH_SHAPES else "scatter"
@@ -122,12 +141,12 @@ class SpatialPlotter(BaseSpatialPlotter):
         if ax is None:
             fig, ax = self.create_map_figure()
         else:
-            fig = ax.get_figure()  # type: ignore[assignment]
+            fig = ax.get_figure()
         self.add_map_features(ax)
 
         extent = self._resolve_extent(domain_type, domain_name)
         if extent is not None:
-            ax.set_extent(extent)  # type: ignore[attr-defined]
+            getattr(ax, "set_extent")(extent)
 
         values = field.values
         finite = values[np.isfinite(values)]
@@ -142,7 +161,7 @@ class SpatialPlotter(BaseSpatialPlotter):
                 fontsize=self.config.text.fontsize,
             )
             return fig
-        norm = None
+        norm: mcolors.Normalize | None = None
         if style_preset is not None:
             if style_preset != "geosit_aod":
                 raise ValueError(f"Unknown spatial style_preset: {style_preset}")
@@ -166,15 +185,31 @@ class SpatialPlotter(BaseSpatialPlotter):
             norm = mcolors.BoundaryNorm(
                 levels_arr,
                 ncolors=cmap_obj.N,
-                extend=extend or "neither",
+                extend=cast(_ColorbarExtend, extend or "neither"),
             )
             cmap = cmap_obj
             vmin = float(levels_arr[0])
             vmax = float(levels_arr[-1])
+        elif vmin is None and vmax is None and robust:
+            if symmetric:
+                percentile = float(max(robust_pct)) if robust_pct else 98.0
+                vmin, vmax = calculate_symmetric_limits(finite, percentile=percentile)
+            else:
+                robust_limits = np.asarray(np.nanpercentile(finite, robust_pct), dtype=float)
+                vmin = float(robust_limits[0])
+                vmax = float(robust_limits[1])
         elif vmin is None:
             vmin = float(np.nanmin(finite))
         if levels is None and vmax is None:
             vmax = float(np.nanmax(finite))
+        if (
+            levels is None
+            and symmetric
+            and vmin is not None
+            and vmax is not None
+            and vmin < 0 < vmax
+        ):
+            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
         cmap = cmap or get_sequential_cmap()
         style = self.config.style
@@ -282,6 +317,83 @@ class SpatialPlotter(BaseSpatialPlotter):
         if time_average:
             return field.mean(dim="time")
         return field
+
+    def _squeeze_singleton_non_spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> xr.DataArray:
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        indexers = {
+            dim: 0 for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim) == 1
+        }
+        if not indexers:
+            return field
+        return field.isel(indexers, drop=True)
+
+    def _split_dim_for_field(
+        self,
+        ds: xr.Dataset,
+        variable: str,
+        *,
+        time_average: bool = True,
+        time_index: int | None = None,
+        level_index: int | str = "surface",
+        lat_var: str = "latitude",
+        lon_var: str = "longitude",
+        **_: Any,
+    ) -> Hashable | None:
+        field = ds[variable]
+        shape = self._resolve_shape(ds, variable, field, lat_var, lon_var)
+        field = self._reduce_vertical(field, level_index)
+        field = self._reduce_time(field, shape, time_average, time_index)
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        split_dims = [
+            dim for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim, 0) > 1
+        ]
+        if not split_dims:
+            return None
+        if len(split_dims) > 1:
+            dims = ", ".join(str(dim) for dim in split_dims)
+            raise NotImplementedError(
+                f"SpatialPlotter can split over one non-spatial dimension; got {dims}."
+            )
+        return split_dims[0]
+
+    def _spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> set[Hashable]:
+        spatial_dims: set[Hashable] = set()
+        for coord_name in (
+            self._resolve_coord_name(ds, _LAT_CANDIDATES, lat_var),
+            self._resolve_coord_name(ds, _LON_CANDIDATES, lon_var),
+        ):
+            if coord_name is None:
+                continue
+            if coord_name in field.dims:
+                spatial_dims.add(coord_name)
+            if coord_name in ds:
+                spatial_dims.update(dim for dim in ds[coord_name].dims if dim in field.dims)
+        return spatial_dims
+
+    @staticmethod
+    def _iter_split_labels(ds: xr.Dataset, dim: Hashable) -> list[tuple[int, Any]]:
+        size = ds.sizes[dim]
+        if dim in ds.coords:
+            return list(enumerate(ds.coords[dim].values))
+        return [(idx, idx) for idx in range(size)]
+
+    @staticmethod
+    def _format_split_label(label: Any) -> str:
+        text = str(label)
+        text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip("-")
+        return text or "group"
 
     def _resolve_coords(
         self,

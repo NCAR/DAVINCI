@@ -33,6 +33,7 @@ dependencies = [
     "numpy>=1.20",
     "pandas>=1.5,<2",
     "xarray>=2022.0",
+    "uxarray",
     "matplotlib>=3.5,<3.9",
     "cartopy>=0.20",
     "netCDF4>=1.5",

@@ -70,6 +70,21 @@ def test_spatial_style_options_are_forwarded_from_comparison_plot_specs() -> Non
     }
 
 
+def test_spatial_robust_options_are_forwarded_from_comparison_plot_specs() -> None:
+    from davinci_monet.pipeline.stages.plot_options import build_comparison_plot_options
+
+    options = build_comparison_plot_options(
+        "spatial",
+        {
+            "robust": True,
+            "robust_pct": [5.0, 95.0],
+        },
+        {},
+    )
+
+    assert options == {"robust": True, "robust_pct": [5.0, 95.0]}
+
+
 def test_plot_subtitle_uses_date_range_or_snapshot() -> None:
     from davinci_monet.pipeline.stages.plot_options import build_plot_subtitle
 

@@ -10,11 +10,15 @@ context API and stage logic, per the repo's existing pipeline-stage test pattern
 
 from __future__ import annotations
 
+from datetime import datetime
+
+import cftime
 import numpy as np
 import pytest
 import xarray as xr
 
 from davinci_monet.core.protocols import DataGeometry
+from davinci_monet.core.registry import source_registry
 from davinci_monet.pipeline.stages import (
     LoadSourcesStage,
     PipelineContext,
@@ -189,6 +193,57 @@ class TestLoadSourcesStage:
         assert set(ctx.sources) == {"cam"}
         assert ctx.sources["cam"].geometry is DataGeometry.GRID
         assert ctx.sources["cam"].data.attrs["geometry"] == "grid"
+
+    def test_source_time_filter_supports_cftime_calendar(self) -> None:
+        class NoLeapReader:
+            @property
+            def name(self) -> str:
+                return "noleap_probe"
+
+            @property
+            def geometry(self) -> DataGeometry:
+                return DataGeometry.GRID
+
+            def open(self, file_paths, variables=None):  # noqa: ANN001
+                times = [
+                    cftime.DatetimeNoLeap(2008, 7, 1),
+                    cftime.DatetimeNoLeap(2008, 7, 2),
+                    cftime.DatetimeNoLeap(2008, 7, 3),
+                ]
+                return xr.Dataset(
+                    {"aod": (("time", "lat", "lon"), np.ones((3, 1, 1)))},
+                    coords={"time": times, "lat": [0.0], "lon": [0.0]},
+                )
+
+        source_registry.register("noleap_probe", NoLeapReader, replace=True)
+        try:
+            ctx = PipelineContext(
+                config={
+                    "analysis": {
+                        "start_time": datetime(2008, 7, 2),
+                        "end_time": datetime(2008, 7, 4),
+                    },
+                    "sources": {
+                        "cam": {
+                            "type": "noleap_probe",
+                            "filename": "ignored.nc",
+                            "variables": {"aod": {}},
+                        }
+                    },
+                }
+            )
+
+            result = LoadSourcesStage().execute(ctx)
+
+            assert result.status is StageStatus.COMPLETED
+            ds = ctx.sources["cam"].data
+            assert ds.sizes["time"] == 2
+            assert list(ds["time"].values) == [
+                cftime.DatetimeNoLeap(2008, 7, 2),
+                cftime.DatetimeNoLeap(2008, 7, 3),
+            ]
+        finally:
+            source_registry.unregister("noleap_probe")
 
     def test_stage_name(self) -> None:
         assert LoadSourcesStage().name == "load_sources"

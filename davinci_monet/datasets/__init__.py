@@ -14,6 +14,7 @@ from davinci_monet.datasets.satellite import generic_l2 as _generic_l2
 from davinci_monet.datasets.satellite import generic_l3 as _generic_l3
 from davinci_monet.datasets.satellite import goes_l3_aod as _goes_l3_aod
 from davinci_monet.datasets.satellite import modis_l2_aod as _modis_l2_aod
+from davinci_monet.datasets.satellite import viirs_l2_aerdb as _viirs_l2_aerdb
 from davinci_monet.datasets.satellite import mopitt_l3_co as _mopitt_l3_co
 from davinci_monet.datasets.satellite import omps_l3_o3 as _omps_l3_o3
 from davinci_monet.datasets.satellite import tempo_l2_no2 as _tempo_l2_no2

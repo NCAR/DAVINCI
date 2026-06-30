@@ -386,6 +386,29 @@ def validate(
     validate_config_command(control, strict=strict, show_config=show_config)
 
 
+@app.command()
+def inspect(
+    run_dir: Path = typer.Argument(
+        ...,
+        help="DAVINCI run directory to inspect.",
+    ),
+    presets: list[str] = typer.Option(
+        ["gridded_aod_diagnostics"],
+        "--preset",
+        help="Inspection preset to apply. Can be repeated.",
+    ),
+    preview_format: str = typer.Option(
+        "png",
+        "--preview-format",
+        help="Inspection preview format to write.",
+    ),
+) -> None:
+    """Inspect final products in a DAVINCI run directory."""
+    from davinci_monet.cli.commands.inspect import inspect_command
+
+    inspect_command(run_dir, presets, preview_format)
+
+
 # CLI entry point
 cli = app
 
