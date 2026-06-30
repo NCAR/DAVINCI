@@ -162,6 +162,7 @@ class GenericReader:
         # via _cleanup_with_suppressed_errors (passed as the on_failure hook).
         def _open() -> xr.Dataset:
             if len(file_list) > 1:
+                concat_kwargs = {"concat_dim": concat_dim} if combine == "nested" else {}
                 if progress_callback is not None:
                     # Sequential open so the preprocess counter is ordered.
                     total = len(file_list)
@@ -180,6 +181,7 @@ class GenericReader:
                         data_vars="all",
                         parallel=False,
                         preprocess=_progress_preprocess,
+                        **concat_kwargs,
                         **kwargs,
                     )
                 return xr.open_mfdataset(
@@ -187,6 +189,7 @@ class GenericReader:
                     combine=combine,
                     data_vars="all",
                     parallel=parallel,
+                    **concat_kwargs,
                     **kwargs,
                 )
             return xr.open_dataset(str(file_list[0]), **kwargs)
