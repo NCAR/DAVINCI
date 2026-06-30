@@ -1,5 +1,6 @@
 # Output files - plots and statistics
 output/
+output.tar
 outback/
 
 # Log files
