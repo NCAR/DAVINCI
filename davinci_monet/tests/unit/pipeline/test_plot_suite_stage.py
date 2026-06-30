@@ -11,7 +11,11 @@ from davinci_monet.pipeline.stages import PipelineContext, PlotSuiteStage, Sourc
 def test_plot_suite_stage_expands_into_context_plots(tmp_path) -> None:
     ds = xr.Dataset(
         {
-            "analyzed_aod": (("group", "lat", "lon"), np.ones((1, 1, 2))),
+            "analyzed_aod": (
+                ("group", "lat", "lon"),
+                np.ones((1, 1, 2)),
+                {"display_name": "CAM7 Analyzed AOD"},
+            ),
             "nudge_fraction": (("group", "lat", "lon"), np.ones((1, 1, 2))),
         },
         coords={"group": ["2008-07-01"], "lat": [0.0], "lon": [0.0, 90.0]},
@@ -34,6 +38,7 @@ def test_plot_suite_stage_expands_into_context_plots(tmp_path) -> None:
     assert "daily_analyzed_aod" in ctx.config["plots"]
     assert ctx.config["plots"]["daily_analyzed_aod"]["source"] == "daily_aod"
     assert ctx.config["plots"]["daily_analyzed_aod"]["output_subdir"] == "plots/daily"
+    assert ctx.config["plots"]["daily_analyzed_aod"]["title"] == "CAM7 Analyzed AOD"
 
 
 def test_plot_suite_stage_preserves_typed_config(tmp_path) -> None:

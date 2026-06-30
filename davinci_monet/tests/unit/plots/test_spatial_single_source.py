@@ -20,6 +20,7 @@ from matplotlib.collections import PathCollection, QuadMesh  # noqa: E402
 from matplotlib.colors import BoundaryNorm  # noqa: E402
 
 from davinci_monet.plots.base import build_series  # noqa: E402
+from davinci_monet.plots.plot_config import PlotConfig  # noqa: E402
 from davinci_monet.plots.renderers.spatial.base import MapConfig  # noqa: E402
 from davinci_monet.plots.renderers.spatial.field import SpatialPlotter  # noqa: E402
 from davinci_monet.tests.synthetic.geometries import (  # noqa: E402
@@ -188,6 +189,61 @@ def test_grid_splits_multiple_product_groups_into_labeled_figures():
     for _label, fig in result:
         assert _has(fig.axes[0], QuadMesh)
         plt.close(fig)
+
+
+def test_grid_split_group_label_is_rendered_as_subtitle():
+    ds = xr.Dataset(
+        {
+            "aod": (
+                ("group", "lat", "lon"),
+                np.ones((2, 2, 2)),
+                {"units": "1"},
+            )
+        },
+        coords={
+            "group": ["2008-07-01", "2008-07-02"],
+            "lat": [-1.0, 1.0],
+            "lon": [0.0, 90.0],
+        },
+        attrs={"geometry": "grid"},
+    )
+
+    result = SpatialPlotter(config=PlotConfig(title="CAM7 Analyzed AOD")).render(
+        build_series(ds, "aod")
+    )
+
+    assert isinstance(result, list)
+    for label, fig in result:
+        ax = fig.axes[0]
+        assert ax.get_title() == "CAM7 Analyzed AOD"
+        assert any(text.get_text() == label for text in ax.texts)
+        plt.close(fig)
+
+
+def test_spatial_render_kwargs_control_map_features(monkeypatch):
+    plotter = SpatialPlotter()
+    fig, ax = plotter.create_map_figure()
+    feature_names: list[str] = []
+
+    def fake_add_feature(feature, **kwargs):
+        feature_names.append(str(getattr(feature, "name", feature)))
+
+    monkeypatch.setattr(ax, "add_feature", fake_add_feature)
+
+    plotter.render(
+        build_series(_aod_grid(), "aod"),
+        ax=ax,
+        show_countries=False,
+        show_states=False,
+        land_color="none",
+        ocean_color="none",
+    )
+
+    assert not any("admin_0" in name for name in feature_names)
+    assert not any("admin_1" in name for name in feature_names)
+    assert not any(name == "land" for name in feature_names)
+    assert not any(name == "ocean" for name in feature_names)
+    plt.close(fig)
 
 
 def test_geosit_aod_style_preset_uses_boundary_norm_and_turbo_colormap():

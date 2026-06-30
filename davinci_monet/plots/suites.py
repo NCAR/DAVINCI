@@ -5,14 +5,24 @@ from typing import Any
 from davinci_monet.core.schema_utils import dump_schema, is_schema_object
 
 _AOD_TITLES = {
-    "observation_aod": "Observation AOD",
-    "analyzed_aod": "CAM Analyzed AOD",
-    "first_guess_aod": "CAM First-Guess AOD",
+    "observation_aod": "Observed AOD",
+    "analyzed_aod": "Analyzed AOD",
+    "first_guess_aod": "Pre-Correction AOD",
     "analysis_minus_observation_aod": "Analysis Minus Observation AOD",
-    "analysis_increment_aod": "Analysis Increment AOD",
+    "analysis_increment_aod": "AOD Correction",
     "nudge_fraction": "Nudge Fraction",
     "observation_fraction": "Observation Fraction",
     "analysis_minus_free_running_aod": "Analyzed Minus Free-Running AOD",
+}
+
+_AOD_MAP_CONTEXT = {
+    "show_coastlines": True,
+    "show_countries": False,
+    "show_states": False,
+    "show_gridlines": True,
+    "gridline_style": "-",
+    "land_color": "none",
+    "ocean_color": "none",
 }
 
 _SARB_TITLES = {
@@ -32,6 +42,14 @@ _GLOBAL_OVERRIDE_KEYS = {
     "domain_type",
     "domain_name",
     "formats",
+}
+
+_GROUP_TITLE_PREFIXES = {
+    "daily": "Daily",
+    "day": "Daily",
+    "five_day": "Mean",
+    "five-day": "Mean",
+    "all": "Mean",
 }
 
 
@@ -72,6 +90,25 @@ def _aod_plot_options(field: str) -> dict[str, Any]:
     return {}
 
 
+def _field_title(field: str, default: str, field_metadata: dict[str, dict[str, Any]]) -> str:
+    metadata = field_metadata.get(field, {})
+    for key in ("display_name", "long_name", "standard_name"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return default
+
+
+def _title_with_group_prefix(title: str, group: Any) -> str:
+    if not group:
+        return title
+    key = str(group).strip().lower().replace(" ", "_")
+    prefix = _GROUP_TITLE_PREFIXES.get(key)
+    if not prefix or title == prefix or title.startswith(f"{prefix} "):
+        return title
+    return f"{prefix} {title}"
+
+
 def _sarb_plot_options(field: str) -> dict[str, Any]:
     if field in {"visible_column_aod", "lw_window_extinction"}:
         return {"style_preset": "geosit_aod"}
@@ -93,16 +130,22 @@ def _expand_aod_suite(
     suite: dict[str, Any],
     *,
     available_fields: list[str],
+    field_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     source = suite["source"]
     fields = suite.get("fields") or {}
     overrides = suite.get("overrides") or {}
     available = {str(field) for field in available_fields}
+    field_metadata = field_metadata or {}
     plots: dict[str, dict[str, Any]] = {}
-    for field, title in _AOD_TITLES.items():
+    for field, default_title in _AOD_TITLES.items():
         variable = str(fields.get(field, field))
         if variable not in available:
             continue
+        title = _title_with_group_prefix(
+            _field_title(variable, default_title, field_metadata),
+            suite.get("group"),
+        )
         plot = {
             "type": "spatial",
             "source": source,
@@ -110,6 +153,7 @@ def _expand_aod_suite(
             "title": title,
             "domain_type": ["all"],
             "formats": ["pdf"],
+            **_AOD_MAP_CONTEXT,
             **_aod_plot_options(field),
             **_plot_overrides(
                 overrides,
@@ -165,13 +209,19 @@ def expand_plot_suite(
     suite: dict[str, Any] | Any,
     *,
     available_fields: list[str],
+    field_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Expand a named plot suite into concrete DAVINCI plot configs."""
 
     suite = _suite_dict(suite)
     preset = suite["preset"]
     if preset == "gridded_aod_diagnostics":
-        return _expand_aod_suite(suite_name, suite, available_fields=available_fields)
+        return _expand_aod_suite(
+            suite_name,
+            suite,
+            available_fields=available_fields,
+            field_metadata=field_metadata,
+        )
     if preset == "sarb_band_aerosol_optics":
         return _expand_sarb_suite(suite_name, suite, available_fields=available_fields)
     raise ValueError(f"unknown plot suite preset: {preset}")

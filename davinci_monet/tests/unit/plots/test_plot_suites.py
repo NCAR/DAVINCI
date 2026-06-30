@@ -32,6 +32,60 @@ def test_gridded_aod_suite_expands_absolute_and_difference_plots() -> None:
     assert plots["daily_aod_nudge_fraction"]["vmax"] == 1.0
     assert plots["daily_aod_analyzed_aod"]["formats"] == ["pdf"]
     assert plots["daily_aod_nudge_fraction"]["output_subdir"] == "plots/daily"
+    assert plots["daily_aod_analyzed_aod"]["show_countries"] is False
+    assert plots["daily_aod_analyzed_aod"]["show_states"] is False
+    assert plots["daily_aod_analyzed_aod"]["gridline_style"] == "-"
+
+
+def test_gridded_aod_suite_uses_field_metadata_for_titles() -> None:
+    plots = expand_plot_suite(
+        "daily_aod",
+        {
+            "preset": "gridded_aod_diagnostics",
+            "source": "daily_aod",
+        },
+        available_fields=["observation_aod", "analyzed_aod", "first_guess_aod"],
+        field_metadata={
+            "observation_aod": {"display_name": "MODIS Observed AOD"},
+            "analyzed_aod": {"display_name": "CAM7 Analyzed AOD"},
+            "first_guess_aod": {"display_name": "CAM7 Pre-Correction AOD"},
+        },
+    )
+
+    assert plots["daily_aod_observation_aod"]["title"] == "MODIS Observed AOD"
+    assert plots["daily_aod_analyzed_aod"]["title"] == "CAM7 Analyzed AOD"
+    assert plots["daily_aod_first_guess_aod"]["title"] == "CAM7 Pre-Correction AOD"
+
+
+def test_gridded_aod_suite_uses_mean_prefix_for_five_day_group() -> None:
+    plots = expand_plot_suite(
+        "five_day_aod",
+        {
+            "preset": "gridded_aod_diagnostics",
+            "source": "five_day_aod",
+            "group": "five_day",
+        },
+        available_fields=["analyzed_aod"],
+        field_metadata={"analyzed_aod": {"display_name": "CAM7 Analyzed AOD"}},
+    )
+
+    assert plots["five_day_aod_analyzed_aod"]["title"] == "Mean CAM7 Analyzed AOD"
+    assert "Five Day" not in plots["five_day_aod_analyzed_aod"]["title"]
+
+
+def test_gridded_aod_suite_generic_titles_do_not_name_models_or_products() -> None:
+    plots = expand_plot_suite(
+        "daily_aod",
+        {
+            "preset": "gridded_aod_diagnostics",
+            "source": "daily_aod",
+        },
+        available_fields=["observation_aod", "analyzed_aod", "first_guess_aod"],
+    )
+
+    joined_titles = "\n".join(plot["title"] for plot in plots.values())
+    for banned in ("CAM", "CAM7", "MODIS", "VIIRS", "GEOS", "WRF"):
+        assert banned not in joined_titles
 
 
 def test_gridded_aod_suite_maps_fields_and_applies_overrides() -> None:

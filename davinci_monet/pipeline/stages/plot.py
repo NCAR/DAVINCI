@@ -239,6 +239,9 @@ class PlottingStage(BaseStage):
                 # Tag the single source so build_series picks up its source label.
                 tag_source_label(subset, source_label=source_label)
                 render_kwargs = dict(flight_kwargs)
+                title = render_kwargs.pop("title", None)
+                if title:
+                    plotter.config.title = str(title)
                 plotter.config.subtitle = render_kwargs.pop("subtitle", None)
                 result = plotter.render(build_series(subset, variable), **render_kwargs)
                 figures: list[tuple[str | None, Any]]

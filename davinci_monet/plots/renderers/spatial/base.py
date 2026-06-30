@@ -375,13 +375,13 @@ class BaseSpatialPlotter(BasePlotter):
         cfg = map_config or self.map_config
 
         # Add land/ocean colors
-        if cfg.land_color:
+        if cfg.land_color and str(cfg.land_color).lower() != "none":
             ax.add_feature(  # type: ignore[attr-defined]
                 cfeature.LAND.with_scale(cfg.resolution),
                 facecolor=cfg.land_color,
                 zorder=0,
             )
-        if cfg.ocean_color:
+        if cfg.ocean_color and str(cfg.ocean_color).lower() != "none":
             ax.add_feature(  # type: ignore[attr-defined]
                 cfeature.OCEAN.with_scale(cfg.resolution),
                 facecolor=cfg.ocean_color,

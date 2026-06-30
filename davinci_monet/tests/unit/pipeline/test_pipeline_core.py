@@ -699,6 +699,76 @@ class TestPlottingStage:
         assert plotter_config["subtitle"] == "2003-01-01 – 2003-12-31"
         assert "caption" not in plotter_config
 
+    def test_single_source_plot_title_config_is_forwarded(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Configured single-source titles must reach the renderer config."""
+        import matplotlib.pyplot as plt
+
+        from davinci_monet.plots.base import PlotConfig
+
+        ds = xr.Dataset(
+            {
+                "analyzed_aod": (
+                    ("lat", "lon"),
+                    np.ones((1, 2)),
+                    {"display_name": "CAM7 Analyzed AOD"},
+                )
+            },
+            coords={"lat": [0.0], "lon": [0.0, 90.0]},
+            attrs={"geometry": "grid", "source_label": "five_day_cam_aod"},
+        )
+        seen: dict[str, Any] = {}
+
+        class FakePlotter:
+            def __init__(self) -> None:
+                self.config = PlotConfig()
+
+            def render(self, series, **kwargs):
+                seen["config_title"] = self.config.title
+                seen["render_title"] = kwargs.get("title")
+                fig, _ax = plt.subplots()
+                return fig
+
+            def save(self, fig, path) -> None:
+                path.write_text("plot")
+
+        fake = FakePlotter()
+
+        monkeypatch.setattr(
+            "davinci_monet.plots.registry.get_plotter",
+            lambda _plot_type: fake,
+        )
+
+        stage = PlottingStage()
+        stage._render_single_source_plot(
+            context=PipelineContext(),
+            plot_name="five_day_analyzed",
+            plot_type="spatial",
+            plot_spec={
+                "type": "spatial",
+                "source": "five_day_aod",
+                "variable": "analyzed_aod",
+                "title": "Mean CAM7 Analyzed AOD",
+                "formats": ["pdf"],
+            },
+            analysis_config={},
+            output_dir=tmp_path,
+            source_map={
+                "five_day_aod": (
+                    SourceData(ds, "five_day_aod", "gridded_analysis", DataGeometry.GRID),
+                    ds,
+                )
+            },
+            plots_generated=[],
+            file_index=0,
+        )
+
+        assert seen["config_title"] == "Mean CAM7 Analyzed AOD"
+        assert seen["render_title"] is None
+
     def test_missing_plot_pair_fails_stage(self, context_with_paired: PipelineContext):
         """A missing plot data reference fails instead of silently producing no plot."""
         context_with_paired.config = {

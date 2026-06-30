@@ -58,10 +58,12 @@ class PlotSuiteStage(BaseStage):
                     duration=time.time() - start,
                 )
             ds = context.get_source_dataset(source)
+            field_metadata = {str(name): dict(ds[name].attrs) for name in ds.data_vars}
             expanded = expand_plot_suite(
                 suite_name,
                 suite,
                 available_fields=list(ds.data_vars),
+                field_metadata=field_metadata,
             )
             plots.update(expanded)
             generated.extend(expanded)

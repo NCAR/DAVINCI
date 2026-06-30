@@ -25,6 +25,7 @@ from davinci_monet.plots.base import (
 from davinci_monet.plots.registry import register_plotter
 from davinci_monet.plots.renderers.spatial.base import (
     BaseSpatialPlotter,
+    MapConfig,
     detect_spatial_geometry,
     draw_spatial_field,
     get_domain_extent,
@@ -90,7 +91,14 @@ class SpatialPlotter(BaseSpatialPlotter):
                 figures.append(
                     (
                         self._format_split_label(label),
-                        self._plot(subset, s.var_name, s.source_label, ax=ax, **kwargs),
+                        self._plot(
+                            subset,
+                            s.var_name,
+                            s.source_label,
+                            ax=ax,
+                            subtitle=self._format_split_label(label),
+                            **kwargs,
+                        ),
                     )
                 )
             return figures
@@ -112,6 +120,7 @@ class SpatialPlotter(BaseSpatialPlotter):
         robust: bool = False,
         robust_pct: Sequence[float] = (2.0, 98.0),
         symmetric: bool = False,
+        subtitle: str | None = None,
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -122,12 +131,30 @@ class SpatialPlotter(BaseSpatialPlotter):
         lon_var: str = "longitude",
         domain_type: str | list[str] | None = None,
         domain_name: str | list[str] | None = None,
+        show_coastlines: bool | None = None,
+        show_countries: bool | None = None,
+        show_states: bool | None = None,
+        show_gridlines: bool | None = None,
+        gridline_style: str | None = None,
+        resolution: str | None = None,
+        land_color: str | None = None,
+        ocean_color: str | None = None,
         **kwargs: Any,
     ) -> matplotlib.figure.Figure:
         import cartopy.crs as ccrs
 
         field = ds[variable]
         shape = self._resolve_shape(ds, variable, field, lat_var, lon_var)
+        map_config = self._map_config_with_overrides(
+            show_coastlines=show_coastlines,
+            show_countries=show_countries,
+            show_states=show_states,
+            show_gridlines=show_gridlines,
+            gridline_style=gridline_style,
+            resolution=resolution,
+            land_color=land_color,
+            ocean_color=ocean_color,
+        )
 
         # Reduce a vertical dim (grid/profile) to a single level (surface default).
         field = self._reduce_vertical(field, level_index)
@@ -142,7 +169,7 @@ class SpatialPlotter(BaseSpatialPlotter):
             fig, ax = self.create_map_figure()
         else:
             fig = ax.get_figure()
-        self.add_map_features(ax)
+        self.add_map_features(ax, map_config)
 
         extent = self._resolve_extent(domain_type, domain_name)
         if extent is not None:
@@ -256,15 +283,41 @@ class SpatialPlotter(BaseSpatialPlotter):
         )
 
         if self.config.title:
-            self.set_title(ax, self.config.title)
+            self.set_title(ax, self.config.title, subtitle=subtitle)
         else:
             # Source name leads the title, de-duped against the quantity, e.g.
             # "AERONET AOD (500 nm)" / "CESM NO2 Column" (not "… (CESM)").
             title_q = labeling.quantity_label(ds, variable)
-            self.set_title(ax, labeling.sourced_title(source_label, title_q))
+            self.set_title(ax, labeling.sourced_title(source_label, title_q), subtitle=subtitle)
         return fig
 
     # -- helpers ---------------------------------------------------------------
+
+    def _map_config_with_overrides(
+        self,
+        *,
+        show_coastlines: bool | None,
+        show_countries: bool | None,
+        show_states: bool | None,
+        show_gridlines: bool | None,
+        gridline_style: str | None,
+        resolution: str | None,
+        land_color: str | None,
+        ocean_color: str | None,
+    ) -> MapConfig:
+        cfg = self.map_config
+        return MapConfig(
+            projection=cfg.projection,
+            extent=cfg.extent,
+            show_states=cfg.show_states if show_states is None else show_states,
+            show_countries=cfg.show_countries if show_countries is None else show_countries,
+            show_coastlines=cfg.show_coastlines if show_coastlines is None else show_coastlines,
+            show_gridlines=cfg.show_gridlines if show_gridlines is None else show_gridlines,
+            gridline_style=cfg.gridline_style if gridline_style is None else gridline_style,
+            resolution=cfg.resolution if resolution is None else resolution,
+            land_color=cfg.land_color if land_color is None else land_color,
+            ocean_color=cfg.ocean_color if ocean_color is None else ocean_color,
+        )
 
     def _resolve_shape(
         self,
