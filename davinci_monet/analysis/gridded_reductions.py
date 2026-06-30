@@ -21,13 +21,24 @@ class _WindowSpec(Protocol):
 
 
 def _label_time(value: Any, freq: str) -> str:
-    stamp = pd.Timestamp(value)
+    try:
+        stamp = pd.Timestamp(value)
+        year = int(stamp.year)
+        month = int(stamp.month)
+        day = int(stamp.day)
+    except (TypeError, ValueError):
+        if not all(hasattr(value, attr) for attr in ("year", "month", "day")):
+            raise
+        year = int(value.year)
+        month = int(value.month)
+        day = int(value.day)
     if freq == "day":
-        return stamp.strftime("%Y-%m-%d")
+        return f"{year:04d}-{month:02d}-{day:02d}"
     if freq == "month":
-        return stamp.strftime("%Y-%m")
+        return f"{year:04d}-{month:02d}"
     if freq == "season":
-        return f"{stamp.year}-Q{stamp.quarter}"
+        quarter = ((month - 1) // 3) + 1
+        return f"{year}-Q{quarter}"
     return "all"
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cftime
 import numpy as np
 import pytest
 import xarray as xr
@@ -50,6 +51,25 @@ def test_group_dataset_day_and_month() -> None:
     assert list(monthly) == ["2008-07", "2008-08"]
     assert daily["2008-07-01"].sizes["time"] == 2
     assert monthly["2008-07"].sizes["time"] == 3
+
+
+def test_group_dataset_labels_cftime_calendar_values() -> None:
+    ds = xr.Dataset(
+        {"aod": (("time", "lat", "lon"), np.ones((3, 1, 1)))},
+        coords={
+            "time": [
+                cftime.DatetimeNoLeap(2008, 7, 1, 3),
+                cftime.DatetimeNoLeap(2008, 7, 1, 6),
+                cftime.DatetimeNoLeap(2008, 10, 1, 0),
+            ],
+            "lat": [0.0],
+            "lon": [0.0],
+        },
+    )
+
+    assert list(group_dataset(ds, "day")) == ["2008-07-01", "2008-10-01"]
+    assert list(group_dataset(ds, "month")) == ["2008-07", "2008-10"]
+    assert list(group_dataset(ds, "season")) == ["2008-Q3", "2008-Q4"]
 
 
 def test_group_dataset_season_groups_quarter_dates_together() -> None:
