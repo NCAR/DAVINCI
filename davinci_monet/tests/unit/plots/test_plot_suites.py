@@ -56,6 +56,20 @@ def test_gridded_aod_suite_maps_fields_and_applies_overrides() -> None:
     assert plot["fig_kwargs"] == {"figsize": [8.0, 4.0]}
 
 
+def test_gridded_aod_suite_preserves_unknown_dict_global_overrides() -> None:
+    plots = expand_plot_suite(
+        "daily",
+        {
+            "preset": "gridded_aod_diagnostics",
+            "source": "daily_aod",
+            "overrides": {"custom_renderer_options": {"enabled": True}},
+        },
+        available_fields=["analyzed_aod"],
+    )
+
+    assert plots["daily_analyzed_aod"]["custom_renderer_options"] == {"enabled": True}
+
+
 def test_unknown_plot_suite_preset_raises() -> None:
     with pytest.raises(ValueError, match="unknown plot suite preset"):
         expand_plot_suite(
