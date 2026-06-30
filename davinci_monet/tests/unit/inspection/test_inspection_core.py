@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
 from davinci_monet.inspection.core import inspect_run_directory
+
+
+def _install_fake_pdftoppm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_pdftoppm = bin_dir / "pdftoppm"
+    fake_pdftoppm.write_text(
+        f"#!{sys.executable}\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[-1] + '.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')\n"
+    )
+    fake_pdftoppm.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{Path('/usr/bin')}")
 
 
 def test_inspect_run_directory_writes_json_and_markdown(tmp_path) -> None:
@@ -22,6 +38,33 @@ def test_inspect_run_directory_writes_json_and_markdown(tmp_path) -> None:
         "known_preset_selected",
     ]
     assert all("detail" in check for check in data["checks"])
+
+
+def test_inspect_run_directory_writes_png_previews_for_final_pdfs(
+    tmp_path, monkeypatch
+) -> None:
+    _install_fake_pdftoppm(tmp_path, monkeypatch)
+    plots = tmp_path / "plots" / "daily"
+    plots.mkdir(parents=True)
+    (plots / "cam-analyzed-aod.pdf").write_bytes(b"%PDF-1.4\n")
+
+    result = inspect_run_directory(
+        tmp_path, presets=["gridded_aod_diagnostics"], preview_format="png"
+    )
+
+    preview = tmp_path / "inspection" / "previews" / "daily" / "cam-analyzed-aod.png"
+    assert result.passed is True
+    assert result.preview_paths == [preview]
+    assert preview.read_bytes().startswith(b"\x89PNG")
+    data = json.loads((tmp_path / "inspection" / "inspection.json").read_text())
+    assert data["previews"] == ["inspection/previews/daily/cam-analyzed-aod.png"]
+    preview_check = next(
+        check for check in data["checks"] if check["name"] == "inspection_previews_exist"
+    )
+    assert preview_check["passed"] is True
+    assert preview_check["previews"] == [
+        "inspection/previews/daily/cam-analyzed-aod.png"
+    ]
 
 
 def test_inspect_run_directory_fails_for_unknown_preset(tmp_path) -> None:

@@ -32,12 +32,15 @@ class InspectionStage(BaseStage):
             )
 
         output_dir = Path(context.analysis_config().output_dir or ".")
-        result = inspect_run_directory(output_dir, presets=cfg.presets)
+        result = inspect_run_directory(
+            output_dir, presets=cfg.presets, preview_format=cfg.preview_format
+        )
         data = {
             "passed": result.passed,
             "checks": result.checks,
             "inspection_json": str(result.json_path),
             "inspection_markdown": str(result.markdown_path),
+            "inspection_previews": [str(path) for path in result.preview_paths],
         }
         if result.passed:
             return self._create_result(

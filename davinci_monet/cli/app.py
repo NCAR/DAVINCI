@@ -397,11 +397,16 @@ def inspect(
         "--preset",
         help="Inspection preset to apply. Can be repeated.",
     ),
+    preview_format: str = typer.Option(
+        "png",
+        "--preview-format",
+        help="Inspection preview format to write.",
+    ),
 ) -> None:
     """Inspect final products in a DAVINCI run directory."""
     from davinci_monet.cli.commands.inspect import inspect_command
 
-    inspect_command(run_dir, presets)
+    inspect_command(run_dir, presets, preview_format)
 
 
 # CLI entry point

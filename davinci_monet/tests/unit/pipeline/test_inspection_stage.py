@@ -1,7 +1,24 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from davinci_monet.config.schema import MonetConfig
 from davinci_monet.pipeline.stages import InspectionStage, PipelineContext, StageStatus
+
+
+def _install_fake_pdftoppm(tmp_path: Path, monkeypatch) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_pdftoppm = bin_dir / "pdftoppm"
+    fake_pdftoppm.write_text(
+        f"#!{sys.executable}\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[-1] + '.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')\n"
+    )
+    fake_pdftoppm.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{Path('/usr/bin')}")
 
 
 def test_inspection_stage_skips_when_disabled(tmp_path) -> None:
@@ -45,7 +62,8 @@ def test_optional_inspection_failure_completes_stage(tmp_path) -> None:
     assert (tmp_path / "inspection" / "inspection.json").exists()
 
 
-def test_enabled_inspection_passes_for_typed_config(tmp_path) -> None:
+def test_enabled_inspection_passes_for_typed_config(tmp_path, monkeypatch) -> None:
+    _install_fake_pdftoppm(tmp_path, monkeypatch)
     plots = tmp_path / "plots"
     plots.mkdir()
     (plots / "aod.pdf").write_bytes(b"%PDF-1.4\n")
@@ -65,3 +83,6 @@ def test_enabled_inspection_passes_for_typed_config(tmp_path) -> None:
     assert result.status == StageStatus.COMPLETED
     assert result.data["passed"] is True
     assert result.data["inspection_json"].endswith("inspection.json")
+    assert result.data["inspection_previews"] == [
+        str(tmp_path / "inspection" / "previews" / "aod.png")
+    ]

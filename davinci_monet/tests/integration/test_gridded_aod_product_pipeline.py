@@ -92,5 +92,8 @@ def test_gridded_aod_product_pipeline_creates_artifacts_plots_inspection_and_man
     assert all(path.endswith(".pdf") for path in manifest["plots"])
     assert any("2008-07-01" in path for path in manifest["plots"])
     assert any("2008-07-02" in path for path in manifest["plots"])
+    previews = sorted((run / "inspection" / "previews").rglob("*.png"))
+    assert len(previews) == len(manifest["plots"])
+    assert len(manifest["inspection"]["inspection_previews"]) == len(manifest["plots"])
     product_pngs = [p for p in run.rglob("*.png") if "inspection/previews" not in str(p)]
     assert product_pngs == []
