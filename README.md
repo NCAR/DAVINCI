@@ -2,6 +2,8 @@
 
 **Data Analysis and Visual Intelligence for Climate/Chemistry**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21180438.svg)](https://doi.org/10.5281/zenodo.21180438)
+
 A modern, type-safe Python toolkit for evaluating climate and atmospheric composition models against observations.
 
 ## Features
@@ -222,6 +224,14 @@ Obs Files ────► Obs Reader ───► xr.Dataset ──┘         �
 - I/O: netCDF4, monet, monetio
 - Config: pydantic, pyyaml
 - CLI: typer
+
+## Citation
+
+If you use DAVINCI in your research, please cite it via its Zenodo record:
+
+> Fillmore, D. *DAVINCI: Data Analysis and Visual Intelligence for Climate/Chemistry.* Zenodo. https://doi.org/10.5281/zenodo.21180438
+
+The DOI [10.5281/zenodo.21180438](https://doi.org/10.5281/zenodo.21180438) resolves to the latest release.
 
 ## License
 
