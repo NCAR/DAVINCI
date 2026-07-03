@@ -326,7 +326,11 @@ class PointStrategy(BasePairingStrategy):
                         f"Extra dimensions {extra_dims} are not singletons."
                     )
             else:
-                # Dimensions match - use original logic
+                # Dimensions match - use original logic. Transpose first: y's
+                # dims can match x's as a set while differing in order, and
+                # assigning raw .values positionally would silently mislabel
+                # the data in that case.
+                y_var = y_var.transpose(*x_ref.dims, missing_dims="raise")
                 y_da = xr.DataArray(
                     y_var.values,
                     dims=x_ref.dims,

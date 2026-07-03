@@ -6,6 +6,7 @@ This module loads and parses DAVINCI YAML configuration files.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -17,6 +18,76 @@ from davinci_monet.config.schema import (
 )
 from davinci_monet.core.exceptions import ConfigurationError
 from davinci_monet.core.schema_utils import dump_schema, validate_schema
+
+_YAML_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+\s*:")
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_BRACED_ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_BARE_ENV_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _looks_like_yaml_content(value: str) -> bool:
+    """Return whether a string should be treated as inline YAML content."""
+    stripped = value.strip()
+    if not stripped:
+        return True
+    if "\n" in value or "\r" in value:
+        return True
+    if stripped.startswith(("{", "[", "---", "...")):
+        return True
+    if _WINDOWS_DRIVE_RE.match(stripped):
+        return False
+    return _YAML_KEY_RE.match(stripped) is not None
+
+
+def _read_yaml_file(path: Path) -> Any:
+    """Read YAML data from an existing configuration file."""
+    try:
+        with path.open() as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError as e:
+        raise ConfigurationError(f"Configuration file not found: {path}") from e
+
+
+def _expand_env_value(name: str, original: str) -> str:
+    """Return an environment variable value or raise a config error."""
+    if name not in os.environ:
+        raise ConfigurationError(
+            f"Unresolved environment variable {name!r} in config value: {original!r}"
+        )
+    return os.environ[name]
+
+
+def _should_expand_bare_env(value: str, start: int, end: int) -> bool:
+    """Return whether a bare $VAR match is likely an environment variable."""
+    previous = value[start - 1 : start]
+    next_char = value[end : end + 1]
+    if previous == "$" or next_char == "$":
+        return False
+    if previous and previous not in "/\\:":
+        return False
+    if next_char and next_char not in "/\\.-":
+        return False
+    return True
+
+
+def _expand_string(value: str) -> str:
+    """Expand supported env vars and leading home directories in a string."""
+
+    def replace_braced(match: re.Match[str]) -> str:
+        return _expand_env_value(match.group(1), value)
+
+    expanded = _BRACED_ENV_RE.sub(replace_braced, value)
+    bare_source = expanded
+
+    def replace_bare(match: re.Match[str]) -> str:
+        if not _should_expand_bare_env(bare_source, match.start(), match.end()):
+            return match.group(0)
+        return _expand_env_value(match.group(1), bare_source)
+
+    expanded = _BARE_ENV_RE.sub(replace_bare, bare_source)
+    if expanded == "~" or expanded.startswith(("~/", "~\\")):
+        expanded = os.path.expanduser(expanded)
+    return expanded
 
 
 def load_yaml(source: str | Path | TextIO) -> dict[str, Any]:
@@ -44,14 +115,16 @@ def load_yaml(source: str | Path | TextIO) -> dict[str, Any]:
     >>> data = load_yaml("analysis:\\n  debug: true")
     """
     try:
-        if isinstance(source, (str, Path)):
-            path = Path(source)
-            if path.exists():
-                with open(path) as f:
-                    data = yaml.safe_load(f)
+        if isinstance(source, Path):
+            data = _read_yaml_file(source.expanduser())
+        elif isinstance(source, str):
+            if _looks_like_yaml_content(source):
+                data = yaml.safe_load(source)
             else:
-                # Try parsing as YAML string
-                data = yaml.safe_load(str(source))
+                path = Path(source).expanduser()
+                if not path.exists():
+                    raise ConfigurationError(f"Configuration file not found: {source}")
+                data = _read_yaml_file(path)
         else:
             # File-like object
             data = yaml.safe_load(source)
@@ -62,10 +135,12 @@ def load_yaml(source: str | Path | TextIO) -> dict[str, Any]:
             raise ConfigurationError(f"YAML root must be a mapping, got {type(data)}")
         return data
 
+    except ConfigurationError:
+        raise
     except yaml.YAMLError as e:
         raise ConfigurationError(f"Failed to parse YAML: {e}") from e
-    except FileNotFoundError as e:
-        raise ConfigurationError(f"Configuration file not found: {source}") from e
+    except OSError as e:
+        raise ConfigurationError(f"Error reading configuration file {source}: {e}") from e
     except Exception as e:
         raise ConfigurationError(f"Error loading configuration: {e}") from e
 
@@ -94,7 +169,7 @@ def expand_env_vars(data: dict[str, Any]) -> dict[str, Any]:
 
     def _expand(value: Any) -> Any:
         if isinstance(value, str):
-            return os.path.expandvars(value)
+            return _expand_string(value)
         elif isinstance(value, dict):
             return {k: _expand(v) for k, v in value.items()}
         elif isinstance(value, list):
@@ -282,7 +357,7 @@ def dump_config(config: MonetConfig, path: str | Path) -> None:
     """
     data = dump_schema(config, exclude_none=True, exclude_unset=True)
     with open(path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 def config_to_yaml(config: MonetConfig) -> str:
@@ -299,7 +374,7 @@ def config_to_yaml(config: MonetConfig) -> str:
         YAML string representation.
     """
     data = dump_schema(config, exclude_none=True, exclude_unset=True)
-    result: str = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    result: str = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
     return result
 
 

@@ -366,7 +366,6 @@ class PairingEngine:
                 [
                     f"y_{y_name}",
                     f"y_{x_name}",
-                    y_name,
                 ],
             )
 

@@ -16,6 +16,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from davinci_monet.core.coordinates import (
+    match_longitude_convention,
+    normalize_post_load_coordinates,
+    vertical_dim_name,
+    wrap_longitudes,
+)
 from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -112,6 +118,9 @@ class IntermediateGridStrategy(BasePairingStrategy):
             Paired dataset on common grid with x, y, and count
             variables.
         """
+        x_data = normalize_post_load_coordinates(x_data)
+        y_data = normalize_post_load_coordinates(y_data)
+
         if kwargs.get("horizontal_res") is not None:
             return self._pair_symmetric(
                 x_data,
@@ -135,10 +144,9 @@ class IntermediateGridStrategy(BasePairingStrategy):
 
         # Extract surface if the y source has a vertical dimension
         y_proc = y_data
-        for dim_name in ["lev", "z", "level"]:
-            if dim_name in y_proc.dims:
-                y_proc = self._extract_surface(y_proc, dim_name)
-                break
+        dim_name = vertical_dim_name(y_proc)
+        if dim_name is not None:
+            y_proc = self._extract_surface(y_proc, dim_name)
 
         # Get y coordinates
         y_lat, y_lon = self._get_y_coords(y_proc)
@@ -189,9 +197,7 @@ class IntermediateGridStrategy(BasePairingStrategy):
         lon_flat = x_lon.values.flatten().astype(np.float64)
         data_flat = x_data[x_var].values.flatten().astype(np.float64)
 
-        # Handle longitude convention: shift -180..180 to 0..360 if needed
-        if lon_edges[0] >= 0 and np.any(lon_flat < 0):
-            lon_flat = np.where(lon_flat < 0, lon_flat + 360.0, lon_flat)
+        lon_flat = match_longitude_convention(lon_flat, lon_edges)
 
         # Get x timestamps as epoch seconds, aligned to the same
         # flattening order as ``data_flat`` (i.e. the binned x variable).
@@ -447,8 +453,7 @@ class IntermediateGridStrategy(BasePairingStrategy):
         # flatten pattern as the lat/lon flatten in ``_flatten_to_points`` so the
         # i-th altitude aligns element-wise with the i-th value/lat/lon/time.
         alt_flat = alt.broadcast_like(da).transpose(*da.dims).values.astype(np.float64).flatten()
-        if lon_edges[0] >= 0 and np.any(lon_flat < 0):
-            lon_flat = np.where(lon_flat < 0, lon_flat + 360.0, lon_flat)
+        lon_flat = match_longitude_convention(lon_flat, lon_edges)
         count = np.zeros(shape, dtype=np.int32)
         acc = np.zeros(shape, dtype=np.float64)
         bin_points_to_grid_4d(
@@ -483,9 +488,9 @@ class IntermediateGridStrategy(BasePairingStrategy):
         return centers, edges
 
     def _reduce_to_surface(self, ds: xr.Dataset) -> xr.Dataset:
-        for dim_name in ("lev", "z", "level"):
-            if dim_name in ds.dims:
-                return self._extract_surface(ds, dim_name)
+        dim_name = vertical_dim_name(ds)
+        if dim_name is not None:
+            return self._extract_surface(ds, dim_name)
         return ds
 
     def _source_altitude(self, ds: xr.Dataset, var: str, units: str) -> xr.DataArray:
@@ -584,8 +589,7 @@ class IntermediateGridStrategy(BasePairingStrategy):
         min_sample_count: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         time_flat, lon_flat, lat_flat, data_flat = self._flatten_to_points(ds, var)
-        if lon_edges[0] >= 0 and np.any(lon_flat < 0):
-            lon_flat = np.where(lon_flat < 0, lon_flat + 360.0, lon_flat)
+        lon_flat = match_longitude_convention(lon_flat, lon_edges)
         count = np.zeros((ntime, nlon, nlat), dtype=np.int32)
         acc = np.zeros((ntime, nlon, nlat), dtype=np.float64)
         bin_swath_to_grid(
@@ -609,8 +613,9 @@ class IntermediateGridStrategy(BasePairingStrategy):
             lats: list[float] = []
             for ds in datasets:
                 lat, lon = self._get_x_coords(ds)
-                lons.append(float(np.nanmin(lon.values)))
-                lons.append(float(np.nanmax(lon.values)))
+                lon_values = wrap_longitudes(lon.values)
+                lons.append(float(np.nanmin(lon_values)))
+                lons.append(float(np.nanmax(lon_values)))
                 lats.append(float(np.nanmin(lat.values)))
                 lats.append(float(np.nanmax(lat.values)))
             lon0, lon1, lat0, lat1 = min(lons), max(lons), min(lats), max(lats)
@@ -691,8 +696,8 @@ class IntermediateGridStrategy(BasePairingStrategy):
                 raise PairingError(
                     "match_dataset grid mode requires 1D y lat/lon " "(rectilinear grid)"
                 )
-            lat_centers = y_lat.values.astype(np.float64)
-            lon_centers = y_lon.values.astype(np.float64)
+            lat_centers = np.sort(y_lat.values.astype(np.float64))
+            lon_centers = np.sort(wrap_longitudes(y_lon.values.astype(np.float64)))
             lat_edges = edges_from_centers(lat_centers)
             lon_edges = edges_from_centers(lon_centers)
 

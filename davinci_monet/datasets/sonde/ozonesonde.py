@@ -6,6 +6,7 @@ vertical profile data from balloon-borne instruments.
 
 from __future__ import annotations
 
+import re
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,78 @@ from davinci_monet.io.reader_utils import (
     set_geometry_attr,
     validate_file_list,
 )
+
+_MISSING_KEYWORDS = ("missing", "fill", "sentinel", "bad")
+
+
+def _numeric_tokens(text: str) -> list[float]:
+    """Extract numeric tokens from metadata text."""
+    values: list[float] = []
+    for token in re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", text):
+        try:
+            values.append(float(token))
+        except ValueError:
+            continue
+    return values
+
+
+def _metadata_missing_values(metadata: dict[str, Any]) -> set[float]:
+    """Return missing-value sentinels declared in metadata key/value pairs."""
+    sentinels: set[float] = set()
+    for key, value in metadata.items():
+        combined = f"{key} {value}"
+        if any(keyword in combined.lower() for keyword in _MISSING_KEYWORDS):
+            sentinels.update(_numeric_tokens(str(value)))
+    return sentinels
+
+
+def _header_missing_values(lines: Sequence[str]) -> set[float]:
+    """Return missing-value sentinels declared in free-form header lines."""
+    sentinels: set[float] = set()
+    for line in lines:
+        if any(keyword in line.lower() for keyword in _MISSING_KEYWORDS):
+            sentinels.update(_numeric_tokens(line))
+    return sentinels
+
+
+def _mask_missing_values(df: pd.DataFrame, sentinels: set[float]) -> pd.DataFrame:
+    """Mask declared sentinel values in numeric profile data."""
+    if not sentinels:
+        return df
+    sentinel_values = np.array(sorted(sentinels), dtype=float)
+    result = df.copy()
+    for column in result.columns:
+        if pd.api.types.is_numeric_dtype(result[column]):
+            values = result[column].to_numpy(dtype=float, copy=False)
+            result[column] = result[column].mask(np.isin(values, sentinel_values))
+    return result
+
+
+_SHADOZ_OZONE_FLOOR = 9000.0
+
+
+def _is_shadoz_ozone_column(name: str) -> bool:
+    """Identify SHADOZ ozone mixing-ratio/partial-pressure columns by name."""
+    lowered = name.lower()
+    return "o3" in lowered or "ozone" in lowered
+
+
+def _apply_shadoz_ozone_floor(df: pd.DataFrame) -> pd.DataFrame:
+    """Mask SHADOZ ozone-column values >= 9000, the SHADOZ missing-data floor.
+
+    SHADOZ files additionally use values >= 9000 as a missing-data floor in
+    ozone mixing-ratio/partial-pressure columns, independent of the header's
+    declared missing-value code (e.g. 9005 or 9999 in an ``O3`` column are
+    fills even when only ``-9999`` is declared). Altitude/geopotential-height
+    columns legitimately exceed 9000 and are never floored; pressure columns
+    are never floored either.
+    """
+    result = df.copy()
+    for column in result.columns:
+        if _is_shadoz_ozone_column(column) and pd.api.types.is_numeric_dtype(result[column]):
+            values = result[column].to_numpy(dtype=float, copy=False)
+            result[column] = result[column].mask(values >= _SHADOZ_OZONE_FLOOR)
+    return result
 
 
 @source_registry.register("ozonesonde")
@@ -210,6 +283,7 @@ class OzonesondeReader:
             raise DataFormatError(f"No profile data found in {file_path}")
 
         df = pd.DataFrame(data_rows, columns=headers[: len(data_rows[0])])
+        df = _mask_missing_values(df, _metadata_missing_values(metadata))
 
         # Add level coordinate
         df["level"] = range(len(df))
@@ -273,6 +347,8 @@ class OzonesondeReader:
         if not headers:
             headers = ["Press", "Alt", "Temp", "RH", "O3"]
 
+        missing_values = _header_missing_values(lines[:header_lines])
+
         data_rows = []
         for line in lines[header_lines:]:
             if line.strip():
@@ -289,6 +365,8 @@ class OzonesondeReader:
             raise DataFormatError(f"No profile data found in {file_path}")
 
         df = pd.DataFrame(data_rows, columns=headers[: len(data_rows[0])])
+        df = _mask_missing_values(df, missing_values)
+        df = _apply_shadoz_ozone_floor(df)
         df["level"] = range(len(df))
         df = df.set_index("level")
 

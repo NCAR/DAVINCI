@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from davinci_monet.core.coordinates import surface_index
 from davinci_monet.plots.base import BasePlotter, PlotConfig
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ def detect_spatial_geometry(
     - ``"regular_grid"``: lat and lon are both 1-D but do **not** share a
       single site dimension (i.e. they are independent axis arrays), and
       the field has at least two dimensions.  This is the geometry of
-      structured rectilinear dataset output where lat and lon define a
+      structured rectilinear model output where lat and lon define a
       Cartesian product.
 
     - ``"curvilinear_grid"``: lat and/or lon are 2-D arrays whose values
@@ -129,11 +130,7 @@ def surface_level_index(field_da: xr.DataArray, level_dim: str) -> int:
     index; for other conventions it is the first. Falls back to ``0`` when the
     level coordinate is absent or has fewer than two values.
     """
-    if level_dim in field_da.coords:
-        vert_vals = field_da.coords[level_dim].values
-        if len(vert_vals) > 1 and vert_vals[-1] > vert_vals[0]:
-            return -1
-    return 0
+    return surface_index(field_da, level_dim)
 
 
 def draw_spatial_field(
@@ -143,11 +140,15 @@ def draw_spatial_field(
     lons: np.ndarray,
     *,
     plot_type: str,
-    cmap: str,
-    vmin: float,
-    vmax: float,
+    cmap: Any,
+    vmin: float | None,
+    vmax: float | None,
+    norm: Any | None = None,
     marker_size: float,
     alpha: float,
+    field_dims: tuple[Any, ...] | None = None,
+    lat_dim: Any | None = None,
+    lon_dim: Any | None = None,
 ) -> Any:
     """Draw a single spatial field on a GeoAxes as scatter or pcolormesh.
 
@@ -185,29 +186,35 @@ def draw_spatial_field(
     lats_flat = lats_flat[mask]
     lons_flat = lons_flat[mask]
 
+    color_kwargs: dict[str, Any] = {"cmap": cmap}
+    if norm is not None:
+        color_kwargs["norm"] = norm
+    else:
+        color_kwargs["vmin"] = vmin
+        color_kwargs["vmax"] = vmax
+
     if plot_type == "pcolormesh" and lats.ndim == 2:
         # Curvilinear grid (e.g. swath) — pcolormesh with 2-D coords
         return ax.pcolormesh(
             lons,
             lats,
             data,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
+            **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
+            rasterized=True,
         )
     if plot_type == "pcolormesh" and lats.ndim == 1 and data.ndim >= 2:
         # Regular grid with 1-D coords — pcolormesh handles natively
+        mesh_data = _orient_regular_grid_data(data, lats, lons, field_dims, lat_dim, lon_dim)
         return ax.pcolormesh(
             lons,
             lats,
-            data.T if data.shape[0] == len(lons) else data,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
+            mesh_data,
+            **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
+            rasterized=True,
         )
     # Point/track/site data — scatter
     return ax.scatter(
@@ -215,13 +222,38 @@ def draw_spatial_field(
         lats_flat,
         c=data_flat,
         s=marker_size**2,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        **color_kwargs,
         transform=ccrs.PlateCarree(),
         alpha=alpha,
         edgecolors="none",
+        rasterized=True,
     )
+
+
+def _orient_regular_grid_data(
+    data: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+    field_dims: tuple[Any, ...] | None,
+    lat_dim: Any | None,
+    lon_dim: Any | None,
+) -> np.ndarray:
+    """Orient 2-D regular-grid data as ``(lat, lon)`` for pcolormesh."""
+    if data.ndim != 2:
+        return data
+    if field_dims is not None and lat_dim in field_dims and lon_dim in field_dims:
+        lat_axis = field_dims.index(lat_dim)
+        lon_axis = field_dims.index(lon_dim)
+        if (lat_axis, lon_axis) == (0, 1):
+            return data
+        if (lat_axis, lon_axis) == (1, 0):
+            return data.T
+
+    if data.shape == (len(lats), len(lons)):
+        return data
+    if data.shape == (len(lons), len(lats)):
+        return data.T
+    return data
 
 
 @dataclass
@@ -242,6 +274,8 @@ class MapConfig:
         Show coastlines.
     show_gridlines : bool
         Show lat/lon gridlines.
+    gridline_style : str
+        Matplotlib linestyle for lat/lon gridlines.
     resolution : str
         Feature resolution ('10m', '50m', '110m').
     land_color : str
@@ -256,6 +290,7 @@ class MapConfig:
     show_countries: bool = True
     show_coastlines: bool = True
     show_gridlines: bool = True
+    gridline_style: str = "-"
     resolution: str = "50m"
     land_color: str = "lightgray"
     ocean_color: str = "lightblue"
@@ -370,13 +405,13 @@ class BaseSpatialPlotter(BasePlotter):
         cfg = map_config or self.map_config
 
         # Add land/ocean colors
-        if cfg.land_color:
+        if cfg.land_color and str(cfg.land_color).lower() != "none":
             ax.add_feature(  # type: ignore[attr-defined]
                 cfeature.LAND.with_scale(cfg.resolution),
                 facecolor=cfg.land_color,
                 zorder=0,
             )
-        if cfg.ocean_color:
+        if cfg.ocean_color and str(cfg.ocean_color).lower() != "none":
             ax.add_feature(  # type: ignore[attr-defined]
                 cfeature.OCEAN.with_scale(cfg.resolution),
                 facecolor=cfg.ocean_color,
@@ -408,7 +443,7 @@ class BaseSpatialPlotter(BasePlotter):
                 draw_labels=True,
                 linewidth=0.5,
                 alpha=0.5,
-                linestyle="--",
+                linestyle=cfg.gridline_style,
             )
             gl.top_labels = False
             gl.right_labels = False

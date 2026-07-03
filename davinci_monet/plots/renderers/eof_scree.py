@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("eof_scree")
+@register_plotter("eof_scree", arity="single_source", category="statistical")
 class EOFScreePlotter(BasePlotter):
     """Bar chart of explained variance (%) by EOF mode."""
 

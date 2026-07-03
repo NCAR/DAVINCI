@@ -9,8 +9,9 @@ For production satellite analyses prefer :class:`IntermediateGridStrategy` (or t
 external `bin_swath_to_grid` helper in ``pairing/grid_binning.py``). Real L2
 swaths have 10^5-10^6 pixels and per-pixel nearest-neighbor matching is too
 slow; the binning path collapses pixels onto a target grid once and then
-pairs grid-to-grid. MODIS L2 geometry (``datasets/satellite/modis_l2.py``)
-follow that pattern and emit ``geometry = "GRID"``.
+pairs grid-to-grid. The registered MODIS L2 AOD reader
+(``datasets/satellite/modis_l2_aod.py``) follows that pattern and emits
+``geometry = "GRID"``.
 
 This class is preserved for possible future use cases that genuinely need
 direct per-pixel pairing (e.g. small swaths, sparse retrievals, debugging).
@@ -25,6 +26,7 @@ from typing import Any, Hashable
 import numpy as np
 import xarray as xr
 
+from davinci_monet.core.coordinates import surface_index, vertical_dim_name
 from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -282,7 +284,11 @@ class SwathStrategy(BasePairingStrategy):
 
                 point_val = var_data.isel(selection)
 
-                # If still has dimensions, take mean (for vertical)
+                level_dim = vertical_dim_name(point_val)
+                if level_dim is not None:
+                    point_val = point_val.isel({level_dim: surface_index(point_val, level_dim)})
+
+                # If still has dimensions, take mean for non-spatial leftovers.
                 if point_val.ndim > 0:
                     out_data[i] = float(point_val.mean().values)
                 else:

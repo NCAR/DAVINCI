@@ -18,6 +18,7 @@ from davinci_monet.datasets.satellite import mopitt_l3_co as _mopitt_l3_co
 from davinci_monet.datasets.satellite import omps_l3_o3 as _omps_l3_o3
 from davinci_monet.datasets.satellite import tempo_l2_no2 as _tempo_l2_no2
 from davinci_monet.datasets.satellite import tropomi as _tropomi
+from davinci_monet.datasets.satellite import viirs_l2_aerdb as _viirs_l2_aerdb
 from davinci_monet.datasets.sonde import ozonesonde as _ozonesonde  # noqa: F401
 from davinci_monet.datasets.surface import aeronet as _aeronet
 from davinci_monet.datasets.surface import airnow as _airnow

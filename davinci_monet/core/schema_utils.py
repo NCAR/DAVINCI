@@ -7,6 +7,7 @@ from typing import Any
 
 def dump_schema(value: Any, **kwargs: Any) -> dict[str, Any]:
     """Return a dictionary from a Pydantic object."""
+    kwargs.setdefault("mode", "json")
     return dict(value.model_dump(**kwargs))
 
 

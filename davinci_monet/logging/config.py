@@ -3,7 +3,7 @@
 This module provides structured logging configuration to replace
 print() statements throughout the package. It supports:
 - Console output with color formatting
-- File output with rotation
+- File output
 - Structured extra fields for context
 - Multiple log levels
 
@@ -103,6 +103,7 @@ class StructuredFormatter(logging.Formatter):
         "name",
         "msg",
         "args",
+        "asctime",
         "created",
         "filename",
         "funcName",
@@ -217,7 +218,9 @@ def configure_logging(
         LogLevel enum, or integer.
     log_file
         Optional path to log file. If provided, logs are written to this
-        file in addition to console.
+        file in addition to console. Each call opens a plain, non-rotating
+        file handler; callers that want per-run separation should pass a
+        fresh timestamped path (as the pipeline runner does).
     log_format
         Custom log format string. If None, uses a sensible default.
     date_format
@@ -290,8 +293,6 @@ def configure_logging(
                     # First apply structured formatting
                     message = StructuredFormatter.format(self, record)
                     # Then apply color
-                    record.msg = message
-                    record.args = ()
                     color = self.COLORS.get(record.levelno, "")
                     if color:
                         return f"{color}{message}{self.RESET}"

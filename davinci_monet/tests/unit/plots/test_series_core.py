@@ -226,7 +226,7 @@ class TestRegistryAliases:
             register_plotter,
         )
 
-        @register_plotter("p0_real_plot")
+        @register_plotter("p0_real_plot", arity="single_source", category="specialized")
         class _RealPlot(BasePlotter):
             name = "p0_real_plot"
 

@@ -54,6 +54,54 @@ def test_symmetric_bins_both_point_sources_cell_means():
     assert paired["y_AOD"].attrs["axis"] == "y" and paired["y_AOD"].attrs["source_label"] == "mod"
 
 
+def test_match_dataset_binning_handles_descending_y_latitude():
+    x = _point_ds([40.0], [-100.0], [5.0], "aod")
+    y = xr.Dataset(
+        {"AOD": (["time", "lat", "lon"], np.ones((1, 3, 1), dtype=float))},
+        coords={
+            "time": pd.to_datetime(["2024-02-01"]),
+            "lat": [50.0, 40.0, 30.0],
+            "lon": [-100.0],
+        },
+    )
+
+    paired = IntermediateGridStrategy().pair_sources(
+        x_data=x,
+        y_data=y,
+        x_var="aod",
+        y_var="AOD",
+        grid_mode="match_dataset",
+        time_resolution="1D",
+        min_sample_count=1,
+    )
+
+    assert int(paired["sample_count"].sum().item()) == 1
+    assert np.isfinite(paired["x_aod"]).any()
+    assert np.isfinite(paired["y_AOD"]).any()
+    np.testing.assert_allclose(paired["lat"].values, [30.0, 40.0, 50.0])
+
+
+def test_symmetric_auto_extent_normalizes_mixed_longitude_conventions():
+    x = _point_ds([35.0], [-100.0], [1.0], "aod")
+    y = _point_ds([35.0], [260.0], [2.0], "AOD")
+
+    paired = IntermediateGridStrategy().pair_sources(
+        x_data=x,
+        y_data=y,
+        x_var="aod",
+        y_var="AOD",
+        x_source="obs",
+        y_source="mod",
+        horizontal_res=1.0,
+        time_resolution="1D",
+        min_sample_count=1,
+    )
+
+    assert paired.sizes["lon"] == 1
+    assert int(paired["x_sample_count"].sum().item()) == 1
+    assert int(paired["y_sample_count"].sum().item()) == 1
+
+
 def test_small_span_auto_extent_keeps_all_points():
     # Regression: data span (~0.9 deg) smaller than horizontal_res (2.0) with the
     # default (auto) extent must NOT silently drop edge points — the grid must

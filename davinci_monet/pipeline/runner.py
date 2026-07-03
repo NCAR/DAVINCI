@@ -98,7 +98,8 @@ class PipelineResult:
         """Collect per-item errors from all stages.
 
         Stages stash per-item error lists in ``context.metadata`` under keys
-        such as ``pairing_errors``, ``stats_errors``, and ``plot_errors``.
+        such as ``pairing_errors``, ``stats_errors``, ``plot_errors``, and
+        ``analysis_errors``.
         This property aggregates those lists alongside any stage-level
         failures so that all errors are discoverable in one place without
         changing the ``success`` flag semantics.
@@ -118,6 +119,7 @@ class PipelineResult:
                 "pairing_errors",
                 "stats_errors",
                 "plot_errors",
+                "analysis_errors",
             )
             for key in _METADATA_ERROR_KEYS:
                 value = self.context.metadata.get(key)
@@ -187,7 +189,9 @@ class PipelineRunner:
             Close source datasets before returning. Set False when programmatic
             callers need to inspect data in ``PipelineResult.context``.
         """
-        self._stages = list(stages) if stages is not None else create_standard_pipeline()
+        self._stages: list[Stage] = (
+            list(stages) if stages is not None else list(create_standard_pipeline())
+        )
         self._fail_fast = fail_fast
         self._hooks = hooks or {}
         self._show_progress = show_progress
@@ -213,9 +217,9 @@ class PipelineRunner:
             Position to insert at. If None, appends to end.
         """
         if position is None:
-            self._stages.append(stage)  # type: ignore[arg-type]
+            self._stages.append(stage)
         else:
-            self._stages.insert(position, stage)  # type: ignore[arg-type]
+            self._stages.insert(position, stage)
 
     def remove_stage(self, stage_name: str) -> bool:
         """Remove a stage by name.
@@ -351,50 +355,50 @@ class PipelineRunner:
         start_time = time.time()
         self._call_hook("on_start", context)
 
+        def run_stage(stage: Stage) -> StageResult:
+            formatter.stage_start(stage.name)
+            if log_collector:
+                log_collector.start_stage(stage.name)
+
+            stage_result = self._execute_stage(stage, context)
+            result.stage_results.append(stage_result)
+            context.results[stage.name] = stage_result
+
+            if log_collector:
+                log_collector.finalize_items()
+
+            if stage_result.status == StageStatus.FAILED:
+                result.success = False
+                formatter.stage_end(stage.name, False, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "failed", stage_result.duration_seconds)
+                    if stage_result.error:
+                        log_collector.log_error(
+                            stage_name=stage.name,
+                            error_type=stage_result.error_type or "Exception",
+                            error_message=stage_result.error,
+                            traceback_str=stage_result.traceback_str,
+                        )
+            elif stage_result.status == StageStatus.SKIPPED:
+                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "skipped", stage_result.duration_seconds)
+            elif stage_result.status == StageStatus.COMPLETED:
+                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                if log_collector:
+                    log_collector.end_stage(stage.name, "completed", stage_result.duration_seconds)
+            return stage_result
+
         try:
             for stage in self._stages:
-                # Start stage in formatter and collector
-                formatter.stage_start(stage.name)
-                if log_collector:
-                    log_collector.start_stage(stage.name)
+                stage_result = run_stage(stage)
+                if stage_result.status == StageStatus.FAILED and self._fail_fast:
+                    break
 
-                stage_result = self._execute_stage(stage, context)
-                result.stage_results.append(stage_result)
-
-                # Store result in context
-                context.results[stage.name] = stage_result
-
-                # Finalize any open items before ending stage
-                if log_collector:
-                    log_collector.finalize_items()
-
-                if stage_result.status == StageStatus.FAILED:
-                    result.success = False
-                    formatter.stage_end(stage.name, False, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(stage.name, "failed", stage_result.duration_seconds)
-                        # Log the error with traceback for the Markdown report
-                        if stage_result.error:
-                            log_collector.log_error(
-                                stage_name=stage.name,
-                                error_type=stage_result.error_type or "Exception",
-                                error_message=stage_result.error,
-                                traceback_str=stage_result.traceback_str,
-                            )
-                    if self._fail_fast:
-                        break
-                elif stage_result.status == StageStatus.SKIPPED:
-                    formatter.stage_end(stage.name, True, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(
-                            stage.name, "skipped", stage_result.duration_seconds
-                        )
-                elif stage_result.status == StageStatus.COMPLETED:
-                    formatter.stage_end(stage.name, True, stage_result.duration_seconds)
-                    if log_collector:
-                        log_collector.end_stage(
-                            stage.name, "completed", stage_result.duration_seconds
-                        )
+            if self._fail_fast and result.failed_stages:
+                for stage in self._stages:
+                    if stage.name == "manifest" and stage.name not in context.results:
+                        run_stage(stage)
 
         finally:
             # Print footer
@@ -413,16 +417,21 @@ class PipelineRunner:
                 error_message=error_message,
             )
 
-            # Surface non-fatal per-item errors (pairing/stats/plot) that stages
-            # collected in metadata. These do not flip success, but were
-            # previously silent — a run could "succeed" while dropping items.
+            # Surface non-fatal per-item errors that stages collected in
+            # metadata. These do not flip success, but were previously silent —
+            # a run could "succeed" while dropping items.
             item_errors = {
                 key: context.metadata.get(key)
-                for key in ("pairing_errors", "stats_errors", "plot_errors")
+                for key in (
+                    "pairing_errors",
+                    "stats_errors",
+                    "plot_errors",
+                    "analysis_errors",
+                )
                 if context.metadata.get(key)
             }
             if item_errors:
-                formatter.print_item_errors(item_errors)
+                formatter.print_item_errors(item_errors, pipeline_success=result.success)
 
             # Display the AI summary brief (if produced) to the terminal. The
             # summary stage cannot print durably itself (its log_progress is

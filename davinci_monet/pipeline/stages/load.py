@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import xarray as xr
 
+from davinci_monet.core.coordinates import normalize_post_load_coordinates
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.schema_utils import dump_schema, is_schema_object
 from davinci_monet.io.source_registration import ensure_builtin_source_readers_registered
@@ -231,7 +233,7 @@ class LoadSourcesStage(BaseStage):
         data = reader.open(file_paths, variables=variable_names, **open_kwargs)
         if time_range and "time" in data:
             start_time, end_time = time_range
-            data = data.sel(time=slice(start_time, end_time))
+            data = data.sel(time=self._time_slice_for_coord(data["time"], start_time, end_time))
         if variables:
             data = self._apply_variable_config(data, variables)
             # Subset to exactly the configured variables (coordinates preserved).
@@ -268,6 +270,36 @@ class LoadSourcesStage(BaseStage):
             config=cfg,
         )
         return source
+
+    @staticmethod
+    def _time_slice_for_coord(coord: xr.DataArray, start: Any, end: Any) -> slice:
+        """Build a time slice compatible with cftime-backed coordinates."""
+        try:
+            import cftime
+            import pandas as pd
+        except ImportError:
+            return slice(start, end)
+
+        values = np.asarray(getattr(coord, "values", []), dtype=object)
+        first = next((value for value in values.ravel() if value is not None), None)
+        if not isinstance(first, cftime.datetime):
+            return slice(start, end)
+
+        def _coerce(value: Any) -> Any:
+            if value is None or isinstance(value, cftime.datetime):
+                return value
+            stamp = pd.Timestamp(value)
+            return type(first)(
+                stamp.year,
+                stamp.month,
+                stamp.day,
+                stamp.hour,
+                stamp.minute,
+                stamp.second,
+                stamp.microsecond,
+            )
+
+        return slice(_coerce(start), _coerce(end))
 
     @staticmethod
     def _apply_variable_config(
@@ -340,6 +372,8 @@ class LoadSourcesStage(BaseStage):
         data = getattr(obj, "data", None)
         if data is None:
             return
+        data = normalize_post_load_coordinates(data)
+        obj.data = data
         try:
             geometry = obj.geometry
             x_name = geometry.name.lower() if hasattr(geometry, "name") else str(geometry)
@@ -351,6 +385,7 @@ class LoadSourcesStage(BaseStage):
     @staticmethod
     def _register_source(context: PipelineContext, label: str, obj: SourceData) -> None:
         """Register a loaded source in the canonical ``context.sources`` view."""
+        obj.data = normalize_post_load_coordinates(obj.data)
         context.sources[label] = obj
         obj.data.attrs["source_label"] = label
         obj.data.attrs["geometry"] = obj.geometry.name.lower()

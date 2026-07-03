@@ -21,7 +21,7 @@ class StrictSchema(
     validate_default=True,
     str_strip_whitespace=True,
 ):
-    """Base dataset with strict validation settings."""
+    """Base model with strict validation settings."""
 
 
 class FlexibleSchema(
@@ -143,7 +143,7 @@ class AnalysisConfig(StrictSchema):
         result: datetime | None = v
         return result
 
-    @field_validator("output_dir", mode="before")
+    @field_validator("output_dir", "log_dir", mode="before")
     @classmethod
     def parse_path(cls, v: Any) -> Path | None:
         """Convert string to Path."""
@@ -194,6 +194,14 @@ class VariableConfig(StrictSchema):
         +/- range for bias plots.
     nlevels_plot
         Number of contour levels.
+    style_preset
+        Named renderer style preset, e.g. "geosit_aod" for AOD maps.
+    levels_plot
+        Explicit contour or color-bin boundaries for plots.
+    cmap_plot
+        Matplotlib colormap name for plots.
+    extend_plot
+        Colorbar extension mode: "neither", "both", "min", or "max".
     LLOD_value
         Lower limit of detection value.
     LLOD_setvalue
@@ -217,6 +225,10 @@ class VariableConfig(StrictSchema):
     vmax_plot: float | None = None
     vdiff_plot: float | None = None
     nlevels_plot: int | None = None
+    style_preset: str | None = None
+    levels_plot: list[float] | None = None
+    cmap_plot: str | None = None
+    extend_plot: Literal["neither", "both", "min", "max"] | None = None
     LLOD_value: float | None = None
     LLOD_setvalue: float | None = None
     need: bool | None = None
@@ -349,7 +361,7 @@ class PipelinePairingConfig(StrictSchema):
     dask_pair_workers: int = 1
 
 
-class SourcePairConfig(FlexibleSchema):
+class SourcePairConfig(StrictSchema):
     """Binary pair definition as an ordered (x, y).
 
     ``x`` is the horizontal/reference axis; ``y`` is vertical. Diffs are ``y - x``.
@@ -505,6 +517,17 @@ class PlotGroupConfig(FlexibleSchema):
             return DataProcConfig(**v)
         result: DataProcConfig | dict[str, Any] = v
         return result
+
+
+class PlotSuiteConfig(StrictSchema):
+    """A named plot-suite expansion over one product source."""
+
+    preset: str
+    source: str
+    group: str | None = None
+    output_subdir: str | None = None
+    fields: dict[str, str] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 # =============================================================================
@@ -684,12 +707,55 @@ class WaveletSpec(StrictSchema):
         return v
 
 
-AnalysisSpec = EOFSpec | WaveletSpec
+class FormulaFieldSpec(StrictSchema):
+    """One named field produced by a gridded analysis formula."""
+
+    formula: str
+    units: str | None = None
+    long_name: str | None = None
+    display_name: str | None = None
+    style_preset: str | None = None
+
+
+class CustomWindowSpec(StrictSchema):
+    """Named inclusive time window for grouped products."""
+
+    name: str
+    start: datetime | str
+    end: datetime | str
+
+
+class GriddedAnalysisSpec(StrictSchema):
+    """Role/formula-driven gridded analysis product."""
+
+    type: Literal["gridded_analysis"]
+    source: str
+    groupby: Literal["day", "month", "season", "all"] | list[CustomWindowSpec] = "all"
+    roles: dict[str, str]
+    fields: dict[str, FormulaFieldSpec]
+    output_group: str | None = None
+
+    @field_validator("roles")
+    @classmethod
+    def _roles_nonempty(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value:
+            raise ValueError("gridded_analysis roles must not be empty")
+        return value
+
+    @field_validator("fields")
+    @classmethod
+    def _fields_nonempty(cls, value: dict[str, FormulaFieldSpec]) -> dict[str, FormulaFieldSpec]:
+        if not value:
+            raise ValueError("gridded_analysis fields must not be empty")
+        return value
+
+
+AnalysisSpec = EOFSpec | WaveletSpec | GriddedAnalysisSpec
 
 
 def build_analysis_spec(cfg: Any) -> AnalysisSpec:
     """Build the right AnalysisSpec submodel from a dict, dispatching on type."""
-    if isinstance(cfg, (EOFSpec, WaveletSpec)):
+    if isinstance(cfg, (EOFSpec, WaveletSpec, GriddedAnalysisSpec)):
         return cfg
     if not isinstance(cfg, dict):
         raise ValueError(f"analysis entry must be a mapping, got {type(cfg).__name__}")
@@ -698,14 +764,26 @@ def build_analysis_spec(cfg: Any) -> AnalysisSpec:
         return EOFSpec(**cfg)
     if analysis_type == "wavelet":
         return WaveletSpec(**cfg)
+    if analysis_type == "gridded_analysis":
+        return GriddedAnalysisSpec(**cfg)
     raise ValueError(
-        f"Unknown analysis type '{analysis_type}'. Available analysis types: eof, wavelet"
+        "Unknown analysis type "
+        f"{analysis_type!r}. Available analysis types: eof, wavelet, gridded_analysis"
     )
 
 
 # =============================================================================
 # Root Configuration
 # =============================================================================
+
+
+class InspectionConfig(StrictSchema):
+    """Optional visual-inspection configuration."""
+
+    enabled: bool = False
+    required: bool = False
+    presets: list[str] = Field(default_factory=list)
+    preview_format: Literal["png"] = "png"
 
 
 class MonetConfig(StrictSchema):
@@ -748,9 +826,11 @@ class MonetConfig(StrictSchema):
     pairs: dict[str, SourcePairConfig] = Field(default_factory=dict)
     pairing: PipelinePairingConfig | None = None
     plots: dict[str, PlotGroupConfig] = Field(default_factory=dict)
+    plot_suites: dict[str, PlotSuiteConfig] = Field(default_factory=dict)
     analyses: dict[str, AnalysisSpec] = Field(default_factory=dict)
     stats: StatsConfig | None = None
     summary: SummaryConfig | None = None
+    inspection: InspectionConfig | None = None
 
     @field_validator("sources", mode="before")
     @classmethod
@@ -805,6 +885,27 @@ class MonetConfig(StrictSchema):
             return result
         result = dict(v)
         return result
+
+    @field_validator("plot_suites", mode="before")
+    @classmethod
+    def parse_plot_suites(cls, value: Any) -> dict[str, PlotSuiteConfig]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {
+                str(name): PlotSuiteConfig(**cfg) if isinstance(cfg, dict) else cfg
+                for name, cfg in value.items()
+            }
+        return dict(value)
+
+    @field_validator("inspection", mode="before")
+    @classmethod
+    def parse_inspection(cls, value: Any) -> InspectionConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return InspectionConfig(**value)
+        return value
 
     @model_validator(mode="after")
     def validate_data_names(self) -> "MonetConfig":

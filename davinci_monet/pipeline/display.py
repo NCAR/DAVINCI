@@ -341,12 +341,11 @@ class ProgressFormatter:
                 pass
         elif platform.system() == "Linux":
             # Linux: parse /proc/cpuinfo
+            from davinci_monet.util.system import _cpu_name_from_cpuinfo
+
             try:
                 with open("/proc/cpuinfo") as f:
-                    for line in f:
-                        if line.startswith("dataset name"):
-                            cpu_name = line.split(":")[1].strip()
-                            break
+                    cpu_name = _cpu_name_from_cpuinfo(f.read())
             except Exception:
                 pass
 
@@ -672,30 +671,37 @@ class ProgressFormatter:
             self._print(f"  [dim]Log:[/dim] [white]{log_path}[/white]")
         self._print()
 
-    def print_item_errors(self, item_errors: Mapping[str, list[Any] | None]) -> None:
+    def print_item_errors(
+        self,
+        item_errors: Mapping[str, list[Any] | None],
+        *,
+        pipeline_success: bool = False,
+    ) -> None:
         """Surface non-fatal per-item errors collected during the run.
 
-        Stages (pairing/statistics/plotting) continue past an individual item
-        failure and stash the error in ``context.metadata`` rather than failing
-        the whole pipeline. Those errors used to be collected but never shown,
-        so a run could report success while silently dropping pairs, stats, or
-        plots. This renders a concise amber summary; full detail (with the count)
-        is in the Markdown log.
+        Stages continue past an individual item failure and stash the error in
+        ``context.metadata`` rather than failing the whole pipeline. Those
+        errors used to be collected but never shown, so a run could report
+        success while silently dropping pairs, stats, plots, or analyses. This
+        renders a concise amber summary; full detail (with the count) is in the
+        Markdown log.
         """
         stage_labels = {
             "pairing_errors": "pairing",
             "stats_errors": "statistics",
             "plot_errors": "plotting",
+            "analysis_errors": "analyses",
         }
         total = sum(len(v or []) for v in item_errors.values())
         if not total:
             return
 
+        suffix = " (pipeline still succeeded)" if pipeline_success else ""
         self._log("")
-        self._log(f"{total} non-fatal error(s) occurred (pipeline still succeeded):")
+        self._log(f"{total} non-fatal error(s) occurred{suffix}:")
         self._print(
             f"  [bold {self.NCAR_ORANGE}]⚠ {total} non-fatal error(s) "
-            f"(pipeline still succeeded):[/bold {self.NCAR_ORANGE}]"
+            f"occurred{suffix}:[/bold {self.NCAR_ORANGE}]"
         )
         for key, errors in item_errors.items():
             stage = stage_labels.get(key, key)

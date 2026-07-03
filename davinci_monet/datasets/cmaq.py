@@ -1,7 +1,7 @@
-"""CMAQ dataset reader.
+"""CMAQ model reader.
 
 This module provides the CMAQReader class for reading Community Multiscale
-Air Quality (CMAQ) dataset output files.
+Air Quality (CMAQ) model output files.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from davinci_monet.io.reader_utils import (
 
 @source_registry.register("cmaq")
 class CMAQReader:
-    """Reader for CMAQ dataset output.
+    """Reader for CMAQ model output.
 
     Reads CMAQ CONC (concentration), MET (meteorology), and other output files,
     standardizing them into a consistent xarray Dataset format.
@@ -46,7 +46,7 @@ class CMAQReader:
 
     @property
     def geometry(self) -> DataGeometry:
-        """Dataset output is gridded."""
+        """CMAQ output is gridded."""
         return DataGeometry.GRID
 
     def open(

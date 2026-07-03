@@ -3,6 +3,8 @@
 Verifies that PipelineResult.stage_errors collects:
 - Per-item error lists stashed by stages in context.metadata
   (pairing_errors, stats_errors, plot_errors)
+- Analysis item error lists stashed by stages in context.metadata
+  (analysis_errors)
 - Stage-level failures from StageResult.error
 """
 
@@ -59,6 +61,13 @@ class TestStageErrorsProperty:
         errors = result.stage_errors
         assert "plot_errors" in errors
         assert errors["plot_errors"] == ["scatter_pm25: FileNotFoundError"]
+
+    def test_collects_analysis_errors(self) -> None:
+        """analysis_errors from context.metadata appear under 'analysis_errors'."""
+        result = _make_result(metadata={"analysis_errors": ["pc1_wavelet: TypeError"]})
+        errors = result.stage_errors
+        assert "analysis_errors" in errors
+        assert errors["analysis_errors"] == ["pc1_wavelet: TypeError"]
 
     def test_collects_stage_level_failure(self) -> None:
         """A FAILED StageResult surfaces under 'stage:<name>'."""

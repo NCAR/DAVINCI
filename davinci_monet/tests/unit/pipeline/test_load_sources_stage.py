@@ -10,11 +10,15 @@ context API and stage logic, per the repo's existing pipeline-stage test pattern
 
 from __future__ import annotations
 
+from datetime import datetime
+
+import cftime
 import numpy as np
 import pytest
 import xarray as xr
 
 from davinci_monet.core.protocols import DataGeometry
+from davinci_monet.core.registry import source_registry
 from davinci_monet.pipeline.stages import (
     LoadSourcesStage,
     PipelineContext,
@@ -158,6 +162,75 @@ class TestLoadSourcesStage:
         assert air_attrs["source_label"] == "airnow"
         assert air_attrs["geometry"] == "point"
 
+    def test_prepopulated_sources_get_post_load_coordinate_contract(self) -> None:
+        grid = SourceData(
+            data=xr.Dataset(
+                {"O3": (("latitude", "longitude"), np.array([[1.0, 2.0], [3.0, 4.0]]))},
+                coords={"latitude": [40.0, 30.0], "longitude": [350.0, 10.0]},
+            ),
+            label="cam",
+            source_type="generic",
+            geometry=DataGeometry.GRID,
+        )
+        point = SourceData(
+            data=xr.Dataset(
+                {"o3": ("site", [11.0, 22.0])},
+                coords={
+                    "site": [0, 1],
+                    "latitude": ("site", [35.0, 34.0]),
+                    "longitude": ("site", [350.0, 20.0]),
+                },
+            ),
+            label="airnow",
+            source_type="pt_sfc",
+            geometry=DataGeometry.POINT,
+        )
+        ctx = PipelineContext(sources={"cam": grid, "airnow": point})
+
+        result = LoadSourcesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        cam = ctx.sources["cam"].data
+        assert "lat" in cam.coords and "lon" in cam.coords
+        np.testing.assert_allclose(cam["latitude"].values, [30.0, 40.0])
+        np.testing.assert_allclose(cam["longitude"].values, [-10.0, 10.0])
+        np.testing.assert_allclose(cam["O3"].values, [[3.0, 4.0], [1.0, 2.0]])
+
+        airnow = ctx.sources["airnow"].data
+        assert "lat" in airnow.coords and "lon" in airnow.coords
+        np.testing.assert_allclose(airnow["longitude"].values, [-10.0, 20.0])
+        np.testing.assert_allclose(airnow["o3"].values, [11.0, 22.0])
+
+    def test_prepopulated_rectilinear_grid_sorts_axis_coords_with_distinct_dims(
+        self,
+    ) -> None:
+        grid = SourceData(
+            data=xr.Dataset(
+                {"O3": (("y", "x"), np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]))},
+                coords={
+                    "y": [0, 1],
+                    "x": [0, 1, 2, 3],
+                    "latitude": ("y", [40.0, 30.0]),
+                    "longitude": ("x", [0.0, 90.0, 180.0, 270.0]),
+                },
+            ),
+            label="cam",
+            source_type="generic",
+            geometry=DataGeometry.GRID,
+        )
+        ctx = PipelineContext(sources={"cam": grid})
+
+        result = LoadSourcesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        cam = ctx.sources["cam"].data
+        np.testing.assert_allclose(cam["latitude"].values, [30.0, 40.0])
+        np.testing.assert_allclose(cam["longitude"].values, [-180.0, -90.0, 0.0, 90.0])
+        np.testing.assert_allclose(
+            cam["O3"].values,
+            [[7.0, 8.0, 5.0, 6.0], [3.0, 4.0, 1.0, 2.0]],
+        )
+
     def test_prepopulated_sources_resolve_via_get_source(
         self, y_data: SourceData, x_data: SourceData
     ) -> None:
@@ -189,6 +262,57 @@ class TestLoadSourcesStage:
         assert set(ctx.sources) == {"cam"}
         assert ctx.sources["cam"].geometry is DataGeometry.GRID
         assert ctx.sources["cam"].data.attrs["geometry"] == "grid"
+
+    def test_source_time_filter_supports_cftime_calendar(self) -> None:
+        class NoLeapReader:
+            @property
+            def name(self) -> str:
+                return "noleap_probe"
+
+            @property
+            def geometry(self) -> DataGeometry:
+                return DataGeometry.GRID
+
+            def open(self, file_paths, variables=None):  # noqa: ANN001
+                times = [
+                    cftime.DatetimeNoLeap(2008, 7, 1),
+                    cftime.DatetimeNoLeap(2008, 7, 2),
+                    cftime.DatetimeNoLeap(2008, 7, 3),
+                ]
+                return xr.Dataset(
+                    {"aod": (("time", "lat", "lon"), np.ones((3, 1, 1)))},
+                    coords={"time": times, "lat": [0.0], "lon": [0.0]},
+                )
+
+        source_registry.register("noleap_probe", NoLeapReader, replace=True)
+        try:
+            ctx = PipelineContext(
+                config={
+                    "analysis": {
+                        "start_time": datetime(2008, 7, 2),
+                        "end_time": datetime(2008, 7, 4),
+                    },
+                    "sources": {
+                        "cam": {
+                            "type": "noleap_probe",
+                            "filename": "ignored.nc",
+                            "variables": {"aod": {}},
+                        }
+                    },
+                }
+            )
+
+            result = LoadSourcesStage().execute(ctx)
+
+            assert result.status is StageStatus.COMPLETED
+            ds = ctx.sources["cam"].data
+            assert ds.sizes["time"] == 2
+            assert list(ds["time"].values) == [
+                cftime.DatetimeNoLeap(2008, 7, 2),
+                cftime.DatetimeNoLeap(2008, 7, 3),
+            ]
+        finally:
+            source_registry.unregister("noleap_probe")
 
     def test_stage_name(self) -> None:
         assert LoadSourcesStage().name == "load_sources"

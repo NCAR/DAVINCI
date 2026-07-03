@@ -27,6 +27,64 @@ def test_comparison_plot_options_are_assembled_outside_stage() -> None:
     assert "ignored" not in options
 
 
+def test_spatial_style_options_are_forwarded_from_single_source_plot_specs() -> None:
+    from davinci_monet.pipeline.stages.plot_options import single_source_plot_kwargs
+
+    kwargs = single_source_plot_kwargs(
+        {
+            "type": "spatial",
+            "source": "modis",
+            "variable": "aod",
+            "style_preset": "geosit_aod",
+            "levels": [0.0, 0.1, 0.5, 1.0],
+            "cmap": "turbo",
+            "extend": "max",
+        }
+    )
+
+    assert kwargs["style_preset"] == "geosit_aod"
+    assert kwargs["levels"] == [0.0, 0.1, 0.5, 1.0]
+    assert kwargs["cmap"] == "turbo"
+    assert kwargs["extend"] == "max"
+
+
+def test_spatial_style_options_are_forwarded_from_comparison_plot_specs() -> None:
+    from davinci_monet.pipeline.stages.plot_options import build_comparison_plot_options
+
+    options = build_comparison_plot_options(
+        "spatial",
+        {
+            "style_preset": "geosit_aod",
+            "levels": [0.0, 0.1, 0.5, 1.0],
+            "cmap": "turbo",
+            "extend": "max",
+        },
+        {},
+    )
+
+    assert options == {
+        "style_preset": "geosit_aod",
+        "levels": [0.0, 0.1, 0.5, 1.0],
+        "cmap": "turbo",
+        "extend": "max",
+    }
+
+
+def test_spatial_robust_options_are_forwarded_from_comparison_plot_specs() -> None:
+    from davinci_monet.pipeline.stages.plot_options import build_comparison_plot_options
+
+    options = build_comparison_plot_options(
+        "spatial",
+        {
+            "robust": True,
+            "robust_pct": [5.0, 95.0],
+        },
+        {},
+    )
+
+    assert options == {"robust": True, "robust_pct": [5.0, 95.0]}
+
+
 def test_plot_subtitle_uses_date_range_or_snapshot() -> None:
     from davinci_monet.pipeline.stages.plot_options import build_plot_subtitle
 

@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 # =============================================================================
 # NSF NCAR Brand Colors
@@ -344,6 +345,44 @@ def get_sequential_cmap() -> str:
         Matplotlib colormap name.
     """
     return "viridis"
+
+
+def geosit_aod_levels(
+    field_values: object,
+    *,
+    cap: float = 1.0,
+    base_step: float = 0.05,
+) -> np.ndarray:
+    """Return the GEOSIT AOD contour levels for a field.
+
+    The reference GEOSIT AOD plots use 0.05 bins up to a plotted cap of 1.0,
+    with extra low-end detail at 0.005, 0.01, 0.02, 0.03, and 0.04.
+    """
+    values = np.asarray(field_values, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return np.linspace(0.0, cap, 11)
+
+    vmax = float(np.nanmax(finite))
+    if not np.isfinite(vmax) or vmax <= 0:
+        return np.linspace(0.0, cap, 11)
+
+    capped = min(vmax, cap)
+    upper = np.ceil(capped / base_step) * base_step
+    upper = min(upper, cap)
+    levels = np.arange(0.0, upper + base_step * 0.5, base_step)
+    augment = [
+        level for level in (0.005, 0.01, 0.02, 0.03, 0.04) if level < base_step and level < upper
+    ]
+    if augment:
+        levels = np.unique(np.concatenate([levels, np.asarray(augment, dtype=float)]))
+        levels.sort()
+    return levels
+
+
+def get_geosit_aod_cmap() -> str:
+    """Get the GEOSIT AOD color table name."""
+    return "turbo"
 
 
 def get_density_cmap() -> str:

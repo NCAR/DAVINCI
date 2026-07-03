@@ -29,7 +29,10 @@ def resample_dataset(
 
     Resamples bare datasets in the unified source loader: average to ``freq``,
     optionally drop bins with fewer than ``min_count`` datasets, and
-    optionally emit an ``sample_count`` variable.
+    optionally emit a diagnostic count variable. With a single data variable
+    the count is emitted as ``sample_count`` (back-compat); with more than
+    one, each variable gets its own ``sample_count_<var>`` since a shared
+    count would overstate coverage for the sparser variable.
     """
     if "time" not in data.dims:
         return data
@@ -38,14 +41,19 @@ def resample_dataset(
     if track_count or min_count is not None:
         data_vars = [v for v in data.data_vars if v not in ("latitude", "longitude", "altitude")]
         if data_vars:
-            counts = resampler.count()[data_vars[0]]
+            count_ds = resampler.count()
+            counts_by_var = {var: count_ds[var] for var in data_vars if var in count_ds}
             if track_count:
-                result["sample_count"] = counts
+                if len(counts_by_var) == 1:
+                    (counts,) = counts_by_var.values()
+                    result["sample_count"] = counts
+                else:
+                    for var, counts in counts_by_var.items():
+                        result[f"sample_count_{var}"] = counts
             if min_count is not None:
-                mask = counts >= min_count
                 for var in data_vars:
-                    if var in result:
-                        result[var] = result[var].where(mask)
+                    if var in result and var in counts_by_var:
+                        result[var] = result[var].where(counts_by_var[var] >= min_count)
     return result
 
 

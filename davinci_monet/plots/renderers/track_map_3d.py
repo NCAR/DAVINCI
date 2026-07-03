@@ -53,7 +53,7 @@ __all__ = [
 ]
 
 
-@register_plotter("track_map_3d")
+@register_plotter("track_map_3d", arity="pairwise", category="specialized")
 class TrackMap3DPlotter(BasePlotter):
     """Plotter for 3D flight track visualization.
 

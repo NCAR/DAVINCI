@@ -45,6 +45,42 @@ class PlottingStage(BaseStage):
             return value
         return {}
 
+    @staticmethod
+    def _plot_formats(plot_spec: dict[str, Any]) -> tuple[str, ...]:
+        raw_formats = plot_spec.get("formats", plot_spec.get("output_formats"))
+        if raw_formats is None:
+            return ("png", "pdf")
+        if isinstance(raw_formats, str):
+            raw_values = [raw_formats]
+        else:
+            try:
+                raw_values = list(raw_formats)
+            except TypeError as exc:
+                raise PlottingError("plot formats must be a string or sequence") from exc
+
+        formats: list[str] = []
+        for raw_value in raw_values:
+            fmt = str(raw_value).lower().lstrip(".")
+            if fmt not in {"png", "pdf"}:
+                raise PlottingError(f"unsupported plot format: {raw_value}")
+            if fmt not in formats:
+                formats.append(fmt)
+        if not formats:
+            raise PlottingError("plot formats must include at least one format")
+        return tuple(formats)
+
+    @staticmethod
+    def _remove_unrequested_format_siblings(path_base: Any, formats: tuple[str, ...]) -> None:
+        requested = set(formats)
+        for fmt in {"png", "pdf"} - requested:
+            stale_path = PlottingStage._format_path(path_base, fmt)
+            if stale_path.exists():
+                stale_path.unlink()
+
+    @staticmethod
+    def _format_path(path_base: Any, fmt: str) -> Any:
+        return path_base.parent / f"{path_base.name}.{fmt}"
+
     @classmethod
     def _source_var_config(
         cls,
@@ -122,6 +158,7 @@ class PlottingStage(BaseStage):
         advancing the shared preview ``file_index`` for mixed dispatch runs.
         """
         import logging
+        from pathlib import Path
 
         import matplotlib.pyplot as plt
         import numpy as np
@@ -154,6 +191,13 @@ class PlottingStage(BaseStage):
             plot_spec,
             analysis_config=analysis_config,
         )
+        formats = self._plot_formats(plot_spec)
+        plot_output_dir = output_dir
+        output_subdir = plot_spec.get("output_subdir")
+        if output_subdir:
+            subdir = Path(str(output_subdir))
+            plot_output_dir = subdir if subdir.is_absolute() else output_dir / subdir
+        plot_output_dir.mkdir(parents=True, exist_ok=True)
 
         has_flights = "flight" in ds.coords
         flight_ids = sorted(set(np.unique(ds["flight"].values).tolist())) if has_flights else [None]
@@ -195,6 +239,9 @@ class PlottingStage(BaseStage):
                 # Tag the single source so build_series picks up its source label.
                 tag_source_label(subset, source_label=source_label)
                 render_kwargs = dict(flight_kwargs)
+                title = render_kwargs.pop("title", None)
+                if title:
+                    plotter.config.title = str(title)
                 plotter.config.subtitle = render_kwargs.pop("subtitle", None)
                 result = plotter.render(build_series(subset, variable), **render_kwargs)
                 figures: list[tuple[str | None, Any]]
@@ -204,16 +251,20 @@ class PlottingStage(BaseStage):
                     figures = [(None, result)]
                 for fig_label, fig in figures:
                     fig_suffix = f"_{fig_label}" if fig_label else ""
-                    out_path = output_dir / f"{plot_name}{suffix}{fig_suffix}.png"
-                    plotter.save(fig, out_path)
-                    plots_generated.append(str(out_path))
-                    # Also save PDF (parity with the comparison path)
-                    pdf_path = output_dir / f"{plot_name}{suffix}{fig_suffix}.pdf"
-                    plotter.save(fig, pdf_path)
-                    plots_generated.append(str(pdf_path))
+                    path_base = plot_output_dir / f"{plot_name}{suffix}{fig_suffix}"
+                    self._remove_unrequested_format_siblings(path_base, formats)
+                    saved_paths = []
+                    for fmt in formats:
+                        out_path = self._format_path(path_base, fmt)
+                        plotter.save(fig, out_path)
+                        plots_generated.append(str(out_path))
+                        saved_paths.append(out_path)
                     plt.close(fig)
                     file_index += 1
-                    _logger.info(f"Saved source plot: {out_path}")
+                    _logger.info(
+                        "Saved source plot: %s",
+                        ", ".join(str(path) for path in saved_paths),
+                    )
             except Exception as e:
                 label = f"'{plot_name}' (flight {fid})" if fid else f"'{plot_name}'"
                 errors.append(f"Plot {label} failed: {e}")
@@ -370,6 +421,10 @@ class PlottingStage(BaseStage):
         vmax = var_config.get("vmax_plot")
         vdiff = var_config.get("vdiff_plot")
         nlevels = var_config.get("nlevels_plot")
+        style_preset = var_config.get("style_preset")
+        levels = var_config.get("levels_plot")
+        cmap = var_config.get("cmap_plot")
+        extend = var_config.get("extend_plot")
 
         # Build plotter config
         plotter_config: dict[str, Any] = {"title": title}
@@ -393,6 +448,14 @@ class PlottingStage(BaseStage):
             analysis_config,
             nlevels=nlevels,
         )
+        if style_preset is not None:
+            plot_options.setdefault("style_preset", style_preset)
+        if levels is not None:
+            plot_options.setdefault("levels", levels)
+        if cmap is not None:
+            plot_options.setdefault("cmap", cmap)
+        if extend is not None:
+            plot_options.setdefault("extend", extend)
 
         # spatial_overlay needs the raw gridded y field for the
         # contour layer; the paired dataset usually carries sampled
@@ -460,6 +523,7 @@ class PlottingStage(BaseStage):
         plots_generated: list[str],
         context: PipelineContext,
         x_source: str,
+        formats: tuple[str, ...],
     ) -> int:
         """Render and save one or more figures from the unified render contract."""
         import matplotlib.pyplot as plt
@@ -472,13 +536,15 @@ class PlottingStage(BaseStage):
         saved_count = 0
         for label, fig in figures:
             prefix = f"{label}_" if label else ""
-            output_path = x_source_output_dir / f"{prefix}{file_index:02d}_{plot_name}.png"
-            plotter.save(fig, output_path, dpi=300)
-            plots_generated.append(str(output_path))
-
-            pdf_path = x_source_output_dir / f"{prefix}{file_index:02d}_{plot_name}.pdf"
-            plotter.save(fig, pdf_path)
-            plots_generated.append(str(pdf_path))
+            path_base = x_source_output_dir / f"{prefix}{file_index:02d}_{plot_name}"
+            PlottingStage._remove_unrequested_format_siblings(path_base, formats)
+            for fmt in formats:
+                output_path = PlottingStage._format_path(path_base, fmt)
+                if fmt == "png":
+                    plotter.save(fig, output_path, dpi=300)
+                else:
+                    plotter.save(fig, output_path)
+                plots_generated.append(str(output_path))
 
             plt.close(fig)
             file_index += 1
@@ -564,6 +630,7 @@ class PlottingStage(BaseStage):
             plots_generated=plots_generated,
             context=context,
             x_source=x_source,
+            formats=self._plot_formats(plot_spec),
         )
 
     def execute(self, context: PipelineContext) -> StageResult:
@@ -607,7 +674,7 @@ class PlottingStage(BaseStage):
                 plot_pairs = plot_spec.get("pairs", [])
                 title = _title_text(plot_spec.get("title", plot_name))
                 arity = plot_arity(plot_type)
-                generated_before = len(plots_generated)
+                file_index_before = file_index
 
                 context.log_progress(f"    Plot: {plot_name} ({plot_number}/{total_plots})")
                 context.log_progress(f"step: Rendering {plot_type}...")
@@ -670,7 +737,7 @@ class PlottingStage(BaseStage):
                             file_index=file_index,
                         )
 
-                plot_count += (len(plots_generated) - generated_before) // 2
+                plot_count += file_index - file_index_before
 
             except Exception as e:
                 context.metadata.setdefault("plot_errors", []).append(f"{plot_name}: {e}")
@@ -678,11 +745,19 @@ class PlottingStage(BaseStage):
 
         errors = context.metadata.get("plot_errors") or []
         if errors:
+            if plot_count == 0:
+                return self._create_result(
+                    StageStatus.FAILED,
+                    data={"plot_count": plot_count, "plots_generated": plots_generated},
+                    error=f"all {len(errors)} plots failed",
+                    duration=time.time() - start,
+                    warnings=list(errors),
+                )
             return self._create_result(
-                StageStatus.FAILED,
+                StageStatus.COMPLETED,
                 data={"plot_count": plot_count, "plots_generated": plots_generated},
-                error="Plotting failed: " + "; ".join(str(e) for e in errors),
                 duration=time.time() - start,
+                warnings=list(errors),
             )
 
         return self._create_result(

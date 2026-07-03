@@ -12,7 +12,10 @@ Rules for all AI agents working in this repository. **Read `CLAUDE.md` for full 
 ## Git Workflow
 
 - **NEVER auto commit or push**: Wait for explicit user confirmation
-- **NEVER merge to main**: Only the user decides when to merge
+- **Work on develop**: Start from and stay on `develop` by default
+- **No stray branches**: Do not create feature, codex, topic, or worktree branches unless the user explicitly authorizes that branch or worktree by name
+- **Main is user-controlled**: Merge or push to `main` only when the user explicitly requests it
+- **Clean up task branches**: After user-approved merge or abandonment, delete local and remote task branches once their contents are no longer needed
 - **After merge, return to develop**: Always switch back to `develop` branch
 
 ## Cross-Dataset Handoff Convention

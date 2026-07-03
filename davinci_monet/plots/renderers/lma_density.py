@@ -21,7 +21,7 @@ from davinci_monet.plots.registry import register_plotter
 from davinci_monet.plots.style import NCAR_PALETTE
 
 
-@register_plotter("lma_density")
+@register_plotter("lma_density", arity="single_source", category="specialized")
 class LMADensityPlotter(BasePlotter):
     """Plotter for LMA gridded flash density maps."""
 
@@ -251,6 +251,7 @@ class LMADensityPlotter(BasePlotter):
             transform=ccrs.PlateCarree(),
             shading="auto",
             zorder=2,
+            rasterized=True,
         )
 
         if flight_tracks:

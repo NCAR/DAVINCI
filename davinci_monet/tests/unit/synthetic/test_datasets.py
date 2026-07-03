@@ -1,4 +1,4 @@
-"""Tests for synthetic dataset output generators."""
+"""Tests for synthetic source-data generators."""
 
 from __future__ import annotations
 

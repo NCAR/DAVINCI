@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from davinci_monet.core.base import PlotSeries
+from davinci_monet.core.coordinates import vertical_dim_name
 from davinci_monet.plots import labeling
 from davinci_monet.plots.base import (
     get_variable_units,
@@ -29,8 +30,11 @@ if TYPE_CHECKING:
     import matplotlib.figure
     import xarray as xr
 
+_Y_LAT_CANDIDATES = ("lat", "latitude", "y")
+_Y_LON_CANDIDATES = ("lon", "longitude", "x")
 
-@register_plotter("spatial_overlay")
+
+@register_plotter("spatial_overlay", arity="pairwise", category="spatial")
 class SpatialOverlayPlotter(BaseSpatialPlotter):
     """Plotter for x-vs-y spatial overlays.
 
@@ -139,33 +143,12 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
                 y_field = y_field.isel(time=time_index)
 
         if level_index is not None:
-            for dim in ["z", "level", "lev", "vertical"]:
-                if dim in y_field.dims:
-                    idx = (
-                        surface_level_index(y_field, dim)
-                        if level_index == "surface"
-                        else level_index
-                    )
-                    y_field = y_field.isel({dim: idx})
-                    break
+            dim = vertical_dim_name(y_field)
+            if dim is not None:
+                idx = surface_level_index(y_field, dim) if level_index == "surface" else level_index
+                y_field = y_field.isel({dim: idx})
 
-        # Get dataset coordinates
-        if y_lat in y_field.coords:
-            y_lats = y_field[y_lat].values
-            y_lons = y_field[y_lon].values
-        elif y_lat in y_field.dims:
-            y_lats = y_field[y_lat].values
-            y_lons = y_field[y_lon].values
-        else:
-            # Try common alternatives
-            for lat_name in ["lat", "latitude", "y"]:
-                if lat_name in y_field.coords:
-                    y_lats = y_field[lat_name].values
-                    break
-            for lon_name in ["lon", "longitude", "x"]:
-                if lon_name in y_field.coords:
-                    y_lons = y_field[lon_name].values
-                    break
+        y_lats, y_lons = _resolve_y_field_coords(y_field, y_lat, y_lon)
 
         # Get value limits
         all_values = np.concatenate(
@@ -190,6 +173,9 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
             # Already 2D
             lon_grid, lat_grid = y_lons, y_lats
 
+        # ContourSet does not support rasterization in the pinned matplotlib
+        # (<3.9): both the constructor kwarg and set_rasterized() raise a
+        # UserWarning, so this filled layer stays vector.
         contour = ax.contourf(
             lon_grid,
             lat_grid,
@@ -242,6 +228,7 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
             edgecolors=x_edgecolor,
             linewidths=x_linewidth,
             zorder=5,
+            rasterized=True,
         )
 
         # Add colorbar. The contour and scatter share this scale, so the label
@@ -260,3 +247,31 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
             self.set_title(ax, labeling.title_text(labeling.quantity_label(paired_data, x_var)))
 
         return fig
+
+
+def _resolve_y_field_coords(
+    y_field: xr.DataArray,
+    preferred_lat: str,
+    preferred_lon: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    lat_name = _first_coord_name(y_field, (preferred_lat, *_Y_LAT_CANDIDATES))
+    lon_name = _first_coord_name(y_field, (preferred_lon, *_Y_LON_CANDIDATES))
+    if lat_name is None or lon_name is None:
+        missing = []
+        if lat_name is None:
+            missing.append("latitude")
+        if lon_name is None:
+            missing.append("longitude")
+        available = ", ".join(str(name) for name in y_field.coords) or "none"
+        raise ValueError(
+            "Spatial overlay y_field requires "
+            f"{' and '.join(missing)} coordinate(s); available coords: {available}"
+        )
+    return y_field[lat_name].values, y_field[lon_name].values
+
+
+def _first_coord_name(y_field: xr.DataArray, candidates: tuple[str, ...]) -> str | None:
+    for name in candidates:
+        if name in y_field.coords:
+            return name
+    return None

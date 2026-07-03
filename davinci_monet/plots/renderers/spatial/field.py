@@ -8,25 +8,31 @@ spatial plot.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import re
+from collections.abc import Hashable, Sequence
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 
 from davinci_monet.plots import labeling
 from davinci_monet.plots.base import (
+    calculate_symmetric_limits,
     get_variable_label,
     get_variable_units,
 )
 from davinci_monet.plots.registry import register_plotter
 from davinci_monet.plots.renderers.spatial.base import (
     BaseSpatialPlotter,
+    MapConfig,
     detect_spatial_geometry,
     draw_spatial_field,
     get_domain_extent,
     resolve_spatial_coords,
     surface_level_index,
 )
-from davinci_monet.plots.style import get_sequential_cmap
+from davinci_monet.plots.style import geosit_aod_levels, get_geosit_aod_cmap, get_sequential_cmap
 
 if TYPE_CHECKING:
     import matplotlib.axes
@@ -39,14 +45,15 @@ if TYPE_CHECKING:
 _LAT_CANDIDATES = ["latitude", "lat", "LAT", "Latitude"]
 _LON_CANDIDATES = ["longitude", "lon", "LON", "Longitude"]
 # Vertical dimension name candidates to reduce for 3-D fields.
-_LEVEL_DIMS = ["lev", "level", "z", "vertical"]
+_LEVEL_DIMS = ["lev", "level", "z", "altitude", "height", "vertical"]
 # Shapes drawn as a filled mesh; everything else is scatter.
 _MESH_SHAPES = {"grid", "swath", "regular_grid", "curvilinear_grid"}
 # Shapes whose ``time`` dim is the sampling path, not something to average over.
 _PATH_SHAPES = {"track", "profile"}
+_ColorbarExtend = Literal["neither", "both", "min", "max"]
 
 
-@register_plotter("spatial")
+@register_plotter("spatial", arity="single_source", category="spatial")
 class SpatialPlotter(BaseSpatialPlotter):
     """Single-source spatial field map (shape-aware).
 
@@ -69,13 +76,32 @@ class SpatialPlotter(BaseSpatialPlotter):
         series: list[PlotSeries],
         ax: matplotlib.axes.Axes | None = None,
         **kwargs: Any,
-    ) -> matplotlib.figure.Figure:
+    ) -> matplotlib.figure.Figure | list[tuple[str, matplotlib.figure.Figure]]:
         """Render a single source's field on a map (exactly 1 series)."""
         if len(series) != 1:
             raise NotImplementedError(
                 f"SpatialPlotter.render requires exactly 1 series; got {len(series)}."
             )
         s = series[0]
+        split_dim = self._split_dim_for_field(s.dataset, s.var_name, **kwargs)
+        if split_dim is not None:
+            figures: list[tuple[str, matplotlib.figure.Figure]] = []
+            for idx, label in self._iter_split_labels(s.dataset, split_dim):
+                subset = s.dataset.isel({split_dim: idx}, drop=True)
+                figures.append(
+                    (
+                        self._format_split_label(label),
+                        self._plot(
+                            subset,
+                            s.var_name,
+                            s.source_label,
+                            ax=ax,
+                            subtitle=self._format_split_label(label),
+                            **kwargs,
+                        ),
+                    )
+                )
+            return figures
         return self._plot(s.dataset, s.var_name, s.source_label, ax=ax, **kwargs)
 
     def _plot(
@@ -88,6 +114,13 @@ class SpatialPlotter(BaseSpatialPlotter):
         cmap: str | None = None,
         vmin: float | None = None,
         vmax: float | None = None,
+        levels: Sequence[float] | np.ndarray | None = None,
+        extend: str | None = None,
+        style_preset: str | None = None,
+        robust: bool = False,
+        robust_pct: Sequence[float] = (2.0, 98.0),
+        symmetric: bool = False,
+        subtitle: str | None = None,
         marker_size: float | None = None,
         alpha: float | None = None,
         time_average: bool = True,
@@ -98,30 +131,54 @@ class SpatialPlotter(BaseSpatialPlotter):
         lon_var: str = "longitude",
         domain_type: str | list[str] | None = None,
         domain_name: str | list[str] | None = None,
+        show_coastlines: bool | None = None,
+        show_countries: bool | None = None,
+        show_states: bool | None = None,
+        show_gridlines: bool | None = None,
+        gridline_style: str | None = None,
+        resolution: str | None = None,
+        land_color: str | None = None,
+        ocean_color: str | None = None,
         **kwargs: Any,
     ) -> matplotlib.figure.Figure:
         import cartopy.crs as ccrs
 
         field = ds[variable]
         shape = self._resolve_shape(ds, variable, field, lat_var, lon_var)
+        map_config = self._map_config_with_overrides(
+            show_coastlines=show_coastlines,
+            show_countries=show_countries,
+            show_states=show_states,
+            show_gridlines=show_gridlines,
+            gridline_style=gridline_style,
+            resolution=resolution,
+            land_color=land_color,
+            ocean_color=ocean_color,
+        )
 
         # Reduce a vertical dim (grid/profile) to a single level (surface default).
         field = self._reduce_vertical(field, level_index)
         # Collapse time unless it is the sampling path (track/profile).
         field = self._reduce_time(field, shape, time_average, time_index)
+        field = self._squeeze_singleton_non_spatial_dims(ds, field, lat_var, lon_var)
 
-        lats, lons, field = self._resolve_coords(ds, field, lat_var, lon_var)
+        lats, lons, field, resolved_lat, resolved_lon = self._resolve_coords(
+            ds, field, lat_var, lon_var
+        )
         plot_type = "pcolormesh" if shape in _MESH_SHAPES else "scatter"
 
         if ax is None:
             fig, ax = self.create_map_figure()
         else:
-            fig = ax.get_figure()  # type: ignore[assignment]
-        self.add_map_features(ax)
+            maybe_fig = ax.get_figure()
+            if maybe_fig is None:
+                raise RuntimeError("Axes is not attached to a figure")
+            fig = maybe_fig
+        self.add_map_features(ax, map_config)
 
         extent = self._resolve_extent(domain_type, domain_name)
         if extent is not None:
-            ax.set_extent(extent)  # type: ignore[attr-defined]
+            getattr(ax, "set_extent")(extent)
 
         values = field.values
         finite = values[np.isfinite(values)]
@@ -136,10 +193,54 @@ class SpatialPlotter(BaseSpatialPlotter):
                 fontsize=self.config.text.fontsize,
             )
             return fig
-        if vmin is None:
+        norm: mcolors.Normalize | None = None
+        if style_preset is not None:
+            if style_preset != "geosit_aod":
+                raise ValueError(f"Unknown spatial style_preset: {style_preset}")
+            if levels is None:
+                levels = geosit_aod_levels(finite)
+            if cmap is None:
+                cmap = get_geosit_aod_cmap()
+            if extend is None:
+                extend = "max"
+
+        if levels is not None:
+            levels_arr = np.asarray(levels, dtype=float)
+            if (
+                levels_arr.ndim != 1
+                or levels_arr.size < 2
+                or not np.all(np.isfinite(levels_arr))
+                or not np.all(np.diff(levels_arr) > 0)
+            ):
+                raise ValueError("levels must be a 1-D sequence of at least two increasing values")
+            cmap_obj = plt.get_cmap(cmap or get_sequential_cmap())
+            norm = mcolors.BoundaryNorm(
+                levels_arr,
+                ncolors=cmap_obj.N,
+                extend=cast(_ColorbarExtend, extend or "neither"),
+            )
+            vmin = float(levels_arr[0])
+            vmax = float(levels_arr[-1])
+        elif vmin is None and vmax is None and robust:
+            if symmetric:
+                percentile = float(max(robust_pct)) if robust_pct else 98.0
+                vmin, vmax = calculate_symmetric_limits(finite, percentile=percentile)
+            else:
+                robust_limits = np.asarray(np.nanpercentile(finite, robust_pct), dtype=float)
+                vmin = float(robust_limits[0])
+                vmax = float(robust_limits[1])
+        elif vmin is None:
             vmin = float(np.nanmin(finite))
-        if vmax is None:
+        if levels is None and vmax is None:
             vmax = float(np.nanmax(finite))
+        if (
+            levels is None
+            and symmetric
+            and vmin is not None
+            and vmax is not None
+            and vmin < 0 < vmax
+        ):
+            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
         cmap = cmap or get_sequential_cmap()
         style = self.config.style
@@ -165,33 +266,65 @@ class SpatialPlotter(BaseSpatialPlotter):
             lats,
             lons,
             plot_type=plot_type,
-            cmap=cmap,
+            cmap=cmap_obj if levels is not None else cmap,
             vmin=vmin,
             vmax=vmax,
+            norm=norm,
             marker_size=ms,
             alpha=a,
+            field_dims=tuple(field.dims),
+            lat_dim=resolved_lat if resolved_lat in field.dims else None,
+            lon_dim=resolved_lon if resolved_lon in field.dims else None,
         )
 
         units = get_variable_units(ds, variable)
         # Colorbar carries units only; the title carries the quantity (+ source),
         # so the quantity is not repeated in both places.
+        colorbar_kwargs: dict[str, Any] = {"extend": extend} if norm is not None and extend else {}
         self.add_colorbar(
             fig,
             mappable,
             ax,
             label=labeling.format_units(units),
+            **colorbar_kwargs,
         )
 
         if self.config.title:
-            self.set_title(ax, self.config.title)
+            self.set_title(ax, self.config.title, subtitle=subtitle)
         else:
             # Source name leads the title, de-duped against the quantity, e.g.
             # "AERONET AOD (500 nm)" / "CESM NO2 Column" (not "… (CESM)").
             title_q = labeling.quantity_label(ds, variable)
-            self.set_title(ax, labeling.sourced_title(source_label, title_q))
+            self.set_title(ax, labeling.sourced_title(source_label, title_q), subtitle=subtitle)
         return fig
 
     # -- helpers ---------------------------------------------------------------
+
+    def _map_config_with_overrides(
+        self,
+        *,
+        show_coastlines: bool | None,
+        show_countries: bool | None,
+        show_states: bool | None,
+        show_gridlines: bool | None,
+        gridline_style: str | None,
+        resolution: str | None,
+        land_color: str | None,
+        ocean_color: str | None,
+    ) -> MapConfig:
+        cfg = self.map_config
+        return MapConfig(
+            projection=cfg.projection,
+            extent=cfg.extent,
+            show_states=cfg.show_states if show_states is None else show_states,
+            show_countries=cfg.show_countries if show_countries is None else show_countries,
+            show_coastlines=cfg.show_coastlines if show_coastlines is None else show_coastlines,
+            show_gridlines=cfg.show_gridlines if show_gridlines is None else show_gridlines,
+            gridline_style=cfg.gridline_style if gridline_style is None else gridline_style,
+            resolution=cfg.resolution if resolution is None else resolution,
+            land_color=cfg.land_color if land_color is None else land_color,
+            ocean_color=cfg.ocean_color if ocean_color is None else ocean_color,
+        )
 
     def _resolve_shape(
         self,
@@ -245,15 +378,92 @@ class SpatialPlotter(BaseSpatialPlotter):
             return field.mean(dim="time")
         return field
 
+    def _squeeze_singleton_non_spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> xr.DataArray:
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        indexers = {
+            dim: 0 for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim) == 1
+        }
+        if not indexers:
+            return field
+        return field.isel(indexers, drop=True)
+
+    def _split_dim_for_field(
+        self,
+        ds: xr.Dataset,
+        variable: str,
+        *,
+        time_average: bool = True,
+        time_index: int | None = None,
+        level_index: int | str = "surface",
+        lat_var: str = "latitude",
+        lon_var: str = "longitude",
+        **_: Any,
+    ) -> Hashable | None:
+        field = ds[variable]
+        shape = self._resolve_shape(ds, variable, field, lat_var, lon_var)
+        field = self._reduce_vertical(field, level_index)
+        field = self._reduce_time(field, shape, time_average, time_index)
+        spatial_dims = self._spatial_dims(ds, field, lat_var, lon_var)
+        split_dims = [
+            dim for dim in field.dims if dim not in spatial_dims and field.sizes.get(dim, 0) > 1
+        ]
+        if not split_dims:
+            return None
+        if len(split_dims) > 1:
+            dims = ", ".join(str(dim) for dim in split_dims)
+            raise NotImplementedError(
+                f"SpatialPlotter can split over one non-spatial dimension; got {dims}."
+            )
+        return split_dims[0]
+
+    def _spatial_dims(
+        self,
+        ds: xr.Dataset,
+        field: xr.DataArray,
+        lat_var: str,
+        lon_var: str,
+    ) -> set[Hashable]:
+        spatial_dims: set[Hashable] = set()
+        for coord_name in (
+            self._resolve_coord_name(ds, _LAT_CANDIDATES, lat_var),
+            self._resolve_coord_name(ds, _LON_CANDIDATES, lon_var),
+        ):
+            if coord_name is None:
+                continue
+            if coord_name in field.dims:
+                spatial_dims.add(coord_name)
+            if coord_name in ds:
+                spatial_dims.update(dim for dim in ds[coord_name].dims if dim in field.dims)
+        return spatial_dims
+
+    @staticmethod
+    def _iter_split_labels(ds: xr.Dataset, dim: Hashable) -> list[tuple[int, Any]]:
+        size = ds.sizes[dim]
+        if dim in ds.coords:
+            return list(enumerate(ds.coords[dim].values))
+        return [(idx, idx) for idx in range(size)]
+
+    @staticmethod
+    def _format_split_label(label: Any) -> str:
+        text = str(label)
+        text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip("-")
+        return text or "group"
+
     def _resolve_coords(
         self,
         ds: xr.Dataset,
         field: xr.DataArray,
         lat_var: str,
         lon_var: str,
-    ) -> tuple[np.ndarray, np.ndarray, xr.DataArray]:
+    ) -> tuple[np.ndarray, np.ndarray, xr.DataArray, str, str]:
         """Resolve lat/lon arrays, shifting 0..360 lon to -180..180 for cartopy."""
-        _, resolved_lon, lats, lons = resolve_spatial_coords(ds, lat_var, lon_var)
+        resolved_lat, resolved_lon, lats, lons = resolve_spatial_coords(ds, lat_var, lon_var)
 
         # A 1-D lon axis that the 0..360 -> -180..180 shift left non-monotonic
         # must be re-sorted, reordering the field along the lon dim to match so
@@ -269,7 +479,7 @@ class SpatialPlotter(BaseSpatialPlotter):
             lons = lons[sort_idx]
             field = field.isel({resolved_lon: sort_idx})
 
-        return lats, lons, field
+        return lats, lons, field, resolved_lat, resolved_lon
 
     @staticmethod
     def _resolve_coord_name(ds: xr.Dataset, candidates: list[str], preferred: str) -> str | None:

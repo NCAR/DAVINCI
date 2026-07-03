@@ -9,6 +9,7 @@ import xarray as xr
 
 from davinci_monet.analysis.eof import (
     _area_weight,
+    _effective_n,
     _fix_sign,
     _lat_coord,
     _layer_mass_weight,
@@ -75,3 +76,54 @@ def test_fix_sign_makes_max_loading_positive() -> None:
     m2, p2 = _fix_sign(mode, pc)
     assert float(m2.sel(mode=1).max()) == 3.0
     assert float(p2.sel(mode=1).isel(time=0)) == -1.0
+
+
+def test_patterns_from_pc_uses_spatial_matrix_multiplication() -> None:
+    from davinci_monet.analysis.eof import _patterns_from_pc
+
+    time = np.arange(4)
+    lat = np.array([10.0, 20.0])
+    lon = np.array([100.0, 110.0, 120.0])
+    values = np.arange(24, dtype=float).reshape(4, 2, 3)
+    anom = xr.DataArray(
+        values,
+        dims=("time", "lat", "lon"),
+        coords={
+            "time": time,
+            "lat": lat,
+            "lon": lon,
+            "latitude": ("lat", lat),
+            "longitude": ("lon", lon),
+        },
+    )
+    pc = xr.DataArray(
+        np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [-1.0, 0.5]]),
+        dims=("time", "mode"),
+        coords={"time": time, "mode": [1, 2]},
+    )
+
+    out = _patterns_from_pc(anom, pc)
+
+    matrix = values.reshape(4, 6)
+    expected = (matrix.T @ pc.values / 4).T.reshape(2, 2, 3)
+    assert out.dims == ("mode", "lat", "lon")
+    np.testing.assert_allclose(out.values, expected)
+
+
+def test_effective_n_is_floored_for_highly_autocorrelated_series() -> None:
+    lat = np.array([0.0, 10.0])
+    lon = np.array([100.0, 110.0])
+    series = np.arange(20, dtype=float)
+    anom = xr.DataArray(
+        series[:, None, None] * np.ones((20, 2, 2)),
+        dims=("time", "lat", "lon"),
+        coords={
+            "time": np.arange(20),
+            "lat": lat,
+            "lon": lon,
+            "latitude": ("lat", lat),
+            "longitude": ("lon", lon),
+        },
+    )
+
+    assert _effective_n(anom, anom["latitude"]) >= 2.0

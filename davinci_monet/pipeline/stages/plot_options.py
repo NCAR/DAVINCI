@@ -19,6 +19,9 @@ SINGLE_SOURCE_SCHEMA_KEYS = {
     "domain_name",
     "pairs",
     "data_proc",
+    "output_subdir",
+    "formats",
+    "output_formats",
 }
 
 
@@ -54,6 +57,11 @@ FORWARDED_COMPARISON_OPTION_KEYS = {
     "split_by_flight",
     "flight_coord",
     "min_points",
+    "style_preset",
+    "levels",
+    "extend",
+    "robust",
+    "robust_pct",
 }
 
 

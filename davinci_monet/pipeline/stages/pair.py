@@ -576,12 +576,21 @@ class PairingStage(BaseStage):
         context.log_progress("    parallel_end")
         if execution_errors:
             context.metadata.setdefault("pairing_errors", []).extend(execution_errors)
+            if paired_count == 0:
+                return self._create_result(
+                    StageStatus.FAILED,
+                    data={"paired_keys": list(context.paired.keys())},
+                    error=f"all {len(jobs)} pairs failed",
+                    duration=time.time() - start,
+                    count=paired_count,
+                    warnings=list(execution_errors),
+                )
             return self._create_result(
-                StageStatus.FAILED,
+                StageStatus.COMPLETED,
                 data={"paired_keys": list(context.paired.keys())},
-                error="Source pair execution failed: " + "; ".join(execution_errors),
                 duration=time.time() - start,
                 count=paired_count,
+                warnings=list(execution_errors),
             )
         return self._create_result(
             StageStatus.COMPLETED,

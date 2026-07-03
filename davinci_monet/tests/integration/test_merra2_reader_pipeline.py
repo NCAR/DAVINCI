@@ -16,8 +16,6 @@ import yaml
 
 from davinci_monet.pipeline.runner import PipelineRunner
 
-pytestmark = pytest.mark.integration
-
 
 def _grid(varname: str, seed: int) -> xr.Dataset:
     times = np.array(["2026-04-01", "2026-04-02", "2026-04-03"], dtype="datetime64[ns]")
@@ -31,6 +29,7 @@ def _grid(varname: str, seed: int) -> xr.Dataset:
     )
 
 
+@pytest.mark.integration
 def test_merra2_reader_pipeline(tmp_path: Path) -> None:
     m_dir = tmp_path / "merra2"
     o_dir = tmp_path / "geometry"
@@ -99,6 +98,7 @@ _IO_AER = Path("/Volumes/Io/MERRA2_tavgM/aer_Nx")
     not _IO_AER.is_dir(),
     reason="MERRA-2 monthly aerosol data not staged on /Volumes/Io",
 )
+@pytest.mark.real_data
 def test_real_merra2_file_opens() -> None:
     """Smoke: open one staged monthly aerosol file via the MERRA-2 reader."""
     from davinci_monet.datasets.merra2 import MERRA2Reader

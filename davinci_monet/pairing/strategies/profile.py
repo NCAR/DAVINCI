@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from davinci_monet.core.coordinates import vertical_dim_name
 from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -77,7 +78,7 @@ class ProfileStrategy(BasePairingStrategy):
         xr.Dataset
             Paired dataset with x and y profiles.
         """
-        level_coord = kwargs.get("level_coord", "level")
+        level_coord = kwargs.get("level_coord") or vertical_dim_name(x_data) or "level"
         interp_to_geometry_levels = kwargs.get("interp_to_geometry_levels", True)
 
         # Get coordinates
@@ -128,9 +129,16 @@ class ProfileStrategy(BasePairingStrategy):
         # Handle vertical interpolation
         if interp_to_geometry_levels and level_coord in x_data.dims:
             x_levels = x_data[level_coord]
+            y_level_coord = vertical_dim_name(y_column)
             y_column = self._interpolate_vertical(
-                y_column, x_levels, level_coord="z", method=vertical_method
+                y_column,
+                x_levels,
+                level_coord=y_level_coord or level_coord,
+                method=vertical_method,
             )
+            if y_level_coord and y_level_coord != level_coord and y_level_coord in y_column.dims:
+                y_column = y_column.rename({y_level_coord: level_coord})
+                y_column = y_column.assign_coords({level_coord: x_levels.values})
 
         # Create paired output
         paired = self._create_paired_output(x_data, y_column, level_coord)

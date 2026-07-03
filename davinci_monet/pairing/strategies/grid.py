@@ -11,6 +11,7 @@ from typing import Any, Hashable
 import numpy as np
 import xarray as xr
 
+from davinci_monet.core.coordinates import vertical_dim_name
 from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -85,7 +86,7 @@ class GridStrategy(BasePairingStrategy):
         x_lat, x_lon = self._get_x_coords(x_data)
 
         # Extract surface if the y source is 3D
-        if extract_surface and "z" in y_data.dims:
+        if extract_surface and vertical_dim_name(y_data) is not None:
             y_proc = self._extract_surface(y_data)
         else:
             y_proc = y_data

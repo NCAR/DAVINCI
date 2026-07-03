@@ -134,6 +134,7 @@ module = [
     "pyhdf.*",
     "pycwt",
     "pycwt.*",
+    "cftime",
 ]
 ignore_missing_imports = true
 
@@ -149,6 +150,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "integration: end-to-end tests that run PipelineRunner.run_from_config",
+    "real_data: opt-in smoke tests that require externally staged data",
 ]
 filterwarnings = [
     "error::UserWarning",

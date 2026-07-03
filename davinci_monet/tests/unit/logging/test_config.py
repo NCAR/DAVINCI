@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from davinci_monet.logging import LogLevel, configure_logging, get_logger, set_log_level
+from davinci_monet.logging import LogLevel
+from davinci_monet.logging import config as logging_config
+from davinci_monet.logging import configure_logging, get_logger, set_log_level
 from davinci_monet.logging.config import (
     LOGGER_PREFIX,
     ColorFormatter,
@@ -132,6 +134,21 @@ class TestConfigureLogging:
             assert "Test message" in content
         finally:
             log_path.unlink()
+
+    def test_color_console_does_not_mutate_record_seen_by_file_handler(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Console coloring must not duplicate formatted text/extras in file logs."""
+        monkeypatch.setattr(logging_config, "_supports_color", lambda: True)
+        log_path = tmp_path / "davinci.log"
+
+        logger = configure_logging(log_file=log_path, use_color=True, use_structured=True)
+        logger.info("Processing", extra={"dataset": "CMAQ"})
+
+        content = log_path.read_text()
+        assert content.count("Processing") == 1
+        assert content.count("dataset='CMAQ'") == 1
+        assert "asctime=" not in content
 
     def test_configure_without_color(self) -> None:
         """Test configuring without color."""

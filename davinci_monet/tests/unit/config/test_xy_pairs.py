@@ -29,3 +29,12 @@ def test_old_shape_is_rejected_with_hint():
 def test_missing_axis_is_rejected():
     with pytest.raises(ValidationError):
         SourcePairConfig(x={"source": "airnow", "variable": "o3"})  # type: ignore[arg-type,call-arg]
+
+
+def test_pair_config_rejects_unknown_fields_by_default():
+    with pytest.raises(ValidationError, match="methd"):
+        SourcePairConfig(
+            x={"source": "airnow", "variable": "o3"},  # type: ignore[arg-type]
+            y={"source": "cam", "variable": "O3"},  # type: ignore[arg-type]
+            methd="grid",  # type: ignore[call-arg]
+        )

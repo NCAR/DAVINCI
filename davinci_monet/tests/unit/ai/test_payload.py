@@ -150,3 +150,16 @@ def test_collect_payload_ignores_non_png() -> None:
     payload = collect_payload(ctx, SummaryConfig(enabled=True))
     assert len(payload.images) == 1
     assert payload.images[0].path.endswith(".png")
+
+
+def test_collect_payload_includes_item_errors() -> None:
+    ctx = _context_with_results([])
+    ctx.metadata["pairing_errors"] = ["cam_vs_airnow_o3: no overlap"]
+    ctx.metadata["analysis_errors"] = ["pc1_wavelet: irregular data"]
+
+    payload = collect_payload(ctx, SummaryConfig(enabled=True))
+
+    assert payload.item_errors == {
+        "pairing_errors": ["cam_vs_airnow_o3: no overlap"],
+        "analysis_errors": ["pc1_wavelet: irregular data"],
+    }

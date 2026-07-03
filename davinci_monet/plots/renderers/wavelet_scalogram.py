@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("wavelet_scalogram")
+@register_plotter("wavelet_scalogram", arity="single_source", category="specialized")
 class WaveletScalogramPlotter(BasePlotter):
     """Torrence & Compo style scalogram with a global-spectrum side panel."""
 

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
 
-@register_plotter("spatial_bias")
+@register_plotter("spatial_bias", arity="pairwise", category="spatial")
 class SpatialBiasPlotter(BaseSpatialPlotter):
     """Plotter for spatial bias maps.
 

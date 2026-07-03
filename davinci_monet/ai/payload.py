@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -31,6 +32,7 @@ class SummaryPayload:
     stats_rows: list[dict[str, Any]]
     images: list[ImageRef]
     instructions: str | None
+    item_errors: dict[str, list[str]] = field(default_factory=dict)
 
 
 # StatisticsStage/PlottingStage emit under these single keys for both
@@ -113,6 +115,18 @@ def collect_payload(context: "PipelineContext", cfg: "SummaryConfig") -> Summary
         selected = all_plots[: cfg.max_images]
 
     images = [ImageRef(caption=Path(p).stem, path=p) for p in selected]
+    metadata_obj = getattr(context, "metadata", {})
+    metadata: Mapping[str, Any] = metadata_obj if isinstance(metadata_obj, Mapping) else {}
+    item_errors = {
+        key: [str(message) for message in value]
+        for key in (
+            "pairing_errors",
+            "stats_errors",
+            "plot_errors",
+            "analysis_errors",
+        )
+        if (value := metadata.get(key))
+    }
 
     return SummaryPayload(
         period=period,
@@ -121,4 +135,5 @@ def collect_payload(context: "PipelineContext", cfg: "SummaryConfig") -> Summary
         stats_rows=stats_rows,
         images=images,
         instructions=cfg.instructions,
+        item_errors=item_errors,
     )

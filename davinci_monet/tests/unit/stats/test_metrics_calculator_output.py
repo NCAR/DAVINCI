@@ -372,6 +372,71 @@ class TestStatisticsCalculator:
         assert int(stats["N"].iloc[0]) == 500
         assert "MB" in stats.columns
 
+    def test_grouped_stats_raises_when_y_missing_x_key(self):
+        """A group key present in x but absent from y must raise, not misalign.
+
+        Regression test for the positional ``zip(x_grouped, y_grouped)`` bug:
+        with asymmetric group keys, zipping by position silently pairs the
+        wrong groups together instead of failing loudly.
+        """
+        from davinci_monet.core.exceptions import StatisticsError
+        from davinci_monet.stats import StatisticsCalculator
+
+        x_data = xr.DataArray(
+            [1.0, 2.0, 3.0],
+            dims="site",
+            coords={"site": ["site_a", "site_b", "site_c"]},
+        )
+        y_data = xr.DataArray(
+            [10.0, 20.0, 30.0],
+            dims="site",
+            coords={"site": ["site_a", "site_b", "site_d"]},
+        )
+
+        calc = StatisticsCalculator()
+
+        with pytest.raises(StatisticsError, match="site_c"):
+            calc._compute_single_groupby(x_data, y_data, ["N"], "site", "site")
+
+    def test_grouped_stats_raises_when_x_missing_y_key(self):
+        """A group key present in y but absent from x must also raise."""
+        from davinci_monet.core.exceptions import StatisticsError
+        from davinci_monet.stats import StatisticsCalculator
+
+        x_data = xr.DataArray(
+            [1.0, 2.0],
+            dims="site",
+            coords={"site": ["site_a", "site_b"]},
+        )
+        y_data = xr.DataArray(
+            [10.0, 20.0, 30.0],
+            dims="site",
+            coords={"site": ["site_a", "site_b", "site_d"]},
+        )
+
+        calc = StatisticsCalculator()
+
+        with pytest.raises(StatisticsError, match="site_d"):
+            calc._compute_single_groupby(x_data, y_data, ["N"], "site", "site")
+
+    def test_min_samples_preserves_true_sample_count(self):
+        """N reports valid-pair count even when other metrics are below the floor."""
+        from davinci_monet.stats import StatisticsCalculator, StatisticsConfig
+
+        ds = xr.Dataset(
+            {
+                "x_o3": ("time", np.array([1.0, 2.0])),
+                "y_o3": ("time", np.array([2.0, 3.0])),
+            },
+            coords={"time": np.arange(2)},
+        )
+        calc = StatisticsCalculator(StatisticsConfig(min_samples=3))
+
+        stats = calc.compute(ds, "x_o3", "y_o3", metrics=["N", "MB"])
+
+        assert stats["N"].iloc[0] == 2
+        assert np.isnan(stats["MB"].iloc[0])
+
 
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
@@ -415,6 +480,15 @@ class TestConvenienceFunctions:
         assert "R" in stats
         # Check positive bias (we added positive offset)
         assert stats["MB"] > 0
+
+    def test_quick_stats_respects_min_samples_floor(self):
+        """quick_stats uses the same floor semantics as StatisticsCalculator."""
+        from davinci_monet.stats import quick_stats
+
+        stats = quick_stats(np.array([1.0, 2.0]), np.array([2.0, 3.0]), metrics=["N", "MB"])
+
+        assert stats["N"] == 2
+        assert np.isnan(stats["MB"])
 
 
 # =============================================================================

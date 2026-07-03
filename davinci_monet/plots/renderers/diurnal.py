@@ -1,7 +1,7 @@
 """Diurnal cycle plot renderer for DAVINCI.
 
 This module provides diurnal cycle plotting functionality for comparing
-dataset output with datasets across the daily cycle.
+model output with observations across the daily cycle.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     import matplotlib.figure
 
 
-@register_plotter("diurnal")
+@register_plotter("diurnal", arity="pairwise", category="temporal")
 class DiurnalPlotter(BasePlotter):
     """Plotter for diurnal cycle comparisons.
 

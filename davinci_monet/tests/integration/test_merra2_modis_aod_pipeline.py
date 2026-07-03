@@ -21,8 +21,6 @@ import yaml
 
 from davinci_monet.pipeline.runner import PipelineRunner
 
-pytestmark = pytest.mark.integration
-
 
 def _make_grid(varname: str, nt: int = 3, ny: int = 6, nx: int = 8, seed: int = 0) -> xr.Dataset:
     """Create a minimal synthetic GRID dataset.
@@ -52,6 +50,7 @@ def _make_grid(varname: str, nt: int = 3, ny: int = 6, nx: int = 8, seed: int = 
     )
 
 
+@pytest.mark.integration
 def test_merra2_modis_aod_pipeline(tmp_path: Path) -> None:
     """Grid-to-grid AOD pipeline runs end-to-end and produces plots + CSV.
 
@@ -157,6 +156,7 @@ def test_merra2_modis_aod_pipeline(tmp_path: Path) -> None:
     not (os.environ.get("MERRA2_DATA") and os.environ.get("MODIS_DATA")),
     reason="set MERRA2_DATA and MODIS_DATA to run the real-data smoke test",
 )
+@pytest.mark.real_data
 def test_real_data_one_month(tmp_path: Path) -> None:
     """Read one real MOD08_M3 HDF4 file through the modis_viirs reader.
 

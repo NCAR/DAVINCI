@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _LAT_NAMES = ("latitude", "lat", "LAT", "Latitude")
 _LON_NAMES = ("longitude", "lon", "LON", "Longitude")
+_MIN_NORTH_EFFECTIVE_N = 2.0
 
 
 def _named_coord(da: xr.DataArray, names: tuple[str, ...], kind: str) -> xr.DataArray:
@@ -95,10 +96,10 @@ def _effective_n(anom: xr.DataArray, lat: xr.DataArray) -> float:
     x = x[np.isfinite(x)]
     n = int(len(x))
     if n < 3:
-        return float(max(n, 1))
+        return _MIN_NORTH_EFFECTIVE_N
     r1 = float(np.corrcoef(x[:-1], x[1:])[0, 1])
     r1 = float(np.clip(r1, -0.99, 0.99))
-    return n * (1.0 - r1) / (1.0 + r1)
+    return max(_MIN_NORTH_EFFECTIVE_N, n * (1.0 - r1) / (1.0 + r1))
 
 
 def _varimax_rotation(loadings: np.ndarray, max_iter: int = 100, tol: float = 1e-6) -> np.ndarray:
@@ -160,6 +161,32 @@ def _svd_decompose(
     return pc, ev_ratio
 
 
+def _patterns_from_pc(anom: xr.DataArray, pc: xr.DataArray) -> xr.DataArray:
+    """Regress anomalies onto PCs without materializing time x space x mode."""
+    spatial_dims = [d for d in anom.dims if d != "time"]
+    stacked = anom.transpose("time", *spatial_dims).stack(_feat=spatial_dims)
+    pc_t = pc.transpose("time", "mode")
+
+    matrix = np.asarray(stacked.values, dtype=float)
+    pc_values = np.asarray(pc_t.values, dtype=float)
+    valid_matrix = np.isfinite(matrix)
+    valid_pc = np.isfinite(pc_values)
+    numerator = np.nan_to_num(matrix, nan=0.0).T @ np.nan_to_num(pc_values, nan=0.0)
+    counts = valid_matrix.astype(float).T @ valid_pc.astype(float)
+    patterns = np.divide(
+        numerator,
+        counts,
+        out=np.full_like(numerator, np.nan, dtype=float),
+        where=counts > 0,
+    )
+    out = xr.DataArray(
+        patterns,
+        dims=("_feat", "mode"),
+        coords={"_feat": stacked["_feat"], "mode": pc_t["mode"]},
+    )
+    return out.unstack("_feat").transpose("mode", *spatial_dims)
+
+
 from davinci_monet.analysis.base import DerivedAnalysis  # noqa: E402
 from davinci_monet.core.protocols import DataGeometry  # noqa: E402
 from davinci_monet.core.registry import analysis_registry  # noqa: E402
@@ -210,10 +237,8 @@ class EOFAnalysis(DerivedAnalysis):
         weighted = (anom * weight).fillna(0.0)
         pc, ev_ratio = _svd_decompose(weighted, spec.n_modes, spec.rotation)
         # Regression of anomaly onto unit-variance PCs → physical spatial modes.
-        # Result has dims (lat, ..., mode); transpose to (mode, <spatial>).
-        mode_raw = (anom * pc).mean("time")
+        mode_raw = _patterns_from_pc(anom, pc)
         spatial_dims = [d for d in mode_raw.dims if d != "mode"]
-        mode_raw = mode_raw.transpose("mode", *spatial_dims)
         mode_raw, pc = _fix_sign(mode_raw, pc)
 
         n_modes = int(ev_ratio.sizes["mode"])
@@ -251,7 +276,7 @@ class EOFAnalysis(DerivedAnalysis):
         )
         if spec.rotation == "none":
             n_eff = _effective_n(anom, lat)
-            err_vals = ev_ratio.values * np.sqrt(2.0 / n_eff)
+            err_vals = np.minimum(ev_ratio.values * np.sqrt(2.0 / n_eff), ev_ratio.values)
             ds["explained_variance_error"] = xr.Variable(
                 ("mode",), err_vals, attrs=dict(kind="scalar")
             )

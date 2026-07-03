@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run all DAVINCI-MONET plot examples.
+"""Run all DAVINCI plot examples.
 
 This script executes all individual plot examples in sequence,
 generating the complete set of demonstration plots.
@@ -38,7 +38,7 @@ def run_example(script_path: Path) -> tuple[bool, float]:
 def main():
     """Run all plot examples."""
     print("=" * 60)
-    print("DAVINCI-MONET: Running All Plot Examples")
+    print("DAVINCI: Running All Plot Examples")
     print("=" * 60)
 
     examples_dir = Path(__file__).parent

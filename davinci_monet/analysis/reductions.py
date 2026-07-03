@@ -46,9 +46,15 @@ def select_series(data: xr.Dataset, spec: "WaveletSpec") -> xr.DataArray:
     if isinstance(reduce, PointReduce):
         lat = _coord(da, _LAT_NAMES, "latitude")
         lon = _coord(da, _LON_NAMES, "longitude")
-        i = int(np.abs(np.asarray(lat.values) - reduce.point[0]).argmin())
-        j = int(np.abs(np.asarray(lon.values) - reduce.point[1]).argmin())
-        da = da.isel({lat.dims[0]: i, lon.dims[0]: j})
+        if lat.ndim == 1 and lon.ndim == 1:
+            i = int(np.abs(np.asarray(lat.values) - reduce.point[0]).argmin())
+            j = int(np.abs(np.asarray(lon.values) - reduce.point[1]).argmin())
+            da = da.isel({lat.dims[0]: i, lon.dims[0]: j})
+        else:
+            dist2 = (lat - reduce.point[0]) ** 2 + (lon - reduce.point[1]) ** 2
+            flat = int(np.asarray(dist2.values).argmin())
+            idx = np.unravel_index(flat, dist2.shape)
+            da = da.isel(dict(zip(dist2.dims, (int(k) for k in idx))))
         rem = [d for d in da.dims if d != "time"]
         return da.mean(rem) if rem else da
     raise ValueError(f"unknown reduce: {reduce!r}")
@@ -76,8 +82,9 @@ def regularize(series: xr.DataArray) -> tuple[xr.DataArray, float, str, float]:
     if not irregular or unit == "steps":
         return series, dt, unit, 0.0
     n_before = int(series.sizes["time"])
-    freq = pd.Timedelta(seconds=med)
-    regular = series.resample(time=freq).mean()
+    times = pd.DatetimeIndex(series["time"].values)
+    target = pd.date_range(times[0], times[-1], freq=pd.Timedelta(seconds=med))
+    regular = series.interp(time=target).dropna("time")
     n_after = int(regular.sizes["time"])
     frac = max(0.0, (n_after - n_before) / max(n_after, 1))
     return regular, dt, unit, frac

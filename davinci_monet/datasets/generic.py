@@ -1,7 +1,7 @@
 """Generic dataset reader.
 
-This module provides a fallback reader for dataset output that doesn't match
-any specific dataset type. It uses xarray's generic NetCDF/grib readers.
+This module provides a fallback reader for source files that do not match any
+specific source type. It uses xarray's generic NetCDF/grib readers.
 """
 
 from __future__ import annotations
@@ -12,8 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+import pandas as pd
 import xarray as xr
 
+from davinci_monet.core.exceptions import DataFormatError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.registry import source_registry
 from davinci_monet.io.reader_utils import (
@@ -119,7 +121,7 @@ class GenericReader:
         Parameters
         ----------
         file_paths
-            Paths to dataset output files.
+            Paths to source output files.
         variables
             Variables to load. If None, loads all variables.
         progress_callback
@@ -162,6 +164,7 @@ class GenericReader:
         # via _cleanup_with_suppressed_errors (passed as the on_failure hook).
         def _open() -> xr.Dataset:
             if len(file_list) > 1:
+                concat_kwargs = {"concat_dim": concat_dim} if combine == "nested" else {}
                 if progress_callback is not None:
                     # Sequential open so the preprocess counter is ordered.
                     total = len(file_list)
@@ -180,6 +183,7 @@ class GenericReader:
                         data_vars="all",
                         parallel=False,
                         preprocess=_progress_preprocess,
+                        **concat_kwargs,
                         **kwargs,
                     )
                 return xr.open_mfdataset(
@@ -187,6 +191,7 @@ class GenericReader:
                     combine=combine,
                     data_vars="all",
                     parallel=parallel,
+                    **concat_kwargs,
                     **kwargs,
                 )
             return xr.open_dataset(str(file_list[0]), **kwargs)
@@ -204,7 +209,31 @@ class GenericReader:
         if standardize:
             ds = self._standardize_dataset(ds)
 
+        if len(file_list) > 1 and combine == "nested":
+            ds = self._sort_and_validate_time(ds, concat_dim)
+
         return ds
+
+    def _sort_and_validate_time(self, ds: xr.Dataset, concat_dim: str) -> xr.Dataset:
+        """Sort nested concatenations by time and reject duplicate timestamps."""
+        time_name = "time" if "time" in ds.coords or "time" in ds.dims else concat_dim
+        if time_name not in ds.coords and time_name not in ds.dims:
+            return ds
+
+        values = ds[time_name].values
+        if values.ndim != 1:
+            return ds
+
+        index = pd.Index(values)
+        if index.duplicated().any():
+            duplicates = index[index.duplicated()].unique()
+            preview = ", ".join(str(value) for value in duplicates[:3])
+            raise DataFormatError(
+                "Duplicate time values found after concatenating generic files"
+                f" along {time_name!r}: {preview}"
+            )
+
+        return ds.sortby(time_name)
 
     def _detect_engine(self, file_path: Path) -> str | None:
         """Detect appropriate xarray engine for file.

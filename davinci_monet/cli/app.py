@@ -76,12 +76,11 @@ def _get_system_info() -> str:
             pass
     elif platform.system() == "Linux":
         # Linux: parse /proc/cpuinfo
+        from davinci_monet.util.system import _cpu_name_from_cpuinfo
+
         try:
             with open("/proc/cpuinfo") as f:
-                for line in f:
-                    if line.startswith("dataset name"):
-                        cpu_name = line.split(":")[1].strip()
-                        break
+                cpu_name = _cpu_name_from_cpuinfo(f.read())
         except Exception:
             pass
 
@@ -303,7 +302,7 @@ def main(
     """DAVINCI: Data Analysis and Visual Intelligence for Climate/Chemistry.
 
     A modern tool for evaluating climate and atmospheric composition
-    datasets against datasets.
+    models against observations.
     """
 
 
@@ -311,7 +310,7 @@ def main(
 def register_commands() -> None:
     """Register all CLI commands."""
     # Import command modules
-    from davinci_monet.cli.commands import get_data, run, validate
+    from davinci_monet.cli.commands import get_data
 
     # Register subcommands
     app.add_typer(get_data.app, name="get")
@@ -384,6 +383,29 @@ def validate(
     from davinci_monet.cli.commands.validate import validate_config_command
 
     validate_config_command(control, strict=strict, show_config=show_config)
+
+
+@app.command()
+def inspect(
+    run_dir: Path = typer.Argument(
+        ...,
+        help="DAVINCI run directory to inspect.",
+    ),
+    presets: list[str] = typer.Option(
+        ["gridded_aod_diagnostics"],
+        "--preset",
+        help="Inspection preset to apply. Can be repeated.",
+    ),
+    preview_format: str = typer.Option(
+        "png",
+        "--preview-format",
+        help="Inspection preview format to write.",
+    ),
+) -> None:
+    """Inspect final products in a DAVINCI run directory."""
+    from davinci_monet.cli.commands.inspect import inspect_command
+
+    inspect_command(run_dir, presets, preview_format)
 
 
 # CLI entry point

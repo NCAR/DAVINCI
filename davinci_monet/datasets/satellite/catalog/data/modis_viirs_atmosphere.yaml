@@ -31,3 +31,25 @@ products:
         units: "1"
         wavelength_nm: 550
         long_name: "AOD at 0.55um (land+ocean), monthly mean of daily mean"
+  - product_id: AERDB_L2_VIIRS_NOAA20
+    instrument: VIIRS
+    platform: NOAA-20
+    daac: LAADS
+    collection: "002"
+    level: L2
+    geometry: SWATH
+    file_format: NetCDF4
+    time_parse: "A%Y%j"
+    dim_aliases: { Idx_Atrack: y, Idx_Xtrack: x }
+    aliases: [viirs_aerdb_noaa20]
+    variables:
+      - display_name: aod_550_land
+        sds_name: Aerosol_Optical_Thickness_550_Land
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Deep Blue AOD at 550 nm over land"
+      - display_name: aod_550_ocean
+        sds_name: Aerosol_Optical_Thickness_550_Ocean
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Deep Blue AOD at 550 nm over ocean"

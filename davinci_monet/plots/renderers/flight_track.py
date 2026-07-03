@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("flight_track")
+@register_plotter("flight_track", arity="single_source", category="specialized")
 class FlightTrackPlotter(BasePlotter):
     """Plotter for 3D flight track maps colored by variable value.
 

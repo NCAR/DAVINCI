@@ -10,6 +10,7 @@ import pytest
 import xarray as xr
 
 from davinci_monet.core.base import iter_paired_variable_xy
+from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.pairing import (
     BasePairingStrategy,
@@ -307,6 +308,23 @@ class TestPairingEngine:
         geometry = engine._detect_geometry(gridded_geometry)
         assert geometry == DataGeometry.GRID
 
+    def test_assemble_requires_prefixed_y_when_variable_names_match(self) -> None:
+        """A bare x variable must not satisfy the y side for same-named variables."""
+        engine = PairingEngine()
+        strategy_output = xr.Dataset(
+            {"o3": ("time", np.array([10.0, 20.0]))},
+            coords={"time": pd.date_range("2024-01-01", periods=2, freq="h")},
+        )
+
+        with pytest.raises(PairingError, match="Could not resolve paired variables"):
+            engine._assemble_paired_dataset(
+                strategy_output,
+                x_vars=["o3"],
+                y_vars=["o3"],
+                x_source="obs",
+                y_source="model",
+            )
+
 
 # =============================================================================
 # Tests for BasePairingStrategy
@@ -342,6 +360,37 @@ class TestBasePairingStrategy:
         # Check that indices are valid
         assert 0 <= lat_idx.values[0] < len(y_lat)
         assert 0 <= lon_idx.values[0] < len(y_lon)
+
+    def test_find_nearest_indices_handles_descending_latitude(self) -> None:
+        strategy = PointStrategy()
+        y_lat = xr.DataArray([50.0, 40.0, 30.0], dims=["lat"])
+        y_lon = xr.DataArray([-110.0, -100.0, -90.0], dims=["lon"])
+
+        lat_idx, lon_idx = strategy._find_nearest_indices(
+            y_lat,
+            y_lon,
+            xr.DataArray([31.0]),
+            xr.DataArray([-100.0]),
+        )
+
+        assert lat_idx.values[0] == 2
+        assert lon_idx.values[0] == 1
+
+    def test_find_nearest_indices_handles_mixed_longitude_conventions(self) -> None:
+        strategy = PointStrategy()
+        y_lat = xr.DataArray([35.0], dims=["lat"])
+        y_lon = xr.DataArray([0.0, 260.0], dims=["lon"])
+
+        lat_idx, lon_idx = strategy._find_nearest_indices(
+            y_lat,
+            y_lon,
+            xr.DataArray([35.0]),
+            xr.DataArray([-100.0]),
+            radius_of_influence=1000.0,
+        )
+
+        assert lat_idx.values[0] == 0
+        assert lon_idx.values[0] == 1
 
     def test_find_nearest_with_radius_filter(self, dataset_2d: xr.Dataset) -> None:
         """Test that radius of influence filters distant points."""
@@ -450,6 +499,24 @@ class TestBasePairingStrategy:
         surface = PointStrategy()._extract_surface(dataset)
 
         np.testing.assert_allclose(surface["ozone"].values, 40.0)
+
+    def test_extract_surface_ascending_altitude_selects_lowest_level(self) -> None:
+        lats = np.array([40.0])
+        lons = np.array([-105.0])
+        altitude = np.array([0.0, 1000.0, 5000.0])
+        dataset = xr.Dataset(
+            {"ozone": (["altitude", "lat", "lon"], np.array([[[40.0]], [[70.0]], [[120.0]]]))},
+            coords={
+                "altitude": ("altitude", altitude, {"units": "m", "positive": "up"}),
+                "lat": lats,
+                "lon": lons,
+            },
+        )
+
+        surface = PointStrategy()._extract_surface(dataset)
+
+        assert "altitude" not in surface.dims
+        assert surface["ozone"].item() == pytest.approx(40.0)
 
 
 # =============================================================================
@@ -833,6 +900,38 @@ class TestProfileStrategy:
 
         # Should have dataset variables
         assert "temperature" in paired.data_vars
+
+    def test_pair_interpolates_y_lev_to_profile_level_coordinate(self) -> None:
+        times = pd.date_range("2024-01-01", periods=1, freq="h")
+        x_profile = xr.Dataset(
+            {"O3": (["time", "level"], np.array([[1.0, 2.0]]))},
+            coords={
+                "time": times,
+                "level": ("level", [1000.0, 900.0], {"units": "hPa"}),
+                "latitude": 40.0,
+                "longitude": -105.0,
+            },
+        )
+        y_grid = xr.Dataset(
+            {"O3": (["time", "lev", "lat", "lon"], np.array([[[[10.0]], [[20.0]]]]))},
+            coords={
+                "time": times,
+                "lev": ("lev", [1000.0, 500.0], {"units": "hPa", "positive": "down"}),
+                "lat": [40.0],
+                "lon": [-105.0],
+            },
+        )
+
+        paired = ProfileStrategy().pair_sources(
+            x_data=x_profile,
+            y_data=y_grid,
+            radius_of_influence=1000.0,
+            vertical_method="linear",
+        )
+
+        assert paired["y_O3"].dims == ("time", "level")
+        np.testing.assert_allclose(paired["level"].values, [1000.0, 900.0])
+        np.testing.assert_allclose(paired["y_O3"].values, [[10.0, 12.0]])
 
 
 # =============================================================================
