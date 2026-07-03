@@ -68,35 +68,27 @@ then loads, pairs, analyzes, plots, inspects, and writes logs and a run
 manifest from one command:
 
 ```bash
-davinci-monet run config.yaml
+davinci run config.yaml
 ```
 
-The project is named DAVINCI; its package and CLI entry point retain
-`davinci-monet`, reflecting its MELODIES-MONET lineage.
 Target users include atmospheric chemistry model developers, air quality and
 field-campaign scientists, and—as the CERES deployment demonstrates—
 operational processing groups.
 
 # State of the field
 
-DAVINCI builds on ideas explored in MELODIES-MONET [@baker_melodies_monet],
-a predecessor toolkit developed at NOAA CSL, in which evaluation is organized
-around a single driver class mixing data loading, pairing, and analysis in
-one procedural sequence, with pairing logic tied to specific observation
-readers. That design makes it difficult to add new observation
-types without modifying core pairing code, to validate configuration before
-runtime, or to run observation-only workflows when model output is
-unavailable. DAVINCI answers with a new architecture rather than incremental extension:
-geometry-driven pairing dispatch, Pydantic-validated configuration, and
-first-class observation-only execution and swath-to-grid binning.
-
-DAVINCI continues to use the monet and monetio libraries [@baker_monet] for
-low-level data I/O but replaces the evaluation layer above them. Its primary
-contribution is not a new metric or I/O library; it is a software design that
-makes heterogeneous atmospheric evaluation workflows easier to configure,
-extend, reuse, and operate unattended. It complements domain libraries such
-as MetPy [@metpy], which provide meteorological analysis and visualization
-but not a unified atmospheric chemistry evaluation runtime.
+Existing open-source tooling for atmospheric composition evaluation offers
+strong building blocks but no unified runtime. The monet and monetio
+libraries [@baker_monet] provide model-format readers, observation-network
+retrieval, and low-level I/O; DAVINCI uses them for data access and supplies
+the evaluation layer above: geometry-driven pairing dispatch,
+Pydantic-validated configuration, first-class observation-only execution,
+and satellite swath-to-grid binning, organized as a stage pipeline. Domain
+libraries such as MetPy [@metpy] provide meteorological analysis and
+visualization but likewise no config-driven evaluation runtime. DAVINCI's
+contribution is not a new metric or I/O library; it is a software design
+that makes heterogeneous evaluation workflows easier to configure, extend,
+reuse, and operate unattended.
 
 # Software design
 
@@ -247,7 +239,7 @@ This work was supported by the National Center for Atmospheric Research,
 which is a major facility sponsored by the National Science Foundation
 under Cooperative Agreement No. 1852977.
 
-DAVINCI builds on the foundation established by MELODIES-MONET
-and the monetio and monet packages developed at NOAA CSL.
+DAVINCI builds on the monet and monetio packages [@baker_monet] developed
+at the NOAA Air Resources Laboratory.
 
 # Bibliography

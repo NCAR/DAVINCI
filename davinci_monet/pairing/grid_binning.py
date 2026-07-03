@@ -1,6 +1,6 @@
 """Numba-accelerated binning of sparse datasets onto a grid.
 
-Ported from MELODIES-MONET grid_util.py. Bins satellite swath pixels
+Bins satellite swath pixels
 (or any sparse 2D datasets) into (time, lon, lat) grid cells by locating
 each value against the true bin edges with ``searchsorted``, accumulated
 in-place. This bins correctly on non-uniform (Gaussian/stretched) grids,

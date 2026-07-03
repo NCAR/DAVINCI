@@ -2,7 +2,7 @@
 
 **Data Analysis and Visual Intelligence for Climate/Chemistry**
 
-A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air quality models against observations, based on MELODIES-MONET.
+A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air quality models against observations.
 
 ---
 
@@ -164,7 +164,7 @@ conda env create -f environment.yml
 conda activate davinci
 ```
 
-**Key packages** (inherited from melodies-monet):
+**Key packages**:
 - monet, monetio - atmospheric data I/O
 - xarray, numpy, pandas - data structures
 - matplotlib, cartopy - plotting
@@ -182,7 +182,6 @@ conda activate davinci
 
 ## Related Repositories
 
-- **MELODIES-MONET**: https://github.com/NOAA-CSL/MELODIES-MONET — predecessor toolkit
 - **Wiki**: https://github.com/NCAR/DAVINCI/wiki
 
 ## Project Goals
