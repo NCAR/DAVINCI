@@ -134,6 +134,33 @@ class ICARTTReader:
             return {}
         return units
 
+    def _parse_base_date(self, lines: list[str]) -> datetime | None:
+        """Parse the ICARTT base date from header line 7."""
+        try:
+            parts = [int(p.strip()) for p in lines[6].split(",")[:3]]
+            return datetime(parts[0], parts[1], parts[2])
+        except (ValueError, IndexError):
+            return None
+
+    def _parse_header_missing_values(self, lines: list[str]) -> dict[str, float]:
+        """Parse per-variable missing-value sentinels from an FFI-1001 header."""
+        try:
+            n_header_lines = int(lines[0].split(",")[0])
+            nv = int(lines[9].split(",")[0])
+            missing_values = [float(p.strip()) for p in lines[11].split(",") if p.strip()]
+        except (ValueError, IndexError):
+            return {}
+
+        sentinels: dict[str, float] = {}
+        for i in range(nv):
+            var_def_idx = 12 + i
+            if var_def_idx >= n_header_lines - 1 or var_def_idx >= len(lines):
+                break
+            parts = [p.strip() for p in lines[var_def_idx].split(",")]
+            if parts and parts[0] and i < len(missing_values):
+                sentinels[parts[0]] = missing_values[i]
+        return sentinels
+
     def _apply_header_units(self, ds: xr.Dataset, file_list: list[Path]) -> xr.Dataset:
         """Stamp units attrs onto dataset variables from the ICARTT file header.
 
@@ -236,6 +263,8 @@ class ICARTTReader:
         # Parse header
         first_line = lines[0].strip().split(",")
         n_header_lines = int(first_line[0])
+        base_date = self._parse_base_date(lines)
+        missing_values = self._parse_header_missing_values(lines)
 
         # Get variable names from header
         var_line_idx = n_header_lines - 1
@@ -260,6 +289,9 @@ class ICARTTReader:
 
         # Create DataFrame
         df = pd.DataFrame(data, columns=var_names[: len(data[0])])
+        for name, sentinel in missing_values.items():
+            if name in df.columns:
+                df[name] = df[name].mask(df[name] == sentinel)
 
         # Convert to xarray
         # Look for time variable (commonly first column or named time/Time_UTC)
@@ -272,6 +304,8 @@ class ICARTTReader:
             time_col = df.columns[0]
 
         if time_col:
+            if base_date is not None and pd.api.types.is_numeric_dtype(df[time_col]):
+                df[time_col] = pd.Timestamp(base_date) + pd.to_timedelta(df[time_col], unit="s")
             df = df.set_index(time_col)
             df.index.name = "time"
 

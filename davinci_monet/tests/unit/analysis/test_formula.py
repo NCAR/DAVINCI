@@ -77,6 +77,16 @@ def test_unknown_function_kwargs_are_formula_errors() -> None:
         evaluate_formula("mean(analysis, bogus=1)", _dataset())
 
 
+def test_dangerous_integer_exponentiation_is_rejected_before_large_int_compute() -> None:
+    with pytest.raises(FormulaError, match="exponent"):
+        evaluate_formula("analysis + 10**10**4", _dataset())
+
+
+def test_small_integer_exponentiation_is_allowed() -> None:
+    out = evaluate_formula("analysis + 2**8", _dataset())
+    np.testing.assert_allclose(out.values, _dataset()["analysis"].values + 256.0)
+
+
 @pytest.mark.parametrize(
     "expr",
     [

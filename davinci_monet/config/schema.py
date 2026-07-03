@@ -143,7 +143,7 @@ class AnalysisConfig(StrictSchema):
         result: datetime | None = v
         return result
 
-    @field_validator("output_dir", mode="before")
+    @field_validator("output_dir", "log_dir", mode="before")
     @classmethod
     def parse_path(cls, v: Any) -> Path | None:
         """Convert string to Path."""
@@ -361,7 +361,7 @@ class PipelinePairingConfig(StrictSchema):
     dask_pair_workers: int = 1
 
 
-class SourcePairConfig(FlexibleSchema):
+class SourcePairConfig(StrictSchema):
     """Binary pair definition as an ordered (x, y).
 
     ``x`` is the horizontal/reference axis; ``y`` is vertical. Diffs are ``y - x``.

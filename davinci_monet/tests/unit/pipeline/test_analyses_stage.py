@@ -83,6 +83,41 @@ def test_stage_registers_derived_sources_in_order(_fake_eof_registered) -> None:
     assert ctx.sources["pc1_wav"].geometry is DataGeometry.SPECTRUM
 
 
+def test_stage_analysis_item_error_completes_with_warning() -> None:
+    _prev = analysis_registry.get_or_none("eof")
+
+    class _SometimesFailingEOF(DerivedAnalysis):
+        name = "eof"
+        output_geometry = DataGeometry.GRID
+
+        def analyze(self, data, spec):
+            if spec.variable == "BAD":
+                raise RuntimeError("forced analysis failure")
+            return xr.Dataset({"pc": ("time", np.arange(3.0))}, coords={"time": np.arange(3)})
+
+    analysis_registry.register("eof", _SometimesFailingEOF, replace=True)
+    try:
+        ctx = _ctx()
+        assert isinstance(ctx.config, dict)
+        ctx.config["analyses"] = {
+            "bad_eof": {"type": "eof", "source": "cam", "variable": "BAD"},
+            "good_eof": {"type": "eof", "source": "cam", "variable": "O3"},
+        }
+
+        result = AnalysesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        assert result.error is None
+        assert "good_eof" in ctx.sources
+        assert "bad_eof" not in ctx.sources
+        assert ctx.metadata["analysis_errors"] == ["bad_eof: forced analysis failure"]
+    finally:
+        if _prev is not None:
+            analysis_registry.register("eof", _prev, replace=True)
+        else:
+            analysis_registry.unregister("eof")
+
+
 def test_stage_defaults_gridded_analysis_source_label_to_analysis_key(tmp_path) -> None:
     time = np.array(["2008-07-01T00:00", "2008-07-01T03:00"], dtype="datetime64[ns]")
     cam = SourceData(

@@ -12,7 +12,8 @@ sources:
     type: cmaq
     files: /data/cmaq/2024/07/CCTM_CONC_*.nc
     files_vert: /data/cmaq/2024/07/METCRO3D_*.nc
-    radius_of_influence: 12000    variables:
+    radius_of_influence: 12000
+    variables:
       O3:
         ylabel_plot: "O3 (ppbv)"
         vmin_plot: 0

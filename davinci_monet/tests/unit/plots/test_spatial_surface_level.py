@@ -30,6 +30,13 @@ def test_ascending_pressure_selects_last_index() -> None:
     assert surface_level_index(_field([10.0, 200.0, 1000.0]), "z") == -1
 
 
+def test_ascending_altitude_selects_first_index() -> None:
+    """Geometric height increases upward, so the surface is the lowest altitude."""
+    field = _field([0.0, 1000.0, 5000.0])
+    field["z"].attrs.update({"units": "m", "positive": "up"})
+    assert surface_level_index(field, "z") == 0
+
+
 def test_descending_pressure_selects_first_index() -> None:
     """Surface-first ordering: pressure decreases with index, surface is index 0."""
     assert surface_level_index(_field([1000.0, 200.0, 10.0]), "z") == 0

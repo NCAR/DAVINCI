@@ -201,7 +201,7 @@ class TROPOMIReader:
 
         # Standardize dimension names
         if "scanline" not in ds.dims:
-            for alias in ["ground_pixel", "nscans"]:
+            for alias in ["scanline", "nscans"]:
                 if alias in ds.dims:
                     dim_renames[alias] = "scanline"
                     break

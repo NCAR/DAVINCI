@@ -13,6 +13,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from davinci_monet.core.coordinates import (
+    extract_surface,
+    match_longitude_convention,
+    wrap_longitudes,
+)
 from davinci_monet.core.exceptions import InterpolationError, PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -167,7 +172,7 @@ class BasePairingStrategy(ABC):
         if y_lat.ndim == 1 and y_lon.ndim == 1:
             # Regular grid - find nearest indices directly
             lat_idx = self._find_nearest_1d(y_lat.values, x_lat.values)
-            lon_idx = self._find_nearest_1d(y_lon.values, x_lon.values)
+            lon_idx = self._find_nearest_1d(y_lon.values, x_lon.values, longitude=True)
         else:
             # Curvilinear grid - need 2D search
             lat_idx, lon_idx = self._find_nearest_2d(
@@ -189,7 +194,11 @@ class BasePairingStrategy(ABC):
         return xr.DataArray(lat_idx), xr.DataArray(lon_idx)
 
     def _find_nearest_1d(
-        self, grid: np.ndarray[Any, np.dtype[Any]], points: np.ndarray[Any, np.dtype[Any]]
+        self,
+        grid: np.ndarray[Any, np.dtype[Any]],
+        points: np.ndarray[Any, np.dtype[Any]],
+        *,
+        longitude: bool = False,
     ) -> np.ndarray[Any, np.dtype[Any]]:
         """Find nearest indices in a 1D sorted array.
 
@@ -205,16 +214,36 @@ class BasePairingStrategy(ABC):
         np.ndarray
             Indices of nearest grid points.
         """
-        # Use searchsorted for efficiency
-        idx = np.searchsorted(grid, points)
-        idx = np.clip(idx, 1, len(grid) - 1)
+        grid_values = np.asarray(grid, dtype=np.float64)
+        point_values = np.asarray(points, dtype=np.float64)
+        if grid_values.size == 0:
+            return np.full(point_values.shape, -1, dtype=np.int64)
+        if grid_values.size == 1:
+            return np.zeros(point_values.shape, dtype=np.int64)
 
-        # Check which neighbor is closer
-        left = grid[idx - 1]
-        right = grid[idx]
-        idx = np.where(np.abs(points - left) < np.abs(points - right), idx - 1, idx)
+        if longitude:
+            flat_points = wrap_longitudes(point_values).reshape(-1)
+            grid_lons = wrap_longitudes(grid_values)
+            deltas = np.abs(((flat_points[:, None] - grid_lons[None, :] + 180.0) % 360.0) - 180.0)
+            return np.nanargmin(deltas, axis=1).reshape(point_values.shape)
 
-        return idx
+        order = np.argsort(grid_values)
+        sorted_grid = grid_values[order]
+
+        idx = np.searchsorted(sorted_grid, point_values)
+        idx = np.clip(idx, 1, len(sorted_grid) - 1)
+
+        left_idx = idx - 1
+        right_idx = idx
+        left = sorted_grid[left_idx]
+        right = sorted_grid[right_idx]
+        nearest_sorted = np.where(
+            np.abs(point_values - left) < np.abs(point_values - right),
+            left_idx,
+            right_idx,
+        )
+
+        return order[nearest_sorted]
 
     def _find_nearest_2d(
         self,
@@ -279,7 +308,7 @@ class BasePairingStrategy(ABC):
         lat1_rad = np.radians(lat1)
         lat2_rad = np.radians(lat2)
         dlat = np.radians(lat2 - lat1)
-        dlon = np.radians(lon2 - lon1)
+        dlon = np.radians(match_longitude_convention(lon2 - lon1, [-180.0, 180.0]))
 
         a = np.sin(dlat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2) ** 2
         c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
@@ -391,24 +420,4 @@ class BasePairingStrategy(ABC):
         xr.Dataset
             Data at surface level only.
         """
-        # Auto-detect vertical dimension if not specified
-        if level_dim is None:
-            for dim_name in ["lev", "z", "level", "altitude", "height"]:
-                if dim_name in data.dims:
-                    level_dim = dim_name
-                    break
-
-        if level_dim is None or level_dim not in data.dims:
-            return data
-
-        # Determine correct surface index based on coordinate values
-        # For CESM-style hybrid coordinates where pressure increases downward,
-        # surface is at the last index (highest pressure), not first (TOA)
-        surface_idx = 0  # Default: first level is surface
-        if level_dim in data.coords:
-            vert_vals = data.coords[level_dim].values
-            if len(vert_vals) > 1 and vert_vals[-1] > vert_vals[0]:
-                # Values increase (typical hybrid sigma-pressure) -> surface at end
-                surface_idx = -1
-
-        return data.isel({level_dim: surface_idx})
+        return extract_surface(data, level_dim)

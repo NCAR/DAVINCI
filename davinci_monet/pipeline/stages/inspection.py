@@ -32,8 +32,15 @@ class InspectionStage(BaseStage):
             )
 
         output_dir = Path(context.analysis_config().output_dir or ".")
+        plot_paths = None
+        plotting = context.results.get("plotting")
+        if plotting and isinstance(plotting.data, dict) and "plots_generated" in plotting.data:
+            plot_paths = plotting.data["plots_generated"]
         result = inspect_run_directory(
-            output_dir, presets=cfg.presets, preview_format=cfg.preview_format
+            output_dir,
+            presets=cfg.presets,
+            preview_format=cfg.preview_format,
+            plot_paths=plot_paths,
         )
         data = {
             "passed": result.passed,

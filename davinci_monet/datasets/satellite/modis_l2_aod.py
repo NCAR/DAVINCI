@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
 import xarray as xr
 
 from davinci_monet.core.exceptions import DataNotFoundError
@@ -173,7 +174,14 @@ class MODISL2AODReader:
             return ds
         if "time" not in ds.coords:
             return ds
-        scan = ds.coords["time"].astype("float64") - float(_EPOCH_1993_SECONDS)
+        time = ds.coords["time"]
+        if np.issubdtype(time.dtype, np.datetime64):
+            seconds = time.values.astype("datetime64[s]").astype("int64").astype("float64")
+            scan = xr.DataArray(seconds, dims=time.dims, coords=time.coords) - float(
+                _EPOCH_1993_SECONDS
+            )
+        else:
+            scan = time.astype("float64") - float(_EPOCH_1993_SECONDS)
         return ds.assign(Scan_Start_Time=scan)
 
     def _open_with_xarray(

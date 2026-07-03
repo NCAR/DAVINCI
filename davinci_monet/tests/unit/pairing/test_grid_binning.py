@@ -1,9 +1,10 @@
 import numpy as np
 
-from davinci_monet.pairing.grid_binning import bin_points_to_grid_4d, normalize_grid
 from davinci_monet.pairing.grid_binning import (
+    bin_points_to_grid_4d,
     bin_swath_to_grid,
     bin_swath_to_grid_uncertainty,
+    normalize_grid,
     normalize_uncertainty_grid,
 )
 

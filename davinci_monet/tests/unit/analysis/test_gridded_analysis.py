@@ -49,24 +49,26 @@ def _cam_ds() -> xr.Dataset:
 
 
 def _spec() -> GriddedAnalysisSpec:
-    return GriddedAnalysisSpec(
-        type="gridded_analysis",
-        source="cam",
-        groupby="day",
-        roles={
-            "observation": "AODNDG_OBS",
-            "first_guess": "AODNDG_MODEL_PRE",
-            "analysis": "AODNDG_MODEL_POST",
-            "mask": "AODNDG_MASK",
-        },
-        fields={
-            "analyzed_aod": {"formula": 'mean(analysis, dim="time")'},
-            "analysis_increment_aod": {
-                "formula": 'active_mean(analysis - first_guess, mask > 0.5, dim="time")'
+    return GriddedAnalysisSpec.model_validate(
+        {
+            "type": "gridded_analysis",
+            "source": "cam",
+            "groupby": "day",
+            "roles": {
+                "observation": "AODNDG_OBS",
+                "first_guess": "AODNDG_MODEL_PRE",
+                "analysis": "AODNDG_MODEL_POST",
+                "mask": "AODNDG_MASK",
             },
-            "increment_x2": {"formula": "analysis_increment_aod * 2"},
-            "nudge_fraction": {"formula": 'mean(mask, dim="time")'},
-        },
+            "fields": {
+                "analyzed_aod": {"formula": 'mean(analysis, dim="time")'},
+                "analysis_increment_aod": {
+                    "formula": 'active_mean(analysis - first_guess, mask > 0.5, dim="time")'
+                },
+                "increment_x2": {"formula": "analysis_increment_aod * 2"},
+                "nudge_fraction": {"formula": 'mean(mask, dim="time")'},
+            },
+        }
     )
 
 

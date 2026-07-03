@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import TwoSlopeNorm
 
 from davinci_monet.core.base import PlotSeries
 from davinci_monet.plots._stats import annotation_metrics
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-@register_plotter("scorecard")
+@register_plotter("scorecard", arity="pairwise", category="specialized")
 class ScorecardPlotter(BasePlotter):
     """Plotter for scorecard/heatmap displays.
 
@@ -174,14 +175,23 @@ class ScorecardPlotter(BasePlotter):
             vmin_calc = np.nanmin(data_finite) if vmin is None else vmin  # type: ignore[assignment]
             vmax_calc = np.nanmax(data_finite) if vmax is None else vmax  # type: ignore[assignment]
 
+        norm = None
+        if (
+            center is not None
+            and np.isfinite(center)
+            and np.isfinite(vmin_calc)
+            and np.isfinite(vmax_calc)
+            and vmin_calc < center < vmax_calc
+        ):
+            norm = TwoSlopeNorm(vcenter=center, vmin=vmin_calc, vmax=vmax_calc)
+
         # Create heatmap
-        im = ax.imshow(
-            data,
-            cmap=cmap,
-            aspect="auto",
-            vmin=vmin_calc,
-            vmax=vmax_calc,
-        )
+        imshow_kwargs: dict[str, Any] = {"cmap": cmap, "aspect": "auto"}
+        if norm is None:
+            imshow_kwargs.update({"vmin": vmin_calc, "vmax": vmax_calc})
+        else:
+            imshow_kwargs["norm"] = norm
+        im = ax.imshow(data, **imshow_kwargs)
 
         # Set ticks
         ax.set_xticks(np.arange(len(col_labels)))
@@ -199,7 +209,12 @@ class ScorecardPlotter(BasePlotter):
                     value = data[i, j]
                     if np.isfinite(value):
                         # Determine text color based on background
-                        bg_val = (value - vmin_calc) / (vmax_calc - vmin_calc)
+                        if norm is not None:
+                            bg_val = float(norm(value))
+                        elif vmax_calc != vmin_calc:
+                            bg_val = (value - vmin_calc) / (vmax_calc - vmin_calc)
+                        else:
+                            bg_val = 0.5
                         text_color = "white" if 0.3 < bg_val < 0.7 else "black"
 
                         text = format(value, fmt)
@@ -295,7 +310,7 @@ class ScorecardPlotter(BasePlotter):
         Parameters
         ----------
         stats_dict
-            Dict mapping dataset names to DataFrames of statistics.
+            Dict mapping source names to DataFrames of statistics.
         metrics
             List of metric names (columns) to show.
         ax

@@ -19,8 +19,6 @@ import yaml
 
 from davinci_monet.pipeline.runner import PipelineRunner
 
-pytestmark = pytest.mark.integration
-
 
 def _monthly_grid(
     varname: str,
@@ -62,6 +60,7 @@ def _monthly_grid(
     )
 
 
+@pytest.mark.integration
 def test_ceres_ebaf_pipeline(tmp_path: Path) -> None:
     e_dir = tmp_path / "ebaf"
     m_dir = tmp_path / "dataset"
@@ -141,6 +140,7 @@ _RUN_REAL = bool(os.environ.get("CERES_DATA"))
     not (_RUN_REAL and _IO_EBAF.is_dir()),
     reason="real-data smoke is opt-in (set CERES_DATA) and needs /Volumes/Io",
 )
+@pytest.mark.real_data
 def test_real_ebaf_file_opens() -> None:
     """Smoke: open the staged EBAF record via the reader, check physics.
 
@@ -177,6 +177,7 @@ def test_real_ebaf_file_opens() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_ceres_syn1deg_pipeline(tmp_path: Path) -> None:
     from davinci_monet.tests.test_ceres_l3_readers import _write_syn_hdf4
 
@@ -254,6 +255,7 @@ _IO_SYN_MONTH = Path("/Volumes/Io/CERES/SYN1deg/month")
     not (_RUN_REAL and _IO_SYN_MONTH.is_dir() and _IO_EBAF.is_dir()),
     reason="real-data smoke is opt-in (set CERES_DATA) and needs /Volumes/Io",
 )
+@pytest.mark.real_data
 def test_real_syn1deg_zonal_means_correlate_with_ebaf() -> None:
     """Smoke: SYN1deg 2025-12 zonal-mean OLR must track EBAF's (lat axis check)."""
     from davinci_monet.datasets.satellite.ceres_l3 import (
@@ -286,6 +288,7 @@ def test_real_syn1deg_zonal_means_correlate_with_ebaf() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_ceres_ssf_pipeline(tmp_path: Path) -> None:
     """SSF footprints -> SwathGridStrategy binning -> stats, via the pipeline."""
     from davinci_monet.tests.test_ceres_ssf_reader import _write_ssf_hdf4_grid
@@ -366,6 +369,7 @@ _IO_SSF_N20 = Path("/Volumes/Io/CERES/SSF/NOAA20-FM6")
     not (_RUN_REAL and _IO_SSF_TERRA.is_dir() and _IO_SSF_N20.is_dir()),
     reason="real-data smoke is opt-in (set CERES_DATA) and needs /Volumes/Io",
 )
+@pytest.mark.real_data
 def test_real_ssf_granules_open_in_both_editions() -> None:
     """Smoke: one HDF4 (Terra) and one netCDF (NOAA-20) granule via the reader."""
     from davinci_monet.datasets.satellite.ceres_ssf import CERESSSFReader

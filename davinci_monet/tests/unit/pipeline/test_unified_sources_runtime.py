@@ -514,7 +514,7 @@ def test_single_source_plot_uses_source_key_not_geometry_key(tmp_path: Path) -> 
     assert len([p for p in plots if p.endswith(".png")]) == 1
 
 
-def test_unsupported_source_pair_fails_pairing_stage() -> None:
+def test_unsupported_source_pair_records_warning_without_failing_stage() -> None:
     from davinci_monet.core.protocols import DataGeometry
     from davinci_monet.pipeline.stages import (
         PairingStage,
@@ -558,9 +558,12 @@ def test_unsupported_source_pair_fails_pairing_stage() -> None:
 
     result = PairingStage().execute(ctx)
 
-    assert result.status is StageStatus.FAILED
-    assert "a_b_o3" in str(result.error)
-    assert "Unsupported pairing combination" in str(result.error)
+    assert result.status is StageStatus.COMPLETED
+    assert result.error is None
+    assert ctx.metadata["pairing_errors"]
+    assert result.metadata["warnings"] == ctx.metadata["pairing_errors"]
+    assert "a_b_o3" in result.metadata["warnings"][0]
+    assert "Unsupported pairing combination" in result.metadata["warnings"][0]
 
 
 def test_sources_config_supports_geometry_geometry_grid_pair(tmp_path: Path) -> None:

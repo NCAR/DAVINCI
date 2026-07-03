@@ -202,6 +202,15 @@ class TestValidateDatasetGeometry:
         )
         validate_dataset_geometry(ds, DataGeometry.TRACK)
 
+    def test_point_geometry_requires_site_or_x_dimension_without_attr(self) -> None:
+        """A time-only dataset is not point geometry when no geometry attr is present."""
+        ds = xr.Dataset(
+            {"temp": (["time"], np.random.randn(10))},
+            coords={"time": np.arange(10)},
+        )
+        with pytest.raises(DataValidationError, match="POINT geometry expects"):
+            validate_dataset_geometry(ds, DataGeometry.POINT)
+
     def test_grid_geometry_valid(self) -> None:
         """Test valid GRID geometry."""
         ds = xr.Dataset(

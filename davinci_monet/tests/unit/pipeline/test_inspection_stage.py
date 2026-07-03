@@ -4,7 +4,12 @@ import sys
 from pathlib import Path
 
 from davinci_monet.config.schema import MonetConfig
-from davinci_monet.pipeline.stages import InspectionStage, PipelineContext, StageStatus
+from davinci_monet.pipeline.stages import (
+    InspectionStage,
+    PipelineContext,
+    StageResult,
+    StageStatus,
+)
 
 
 def _install_fake_pdftoppm(tmp_path: Path, monkeypatch) -> None:
@@ -68,13 +73,15 @@ def test_enabled_inspection_passes_for_typed_config(tmp_path, monkeypatch) -> No
     plots.mkdir()
     (plots / "aod.pdf").write_bytes(b"%PDF-1.4\n")
     ctx = PipelineContext(
-        config=MonetConfig(
-            analysis={"output_dir": str(tmp_path)},
-            inspection={
-                "enabled": True,
-                "required": True,
-                "presets": ["gridded_aod_diagnostics"],
-            },
+        config=MonetConfig.model_validate(
+            {
+                "analysis": {"output_dir": str(tmp_path)},
+                "inspection": {
+                    "enabled": True,
+                    "required": True,
+                    "presets": ["gridded_aod_diagnostics"],
+                },
+            }
         )
     )
 
@@ -86,3 +93,31 @@ def test_enabled_inspection_passes_for_typed_config(tmp_path, monkeypatch) -> No
     assert result.data["inspection_previews"] == [
         str(tmp_path / "inspection" / "previews" / "aod.png")
     ]
+
+
+def test_inspection_stage_uses_plotting_stage_products(tmp_path, monkeypatch) -> None:
+    _install_fake_pdftoppm(tmp_path, monkeypatch)
+    plot_dir = tmp_path / "cam"
+    plot_dir.mkdir()
+    pdf = plot_dir / "aod.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    ctx = PipelineContext(
+        config={
+            "analysis": {"output_dir": str(tmp_path)},
+            "inspection": {
+                "enabled": True,
+                "required": True,
+                "presets": ["gridded_aod_diagnostics"],
+            },
+        }
+    )
+    ctx.results["plotting"] = StageResult(
+        "plotting",
+        StageStatus.COMPLETED,
+        data={"plots_generated": [str(pdf)]},
+    )
+
+    result = InspectionStage().execute(ctx)
+
+    assert result.status == StageStatus.COMPLETED
+    assert result.data["passed"] is True

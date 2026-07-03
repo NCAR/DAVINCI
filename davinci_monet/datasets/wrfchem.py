@@ -1,7 +1,7 @@
-"""WRF-Chem dataset reader.
+"""WRF-Chem model reader.
 
 This module provides the WRFChemReader class for reading Weather Research and
-Forecasting dataset with Chemistry (WRF-Chem) output files.
+Forecasting with Chemistry (WRF-Chem) model output files.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _MONETIO_ONLY_KWARGS = ("mech", "convert_to_ppb", "surf_only", "surf_only_nc")
 
 @source_registry.register("wrfchem")
 class WRFChemReader:
-    """Reader for WRF-Chem dataset output.
+    """Reader for WRF-Chem model output.
 
     Reads WRF-Chem output files (wrfout_*), handling various chemical
     mechanisms and output configurations.

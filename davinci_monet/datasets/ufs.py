@@ -1,7 +1,7 @@
-"""UFS (Unified Forecast System) dataset reader.
+"""UFS (Unified Forecast System) model reader.
 
-This module provides the UFSReader class for reading UFS-AQM (Air Quality Dataset)
-output, including RRFS (Rapid Refresh Forecast System) data.
+This module provides the UFSReader class for reading UFS-AQM (Air Quality
+Model) output, including RRFS (Rapid Refresh Forecast System) data.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from davinci_monet.io.reader_utils import (
 
 @source_registry.register("ufs")
 class UFSReader:
-    """Reader for UFS-AQM dataset output.
+    """Reader for UFS-AQM model output.
 
-    Reads UFS Air Quality Dataset output, including RRFS-CMAQ data.
+    Reads UFS Air Quality Model output, including RRFS-CMAQ data.
     Supports both grib2 and netCDF formats.
 
     Examples

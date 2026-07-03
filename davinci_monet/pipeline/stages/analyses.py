@@ -127,10 +127,10 @@ class AnalysesStage(BaseStage):
         errors = context.metadata.get("analysis_errors") or []
         if errors:
             return self._create_result(
-                StageStatus.FAILED,
+                StageStatus.COMPLETED,
                 data=summary,
-                error="Analyses failed: " + "; ".join(str(e) for e in errors),
                 duration=time.time() - start,
+                warnings=list(errors),
             )
         return self._create_result(
             StageStatus.COMPLETED, data=summary, duration=time.time() - start

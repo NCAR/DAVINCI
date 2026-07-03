@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import xarray as xr
 
@@ -34,11 +36,12 @@ def test_plot_suite_stage_expands_into_context_plots(tmp_path) -> None:
         sources={"daily_aod": SourceData(ds, "daily_aod", "gridded_analysis", DataGeometry.GRID)},
     )
     result = PlotSuiteStage().execute(ctx)
+    config = cast(dict[str, Any], ctx.config)
     assert result.status == StageStatus.COMPLETED
-    assert "daily_analyzed_aod" in ctx.config["plots"]
-    assert ctx.config["plots"]["daily_analyzed_aod"]["source"] == "daily_aod"
-    assert ctx.config["plots"]["daily_analyzed_aod"]["output_subdir"] == "plots/daily"
-    assert ctx.config["plots"]["daily_analyzed_aod"]["title"] == "CAM7 Analyzed AOD"
+    assert "daily_analyzed_aod" in config["plots"]
+    assert config["plots"]["daily_analyzed_aod"]["source"] == "daily_aod"
+    assert config["plots"]["daily_analyzed_aod"]["output_subdir"] == "plots/daily"
+    assert config["plots"]["daily_analyzed_aod"]["title"] == "CAM7 Analyzed AOD"
 
 
 def test_plot_suite_stage_preserves_typed_config(tmp_path) -> None:
@@ -46,22 +49,24 @@ def test_plot_suite_stage_preserves_typed_config(tmp_path) -> None:
         {"analyzed_aod": (("group", "lat", "lon"), np.ones((1, 1, 2)))},
         coords={"group": ["2008-07-01"], "lat": [0.0], "lon": [0.0, 90.0]},
     )
-    cfg = MonetConfig(
-        sources={"daily_aod": {"type": "generic", "files": "daily.nc"}},
-        plots={
-            "existing": {
-                "type": "spatial",
-                "source": "daily_aod",
-                "variable": "analyzed_aod",
-            }
-        },
-        plot_suites={
-            "daily": {
-                "preset": "gridded_aod_diagnostics",
-                "source": "daily_aod",
-                "output_subdir": "plots/daily",
-            }
-        },
+    cfg = MonetConfig.model_validate(
+        {
+            "sources": {"daily_aod": {"type": "generic", "files": "daily.nc"}},
+            "plots": {
+                "existing": {
+                    "type": "spatial",
+                    "source": "daily_aod",
+                    "variable": "analyzed_aod",
+                }
+            },
+            "plot_suites": {
+                "daily": {
+                    "preset": "gridded_aod_diagnostics",
+                    "source": "daily_aod",
+                    "output_subdir": "plots/daily",
+                }
+            },
+        }
     )
     ctx = PipelineContext(
         config=cfg,

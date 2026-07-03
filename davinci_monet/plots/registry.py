@@ -25,11 +25,16 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from davinci_monet.core.registry import Registry, plotter_registry
 from davinci_monet.plots.contracts import (
     ALL_PLOT_TYPES,
+    MULTI_SOURCE_PLOTS,
+    PAIRWISE_PLOTS,
+    SINGLE_SOURCE_PLOTS,
     SPATIAL_PLOTS,
     SPECIALIZED_PLOTS,
     STATISTICAL_PLOTS,
     TEMPORAL_PLOTS,
+    PlotArity,
 )
+from davinci_monet.plots.contracts import plot_category as _plot_category
 
 if TYPE_CHECKING:
     from davinci_monet.plots.base import BasePlotter, PlotConfig
@@ -37,7 +42,13 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def register_plotter(name: str, *, replace: bool = False) -> Callable[[type[T]], type[T]]:
+def register_plotter(
+    name: str,
+    *,
+    replace: bool = False,
+    arity: PlotArity | str | None = None,
+    category: str | None = None,
+) -> Callable[[type[T]], type[T]]:
     """Decorator to register a plotter class.
 
     Parameters
@@ -46,6 +57,12 @@ def register_plotter(name: str, *, replace: bool = False) -> Callable[[type[T]],
         Unique name for the plotter (e.g., 'timeseries', 'scatter').
     replace
         If True, allow replacing an existing registration.
+    arity
+        Optional input-shape contract stored on the plotter class as
+        ``plot_arity``.
+    category
+        Optional public plot category stored on the plotter class as
+        ``plot_category``.
 
     Returns
     -------
@@ -60,7 +77,15 @@ def register_plotter(name: str, *, replace: bool = False) -> Callable[[type[T]],
     ...     def render(self, series, **kwargs):
     ...         ...
     """
-    return plotter_registry.register(name, replace=replace)
+
+    def decorator(plotter_cls: type[T]) -> type[T]:
+        if arity is not None:
+            setattr(plotter_cls, "plot_arity", arity)
+        if category is not None:
+            setattr(plotter_cls, "plot_category", category)
+        return plotter_registry.register(name, replace=replace)(plotter_cls)
+
+    return decorator
 
 
 def get_plotter_class(name: str) -> type[BasePlotter]:
@@ -166,15 +191,7 @@ def get_plot_category(name: str) -> str | None:
     str | None
         Category name, or None if not a standard type.
     """
-    if name in TEMPORAL_PLOTS:
-        return "temporal"
-    if name in STATISTICAL_PLOTS:
-        return "statistical"
-    if name in SPATIAL_PLOTS:
-        return "spatial"
-    if name in SPECIALIZED_PLOTS:
-        return "specialized"
-    return None
+    return _plot_category(name)
 
 
 # Re-export the registry for direct access
@@ -186,6 +203,9 @@ __all__ = [
     "list_plotters",
     "has_plotter",
     "get_plot_category",
+    "SINGLE_SOURCE_PLOTS",
+    "PAIRWISE_PLOTS",
+    "MULTI_SOURCE_PLOTS",
     "TEMPORAL_PLOTS",
     "STATISTICAL_PLOTS",
     "SPATIAL_PLOTS",

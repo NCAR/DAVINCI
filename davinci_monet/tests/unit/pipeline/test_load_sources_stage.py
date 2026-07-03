@@ -162,6 +162,75 @@ class TestLoadSourcesStage:
         assert air_attrs["source_label"] == "airnow"
         assert air_attrs["geometry"] == "point"
 
+    def test_prepopulated_sources_get_post_load_coordinate_contract(self) -> None:
+        grid = SourceData(
+            data=xr.Dataset(
+                {"O3": (("latitude", "longitude"), np.array([[1.0, 2.0], [3.0, 4.0]]))},
+                coords={"latitude": [40.0, 30.0], "longitude": [350.0, 10.0]},
+            ),
+            label="cam",
+            source_type="generic",
+            geometry=DataGeometry.GRID,
+        )
+        point = SourceData(
+            data=xr.Dataset(
+                {"o3": ("site", [11.0, 22.0])},
+                coords={
+                    "site": [0, 1],
+                    "latitude": ("site", [35.0, 34.0]),
+                    "longitude": ("site", [350.0, 20.0]),
+                },
+            ),
+            label="airnow",
+            source_type="pt_sfc",
+            geometry=DataGeometry.POINT,
+        )
+        ctx = PipelineContext(sources={"cam": grid, "airnow": point})
+
+        result = LoadSourcesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        cam = ctx.sources["cam"].data
+        assert "lat" in cam.coords and "lon" in cam.coords
+        np.testing.assert_allclose(cam["latitude"].values, [30.0, 40.0])
+        np.testing.assert_allclose(cam["longitude"].values, [-10.0, 10.0])
+        np.testing.assert_allclose(cam["O3"].values, [[3.0, 4.0], [1.0, 2.0]])
+
+        airnow = ctx.sources["airnow"].data
+        assert "lat" in airnow.coords and "lon" in airnow.coords
+        np.testing.assert_allclose(airnow["longitude"].values, [-10.0, 20.0])
+        np.testing.assert_allclose(airnow["o3"].values, [11.0, 22.0])
+
+    def test_prepopulated_rectilinear_grid_sorts_axis_coords_with_distinct_dims(
+        self,
+    ) -> None:
+        grid = SourceData(
+            data=xr.Dataset(
+                {"O3": (("y", "x"), np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]))},
+                coords={
+                    "y": [0, 1],
+                    "x": [0, 1, 2, 3],
+                    "latitude": ("y", [40.0, 30.0]),
+                    "longitude": ("x", [0.0, 90.0, 180.0, 270.0]),
+                },
+            ),
+            label="cam",
+            source_type="generic",
+            geometry=DataGeometry.GRID,
+        )
+        ctx = PipelineContext(sources={"cam": grid})
+
+        result = LoadSourcesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        cam = ctx.sources["cam"].data
+        np.testing.assert_allclose(cam["latitude"].values, [30.0, 40.0])
+        np.testing.assert_allclose(cam["longitude"].values, [-180.0, -90.0, 0.0, 90.0])
+        np.testing.assert_allclose(
+            cam["O3"].values,
+            [[7.0, 8.0, 5.0, 6.0], [3.0, 4.0, 1.0, 2.0]],
+        )
+
     def test_prepopulated_sources_resolve_via_get_source(
         self, y_data: SourceData, x_data: SourceData
     ) -> None:

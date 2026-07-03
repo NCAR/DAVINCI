@@ -79,7 +79,7 @@ def _get_system_info() -> str:
         try:
             with open("/proc/cpuinfo") as f:
                 for line in f:
-                    if line.startswith("dataset name"):
+                    if line.startswith("model name"):
                         cpu_name = line.split(":")[1].strip()
                         break
         except Exception:
@@ -303,7 +303,7 @@ def main(
     """DAVINCI: Data Analysis and Visual Intelligence for Climate/Chemistry.
 
     A modern tool for evaluating climate and atmospheric composition
-    datasets against datasets.
+    models against observations.
     """
 
 
@@ -311,7 +311,7 @@ def main(
 def register_commands() -> None:
     """Register all CLI commands."""
     # Import command modules
-    from davinci_monet.cli.commands import get_data, run, validate
+    from davinci_monet.cli.commands import get_data
 
     # Register subcommands
     app.add_typer(get_data.app, name="get")

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     import matplotlib.figure
 
 
-@register_plotter("curtain")
+@register_plotter("curtain", arity="pairwise", category="specialized")
 class CurtainPlotter(BasePlotter):
     """Plotter for vertical curtain plots.
 

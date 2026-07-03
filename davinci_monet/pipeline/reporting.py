@@ -246,6 +246,7 @@ class LogCollector:
             "pairing_errors": "pairing",
             "stats_errors": "statistics",
             "plot_errors": "plotting",
+            "analysis_errors": "analyses",
         }
         for meta_key, stage_name in _ITEM_ERROR_STAGES.items():
             for message in context.metadata.get(meta_key, []) or []:

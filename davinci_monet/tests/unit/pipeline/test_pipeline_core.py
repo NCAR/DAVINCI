@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from davinci_monet.core.base import PairedData
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.pipeline import (
     BaseStage,
@@ -465,6 +466,65 @@ class TestPairingStage:
         assert set(paired.data_vars) == {"ceres_flux", "met_flux"}
         assert all(not str(name).startswith(("geometry_", "dataset_")) for name in paired.data_vars)
 
+    def test_pairing_item_error_completes_with_warning(
+        self,
+        sample_paired_dataset: xr.Dataset,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A failed pair job is a warning, not a stage failure."""
+        source_ds = xr.Dataset(
+            {"o3": ("time", [1.0, 2.0])},
+            coords={"time": [0, 1]},
+            attrs={"geometry": "point"},
+        )
+        ctx = PipelineContext(
+            config={
+                "pairs": {
+                    "bad": {
+                        "x": {"source": "airnow", "variable": "o3"},
+                        "y": {"source": "cam", "variable": "o3"},
+                    },
+                    "keep": {
+                        "x": {"source": "airnow", "variable": "o3"},
+                        "y": {"source": "cam", "variable": "o3"},
+                    },
+                }
+            }
+        )
+        ctx.sources["airnow"] = SourceData(
+            source_ds,
+            label="airnow",
+            source_type="pt_sfc",
+            geometry=DataGeometry.POINT,
+        )
+        ctx.sources["cam"] = SourceData(
+            source_ds,
+            label="cam",
+            source_type="generic",
+            geometry=DataGeometry.POINT,
+        )
+        stage = PairingStage()
+
+        def _fake_run_pair_job(context, job, pairing_config_dict, debug):
+            if job.pair_key == "bad":
+                return job, None, "bad: forced pair failure"
+            paired = PairedData(
+                data=sample_paired_dataset,
+                x_source=job.x_source,
+                y_source=job.y_source,
+                geometry=DataGeometry.POINT,
+            )
+            return job, paired, None
+
+        monkeypatch.setattr(stage, "_run_pair_job", _fake_run_pair_job)
+
+        result = stage.execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        assert result.error is None
+        assert "keep" in ctx.paired
+        assert ctx.metadata["pairing_errors"] == ["bad: forced pair failure"]
+
 
 class TestStatisticsStage:
     """Tests for StatisticsStage."""
@@ -585,12 +645,12 @@ class TestStatisticsStage:
         flights = {row["flight"] for row in result.data["p"]["_per_flight"]}
         assert flights == {"F1", "F2"}
 
-    def test_stats_item_error_fails_stage(
+    def test_stats_item_error_completes_with_warning(
         self,
         context_with_paired: PipelineContext,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Per-pair stats errors should make the statistics stage fail."""
+        """Per-pair stats errors should complete the stage with warning metadata."""
         stage = StatisticsStage()
 
         def _raise(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -600,8 +660,8 @@ class TestStatisticsStage:
 
         result = stage.execute(context_with_paired)
 
-        assert result.status == StageStatus.FAILED
-        assert "forced stats failure" in (result.error or "")
+        assert result.status == StageStatus.COMPLETED
+        assert result.error is None
         assert context_with_paired.metadata["stats_errors"]
 
     def test_domain_filter_restricts_stats_to_conus(self):
@@ -769,8 +829,11 @@ class TestPlottingStage:
         assert seen["config_title"] == "Mean CAM7 Analyzed AOD"
         assert seen["render_title"] is None
 
-    def test_missing_plot_pair_fails_stage(self, context_with_paired: PipelineContext):
-        """A missing plot data reference fails instead of silently producing no plot."""
+    def test_missing_plot_pair_completes_with_warning(
+        self,
+        context_with_paired: PipelineContext,
+    ):
+        """A missing plot data reference is collected as warning metadata."""
         context_with_paired.config = {
             "analysis": {"output_dir": "."},
             "plots": {"scatter": {"type": "scatter", "pairs": ["missing_pair"]}},
@@ -778,8 +841,9 @@ class TestPlottingStage:
 
         result = PlottingStage().execute(context_with_paired)
 
-        assert result.status == StageStatus.FAILED
-        assert "missing_pair" in (result.error or "")
+        assert result.status == StageStatus.COMPLETED
+        assert result.error is None
+        assert "missing_pair" in context_with_paired.metadata["plot_errors"][0]
 
     def test_labeled_render_results_are_saved_without_legacy_split_helpers(
         self,
@@ -792,6 +856,8 @@ class TestPlottingStage:
 
         class LabeledMultiPlotter(BasePlotter):
             name = "scatter"
+            plot_arity = "pairwise"
+            plot_category = "statistical"
 
             def render(self, series, ax=None, **kwargs):
                 fig_a, _ = self.create_figure()
@@ -894,8 +960,8 @@ class TestCreateStandardPipeline:
             "plot_suites",
             "pairing",
             "statistics",
-            "plotting",
             "save_results",
+            "plotting",
             "summary",
             "inspection",
             "manifest",
@@ -910,7 +976,8 @@ class TestCreateStandardPipeline:
         assert stages[2].name == "plot_suites"
         assert stages[3].name == "pairing"
         assert stages[4].name == "statistics"
-        assert stages[5].name == "plotting"
+        assert stages[5].name == "save_results"
+        assert stages[6].name == "plotting"
         assert stages[-2].name == "inspection"
         assert stages[-1].name == "manifest"
 
@@ -928,7 +995,7 @@ class TestPipelineRunner:
         runner = PipelineRunner()
 
         # Unified pipeline (geometry/paired stage fork collapsed): load_sources,
-        # analyses, plot_suites, pairing, statistics, plotting, save_results,
+        # analyses, plot_suites, pairing, statistics, save_results, plotting,
         # summary, inspection, manifest.
         assert len(runner.stages) == 10
 
@@ -1093,6 +1160,35 @@ class TestPipelineRunner:
 
         assert result.success is False
         assert len(result.stage_results) == 1  # Only first stage ran
+
+    def test_fail_fast_continues_after_plot_item_warning(
+        self,
+        context_with_paired: PipelineContext,
+        tmp_path: Any,
+    ):
+        """Per-item plotting warnings do not stop later stages."""
+
+        class MarkerStage(BaseStage):
+            def execute(self, context: PipelineContext) -> StageResult:
+                context.metadata["marker_ran"] = True
+                return self._create_result(StageStatus.COMPLETED)
+
+        context_with_paired.config = {
+            "analysis": {"output_dir": str(tmp_path)},
+            "plots": {"scatter": {"type": "scatter", "pairs": ["missing_pair"]}},
+        }
+        runner = PipelineRunner(
+            stages=[PlottingStage(), MarkerStage(name="marker")],
+            fail_fast=True,
+            show_progress=False,
+        )
+
+        result = runner.run(context_with_paired)
+
+        assert result.success is True
+        assert [stage.stage_name for stage in result.stage_results] == ["plotting", "marker"]
+        assert result.context is not None
+        assert result.context.metadata["marker_ran"] is True
 
     def test_fail_fast_still_runs_manifest_stage(self, tmp_path):
         """The final manifest is written even when fail_fast stops normal stages."""

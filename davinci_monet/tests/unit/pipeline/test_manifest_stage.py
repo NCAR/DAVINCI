@@ -19,6 +19,7 @@ def test_manifest_stage_writes_run_manifest(tmp_path) -> None:
             "summary_path": str(tmp_path / "products" / "daily_aod" / "summary.json"),
         }
     }
+    ctx.metadata["analysis_errors"] = ["pc1_wavelet: irregular data"]
     ctx.results["plotting"] = StageResult(
         "plotting",
         StageStatus.COMPLETED,
@@ -34,6 +35,7 @@ def test_manifest_stage_writes_run_manifest(tmp_path) -> None:
     assert data["status"] == "completed"
     assert "daily_aod" in data["products"]
     assert str(tmp_path / "plots" / "daily" / "aod.pdf") in data["plots"]
+    assert data["errors"] == {"analysis_errors": ["pc1_wavelet: irregular data"]}
 
 
 def test_manifest_stage_serializes_path_like_payloads(tmp_path) -> None:

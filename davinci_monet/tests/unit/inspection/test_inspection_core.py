@@ -40,9 +40,24 @@ def test_inspect_run_directory_writes_json_and_markdown(tmp_path) -> None:
     assert all("detail" in check for check in data["checks"])
 
 
-def test_inspect_run_directory_writes_png_previews_for_final_pdfs(
-    tmp_path, monkeypatch
-) -> None:
+def test_inspect_run_directory_uses_explicit_plot_paths(tmp_path) -> None:
+    source_dir = tmp_path / "cam"
+    source_dir.mkdir()
+    pdf = source_dir / "cam-analyzed-aod.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    result = inspect_run_directory(
+        tmp_path,
+        presets=["gridded_aod_diagnostics"],
+        plot_paths=[pdf],
+    )
+
+    assert result.passed is True
+    data = json.loads((tmp_path / "inspection" / "inspection.json").read_text())
+    assert data["checks"][0]["pdfs"] == ["cam/cam-analyzed-aod.pdf"]
+
+
+def test_inspect_run_directory_writes_png_previews_for_final_pdfs(tmp_path, monkeypatch) -> None:
     _install_fake_pdftoppm(tmp_path, monkeypatch)
     plots = tmp_path / "plots" / "daily"
     plots.mkdir(parents=True)
@@ -62,9 +77,7 @@ def test_inspect_run_directory_writes_png_previews_for_final_pdfs(
         check for check in data["checks"] if check["name"] == "inspection_previews_exist"
     )
     assert preview_check["passed"] is True
-    assert preview_check["previews"] == [
-        "inspection/previews/daily/cam-analyzed-aod.png"
-    ]
+    assert preview_check["previews"] == ["inspection/previews/daily/cam-analyzed-aod.png"]
 
 
 def test_inspect_run_directory_fails_for_unknown_preset(tmp_path) -> None:

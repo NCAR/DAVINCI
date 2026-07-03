@@ -21,25 +21,27 @@ def _base_sources() -> dict:
 
 
 def test_gridded_analysis_spec_parses_roles_fields_and_groupby() -> None:
-    cfg = MonetConfig(
-        sources=_base_sources(),
-        analyses={
-            "daily_aod": {
-                "type": "gridded_analysis",
-                "source": "cam",
-                "groupby": "day",
-                "roles": {
-                    "observation": "AODNDG_OBS",
-                    "first_guess": "AODNDG_MODEL_PRE",
-                    "analysis": "AODNDG_MODEL_POST",
-                    "mask": "AODNDG_MASK",
-                },
-                "fields": {
-                    "analyzed_aod": {"formula": 'mean(analysis, dim="time")'},
-                    "nudge_fraction": {"formula": 'mean(mask, dim="time")'},
-                },
-            }
-        },
+    cfg = MonetConfig.model_validate(
+        {
+            "sources": _base_sources(),
+            "analyses": {
+                "daily_aod": {
+                    "type": "gridded_analysis",
+                    "source": "cam",
+                    "groupby": "day",
+                    "roles": {
+                        "observation": "AODNDG_OBS",
+                        "first_guess": "AODNDG_MODEL_PRE",
+                        "analysis": "AODNDG_MODEL_POST",
+                        "mask": "AODNDG_MASK",
+                    },
+                    "fields": {
+                        "analyzed_aod": {"formula": 'mean(analysis, dim="time")'},
+                        "nudge_fraction": {"formula": 'mean(mask, dim="time")'},
+                    },
+                }
+            },
+        }
     )
     spec = cfg.analyses["daily_aod"]
     assert spec.type == "gridded_analysis"
@@ -51,28 +53,32 @@ def test_gridded_analysis_spec_parses_roles_fields_and_groupby() -> None:
 
 def test_gridded_analysis_requires_at_least_one_role_and_field() -> None:
     with pytest.raises(ValueError, match="roles"):
-        MonetConfig(
-            sources=_base_sources(),
-            analyses={
-                "bad": {
-                    "type": "gridded_analysis",
-                    "source": "cam",
-                    "groupby": "day",
-                    "roles": {},
-                    "fields": {"x": {"formula": "1"}},
-                }
-            },
+        MonetConfig.model_validate(
+            {
+                "sources": _base_sources(),
+                "analyses": {
+                    "bad": {
+                        "type": "gridded_analysis",
+                        "source": "cam",
+                        "groupby": "day",
+                        "roles": {},
+                        "fields": {"x": {"formula": "1"}},
+                    }
+                },
+            }
         )
     with pytest.raises(ValueError, match="fields"):
-        MonetConfig(
-            sources=_base_sources(),
-            analyses={
-                "bad": {
-                    "type": "gridded_analysis",
-                    "source": "cam",
-                    "groupby": "day",
-                    "roles": {"analysis": "AODNDG_MODEL_POST"},
-                    "fields": {},
-                }
-            },
+        MonetConfig.model_validate(
+            {
+                "sources": _base_sources(),
+                "analyses": {
+                    "bad": {
+                        "type": "gridded_analysis",
+                        "source": "cam",
+                        "groupby": "day",
+                        "roles": {"analysis": "AODNDG_MODEL_POST"},
+                        "fields": {},
+                    }
+                },
+            }
         )

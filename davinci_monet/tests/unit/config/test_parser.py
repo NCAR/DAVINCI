@@ -83,8 +83,23 @@ sources: {}
 
     def test_file_not_found_raises(self) -> None:
         """Test missing file raises ConfigurationError."""
-        with pytest.raises(ConfigurationError):
+        with pytest.raises(ConfigurationError, match="Configuration file not found"):
             load_yaml("/nonexistent/path/config.yaml")
+
+    def test_missing_relative_yaml_file_is_not_parsed_as_yaml(self) -> None:
+        """A typo'd config path should report a missing file, not a scalar root."""
+        with pytest.raises(ConfigurationError, match="Configuration file not found"):
+            load_yaml("missing_config.yaml")
+
+    def test_inline_one_line_mapping_string_still_loads(self) -> None:
+        """Inline YAML strings that look like mappings remain supported."""
+        data = load_yaml("analysis: {debug: true}")
+        assert data["analysis"]["debug"] is True
+
+    def test_cmaq_airnow_example_yaml_is_parseable(self) -> None:
+        """Tracked example config is well-formed YAML."""
+        data = load_yaml(Path("examples/configs/cmaq_airnow.yaml"))
+        assert data["sources"]["cmaq_v54"]["variables"]["O3"]["vmin_plot"] == 0
 
 
 class TestExpandEnvVars:
@@ -113,6 +128,38 @@ class TestExpandEnvVars:
         data = expand_env_vars({"path": "/static/path"})
         assert data["path"] == "/static/path"
 
+    def test_missing_environment_variable_raises(self) -> None:
+        """Unset environment variables are rejected instead of left literal."""
+        with pytest.raises(ConfigurationError, match="UNSET_DAVINCI_TEST_VAR"):
+            expand_env_vars({"analysis": {"output_dir": "${UNSET_DAVINCI_TEST_VAR}/output"}})
+
+    def test_missing_bare_environment_variable_raises(self) -> None:
+        """Unset bare $VAR references are rejected in path-like values."""
+        with pytest.raises(ConfigurationError, match="UNSET_DAVINCI_TEST_VAR"):
+            expand_env_vars({"files": "$UNSET_DAVINCI_TEST_VAR/input.nc"})
+
+    def test_mathtext_like_dollar_strings_are_left_alone(self) -> None:
+        """Plot labels with mathtext-style dollars are normal scalar strings."""
+        data = expand_env_vars({"label": "$O_3$ concentration"})
+        assert data["label"] == "$O_3$ concentration"
+
+    def test_expand_user_home_in_strings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Leading ~/ is expanded for path-like strings wherever they appear."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        data = expand_env_vars(
+            {
+                "analysis": {"output_dir": "~/davinci-output", "log_dir": "~/davinci-logs"},
+                "sources": {"cam": {"files": "~/data/*.nc"}},
+            }
+        )
+
+        assert data["analysis"]["output_dir"] == str(tmp_path / "davinci-output")
+        assert data["analysis"]["log_dir"] == str(tmp_path / "davinci-logs")
+        assert data["sources"]["cam"]["files"] == str(tmp_path / "data/*.nc")
+
 
 class TestPreprocessConfig:
     """Tests for preprocess_config function."""
@@ -122,6 +169,17 @@ class TestPreprocessConfig:
         data = preprocess_config({"analysis": {}, "sources": None, "pairs": None})
         assert data["sources"] == {}
         assert data["pairs"] == {}
+
+    def test_preprocess_expands_output_and_log_dirs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Preprocessing expands home directories before schema validation."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        data = preprocess_config({"analysis": {"output_dir": "~/out", "log_dir": "~/logs"}})
+
+        assert data["analysis"]["output_dir"] == str(tmp_path / "out")
+        assert data["analysis"]["log_dir"] == str(tmp_path / "logs")
 
 
 class TestLoadConfig:
@@ -319,6 +377,32 @@ class TestDumpConfig:
             finally:
                 os.unlink(f.name)
 
+    def test_dump_and_reload_paths_and_datetimes_are_yaml_safe(self, tmp_path: Path) -> None:
+        """Dumped configs use plain YAML scalars for Path and datetime values."""
+        config = validate_schema(
+            MonetConfig,
+            {
+                "analysis": {
+                    "start_time": "2024-01-01",
+                    "end_time": "2024-01-02T03:04:05",
+                    "output_dir": tmp_path / "output",
+                    "log_dir": tmp_path / "logs",
+                },
+                "sources": {"cmaq": {"type": "cmaq"}},
+            },
+        )
+        path = tmp_path / "config.yaml"
+
+        dump_config(config, path)
+        dumped = path.read_text()
+        reloaded = load_config(path)
+
+        assert "!!python/object" not in dumped
+        assert reloaded.analysis.start_time == datetime(2024, 1, 1)
+        assert reloaded.analysis.end_time == datetime(2024, 1, 2, 3, 4, 5)
+        assert reloaded.analysis.output_dir == tmp_path / "output"
+        assert reloaded.analysis.log_dir == tmp_path / "logs"
+
 
 class TestConfigToYaml:
     """Tests for config_to_yaml function."""
@@ -328,6 +412,25 @@ class TestConfigToYaml:
         config = validate_schema(MonetConfig, {"analysis": {"debug": True}})
         yaml_str = config_to_yaml(config)
         assert "debug: true" in yaml_str
+
+    def test_paths_and_datetimes_are_yaml_safe(self, tmp_path: Path) -> None:
+        """Config YAML strings are reloadable by safe_load."""
+        config = validate_schema(
+            MonetConfig,
+            {
+                "analysis": {
+                    "start_time": "2024-01-01",
+                    "output_dir": tmp_path / "output",
+                }
+            },
+        )
+
+        yaml_str = config_to_yaml(config)
+        reloaded = load_config(yaml_str)
+
+        assert "!!python/object" not in yaml_str
+        assert reloaded.analysis.start_time == datetime(2024, 1, 1)
+        assert reloaded.analysis.output_dir == tmp_path / "output"
 
 
 class TestMergeConfigs:

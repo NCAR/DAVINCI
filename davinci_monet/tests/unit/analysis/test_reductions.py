@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -81,6 +83,27 @@ def test_regularize_regular_series() -> None:
     assert dt == pytest.approx(1.0)
     assert unit == "days"
     assert frac == 0.0
+
+
+def test_regularize_irregular_datetime_resamples_with_frequency_string(monkeypatch) -> None:
+    times = pd.to_datetime(["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01"])
+    s = xr.DataArray(np.arange(4, dtype=float), dims=("time",), coords={"time": times})
+    seen: dict[str, object] = {}
+    original_resample: Any = xr.DataArray.resample
+
+    def wrapped_resample(self: xr.DataArray, *args: Any, **kwargs: Any) -> Any:
+        seen["time"] = kwargs.get("time")
+        return original_resample(self, *args, **kwargs)
+
+    monkeypatch.setattr(xr.DataArray, "resample", wrapped_resample)
+
+    reg, dt, unit, frac = regularize(s)
+
+    assert isinstance(seen["time"], str)
+    assert reg.dims == ("time",)
+    assert dt == pytest.approx(31.0)
+    assert unit == "days"
+    assert frac >= 0.0
 
 
 def test_detrend_and_normalize() -> None:

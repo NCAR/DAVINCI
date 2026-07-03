@@ -8,7 +8,7 @@ geometry-only specs through render() for migrated renderers.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import matplotlib
 
@@ -56,7 +56,7 @@ class TestTimeseriesRenderSingleSource:
         fig = TimeSeriesPlotter(cfg).render([_multisite_series()])
         ax = fig.axes[0]
         fig.canvas.draw()
-        sizes = {round(t.get_fontsize(), 1) for t in ax.get_xticklabels()}
+        sizes = {round(cast(float, t.get_fontsize()), 1) for t in ax.get_xticklabels()}
         assert sizes == {7.0}, f"x date ticks must use annotation_small (7.0), got {sizes}"
         plt.close(fig)
 

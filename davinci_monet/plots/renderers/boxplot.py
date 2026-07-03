@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
 
-@register_plotter("boxplot")
+@register_plotter("boxplot", arity="pairwise", category="statistical")
 class BoxPlotter(BasePlotter):
     """Plotter for box plot comparisons.
 

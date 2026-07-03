@@ -142,6 +142,30 @@ def test_grid_slices_surface_not_toa():
     plt.close(fig)
 
 
+def test_square_grid_preserves_lat_lon_dim_orientation():
+    lat = np.array([30.0, 40.0, 50.0])
+    lon = np.array([-120.0, -110.0, -100.0])
+    data = np.array(
+        [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+        ]
+    )
+    ds = xr.Dataset(
+        {"O3": (["lat", "lon"], data, {"units": "ppb"})},
+        coords={"lat": lat, "lon": lon},
+        attrs={"geometry": "grid"},
+    )
+
+    fig, ax = _render(ds, "O3")
+
+    qm = next(c for c in ax.collections if isinstance(c, QuadMesh))
+    rendered = np.asarray(qm.get_array(), dtype=float).reshape(data.shape)
+    np.testing.assert_allclose(rendered, data)
+    plt.close(fig)
+
+
 def test_grid_squeezes_singleton_product_group_dimension():
     ds = xr.Dataset(
         {

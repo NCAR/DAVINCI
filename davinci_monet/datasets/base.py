@@ -38,14 +38,21 @@ def resample_dataset(
     if track_count or min_count is not None:
         data_vars = [v for v in data.data_vars if v not in ("latitude", "longitude", "altitude")]
         if data_vars:
-            counts = resampler.count()[data_vars[0]]
+            count_ds = resampler.count()
+            counts_by_var = {var: count_ds[var] for var in data_vars if var in count_ds}
             if track_count:
-                result["sample_count"] = counts
+                count_arrays = list(counts_by_var.values())
+                if count_arrays:
+                    try:
+                        result["sample_count"] = xr.concat(
+                            count_arrays, dim="_sample_count_var"
+                        ).max("_sample_count_var")
+                    except ValueError:
+                        result["sample_count"] = count_arrays[0]
             if min_count is not None:
-                mask = counts >= min_count
                 for var in data_vars:
-                    if var in result:
-                        result[var] = result[var].where(mask)
+                    if var in result and var in counts_by_var:
+                        result[var] = result[var].where(counts_by_var[var] >= min_count)
     return result
 
 

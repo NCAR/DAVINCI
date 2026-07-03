@@ -502,6 +502,20 @@ class TestSpatialOverlayRendererContract:
         assert isinstance(fig, matplotlib.figure.Figure)
         plt.close(fig)
 
+    def test_y_field_missing_lon_raises_clear_error(self) -> None:
+        from davinci_monet.plots.renderers.spatial.overlay import SpatialOverlayPlotter
+
+        ds = _overlay_ds()
+        y_field = xr.DataArray(
+            np.ones((3, 3)),
+            dims=["lat", "x"],
+            coords={"lat": [30.0, 40.0, 50.0]},
+        )
+        plotter = SpatialOverlayPlotter()
+
+        with pytest.raises(ValueError, match="longitude"):
+            plotter.render(build_series(ds, "x_o3", "y_o3"), y_field=y_field)
+
     def test_render_wrong_series_count_raises(self) -> None:
         from davinci_monet.plots.renderers.spatial.overlay import SpatialOverlayPlotter
 

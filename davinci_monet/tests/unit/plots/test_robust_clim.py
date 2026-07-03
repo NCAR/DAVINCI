@@ -4,6 +4,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import matplotlib.figure  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
@@ -45,15 +46,21 @@ def _quadmesh_clim(fig):
     return mesh.get_clim()
 
 
+def _render_spatial(*args, **kwargs) -> matplotlib.figure.Figure:
+    fig = SpatialPlotter().render(*args, **kwargs)
+    assert isinstance(fig, matplotlib.figure.Figure)
+    return fig
+
+
 def test_spatial_plotter_robust_color_limits_ignore_outlier():
-    fig = SpatialPlotter().render(build_series(_heavy_tailed_grid(), "aod"), robust=True)
+    fig = _render_spatial(build_series(_heavy_tailed_grid(), "aod"), robust=True)
     _, vmax = _quadmesh_clim(fig)
     assert vmax < 1.0
     plt.close(fig)
 
 
 def test_spatial_plotter_robust_symmetric_limits_center_zero():
-    fig = SpatialPlotter().render(
+    fig = _render_spatial(
         build_series(_skewed_signed_grid(), "increment"),
         robust=True,
         symmetric=True,
@@ -68,7 +75,7 @@ def test_spatial_plotter_robust_symmetric_limits_center_zero():
 
 
 def test_spatial_plotter_default_color_limits_use_full_data_range():
-    fig = SpatialPlotter().render(build_series(_heavy_tailed_grid(), "aod"), robust=False)
+    fig = _render_spatial(build_series(_heavy_tailed_grid(), "aod"), robust=False)
     _, vmax = _quadmesh_clim(fig)
     assert vmax == pytest.approx(50.0)
     plt.close(fig)

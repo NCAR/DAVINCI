@@ -6,6 +6,7 @@ visualizing x-vs-y statistical relationships.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
@@ -27,8 +28,10 @@ if TYPE_CHECKING:
     import matplotlib.figure
     import xarray as xr
 
+logger = logging.getLogger(__name__)
 
-@register_plotter("taylor")
+
+@register_plotter("taylor", arity="pairwise", category="statistical")
 class TaylorPlotter(BasePlotter):
     """Plotter for Taylor diagrams.
 
@@ -101,10 +104,12 @@ class TaylorPlotter(BasePlotter):
         # Use the first comparison to scale the Taylor axes, preserving the
         # historical one-reference/many-model diagram behavior.
         x_values, _ = clean_xy(paired_data[x_var].values, y_series_list[0].dataset[y_var].values)
-        x_std = np.std(x_values)
+        x_std = float(np.std(x_values)) if x_values.size else np.nan
 
         # Normalize if requested
         x_std_norm = 1.0 if normalize else x_std
+        if not np.isfinite(x_std_norm) or x_std_norm <= 0:
+            x_std_norm = 1.0
 
         # Create Taylor diagram
         if ax is None:
@@ -150,14 +155,32 @@ class TaylorPlotter(BasePlotter):
                 x_series.dataset[x_series.var_name].values,
                 current_y.dataset[current_y.var_name].values,
             )
-            x_std = np.std(x_values)
-            y_std = np.std(y_values)
-            correlation = np.corrcoef(x_values, y_values)[0, 1]
+            x_std = float(np.std(x_values)) if x_values.size else np.nan
+            y_std = float(np.std(y_values)) if y_values.size else np.nan
+            if (
+                x_values.size < 2
+                or not np.isfinite(x_std)
+                or not np.isfinite(y_std)
+                or x_std <= 0.0
+                or y_std <= 0.0
+            ):
+                logger.warning(
+                    "Skipping Taylor series '%s' because standard deviation is zero or invalid",
+                    label,
+                )
+                continue
+            correlation = float(np.corrcoef(x_values, y_values)[0, 1])
+            if not np.isfinite(correlation):
+                logger.warning(
+                    "Skipping Taylor series '%s' because correlation is undefined",
+                    label,
+                )
+                continue
 
             y_std_norm = y_std / x_std if normalize else y_std
 
             # Taylor diagram uses polar coordinates: theta=arccos(correlation), r=std
-            theta = np.arccos(correlation)
+            theta = np.arccos(np.clip(correlation, -1.0, 1.0))
             ax.plot(
                 theta,
                 y_std_norm,

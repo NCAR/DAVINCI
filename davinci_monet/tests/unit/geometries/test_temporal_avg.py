@@ -2,7 +2,7 @@
 
 Tests for the module-level :func:`resample_dataset` with ``min_count`` and
 ``track_count``. These features enable averaging high-frequency datasets
-(e.g. sub-hourly Pandora) to match dataset output resolution (e.g. hourly). The
+(e.g. sub-hourly Pandora) to match model output resolution (e.g. hourly). The
 current ``GeometryData.resample_data`` wrapper was removed; the unified source
 loader resamples bare datasets through ``resample_dataset`` directly.
 """
@@ -171,6 +171,23 @@ class TestTemporalAveraging:
         # Both variables should be resampled
         assert len(result["no2_column"]) == 4
         assert len(result["o3_column"]) == 4
+
+    def test_min_count_uses_each_variables_own_valid_count(self) -> None:
+        """A sparse first variable must not mask valid bins for later variables."""
+        times = pd.date_range("2024-01-01", periods=6, freq="10min")
+        ds = xr.Dataset(
+            {
+                "no2_column": ("time", np.array([1.0, np.nan, np.nan, np.nan, np.nan, np.nan])),
+                "o3_column": ("time", np.arange(6, dtype=float) + 10.0),
+            },
+            coords={"time": times},
+        )
+
+        result = resample_dataset(ds, "h", min_count=3, track_count=True)
+
+        assert np.isnan(result["no2_column"].isel(time=0))
+        assert result["o3_column"].isel(time=0).item() == pytest.approx(12.5)
+        assert result["sample_count"].isel(time=0).item() == 6
 
 
 class TestTemporalAveragingEdgeCases:

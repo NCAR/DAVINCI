@@ -1,7 +1,7 @@
 """Time series plot renderer for DAVINCI.
 
 This module provides time series plotting functionality for comparing
-dataset output with datasets over time.
+model output with observations over time.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("timeseries")
+@register_plotter("timeseries", arity="multi_source", category="temporal")
 class TimeSeriesPlotter(BasePlotter):
     """Plotter for time series comparisons.
 

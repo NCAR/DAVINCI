@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 _LAT_CANDIDATES = ["latitude", "lat", "LAT", "Latitude"]
 _LON_CANDIDATES = ["longitude", "lon", "LON", "Longitude"]
 # Vertical dimension name candidates to reduce for 3-D fields.
-_LEVEL_DIMS = ["lev", "level", "z", "vertical"]
+_LEVEL_DIMS = ["lev", "level", "z", "altitude", "height", "vertical"]
 # Shapes drawn as a filled mesh; everything else is scatter.
 _MESH_SHAPES = {"grid", "swath", "regular_grid", "curvilinear_grid"}
 # Shapes whose ``time`` dim is the sampling path, not something to average over.
@@ -53,7 +53,7 @@ _PATH_SHAPES = {"track", "profile"}
 _ColorbarExtend = Literal["neither", "both", "min", "max"]
 
 
-@register_plotter("spatial")
+@register_plotter("spatial", arity="single_source", category="spatial")
 class SpatialPlotter(BaseSpatialPlotter):
     """Single-source spatial field map (shape-aware).
 
@@ -162,13 +162,18 @@ class SpatialPlotter(BaseSpatialPlotter):
         field = self._reduce_time(field, shape, time_average, time_index)
         field = self._squeeze_singleton_non_spatial_dims(ds, field, lat_var, lon_var)
 
-        lats, lons, field = self._resolve_coords(ds, field, lat_var, lon_var)
+        lats, lons, field, resolved_lat, resolved_lon = self._resolve_coords(
+            ds, field, lat_var, lon_var
+        )
         plot_type = "pcolormesh" if shape in _MESH_SHAPES else "scatter"
 
         if ax is None:
             fig, ax = self.create_map_figure()
         else:
-            fig = ax.get_figure()
+            maybe_fig = ax.get_figure()
+            if maybe_fig is None:
+                raise RuntimeError("Axes is not attached to a figure")
+            fig = maybe_fig
         self.add_map_features(ax, map_config)
 
         extent = self._resolve_extent(domain_type, domain_name)
@@ -214,7 +219,6 @@ class SpatialPlotter(BaseSpatialPlotter):
                 ncolors=cmap_obj.N,
                 extend=cast(_ColorbarExtend, extend or "neither"),
             )
-            cmap = cmap_obj
             vmin = float(levels_arr[0])
             vmax = float(levels_arr[-1])
         elif vmin is None and vmax is None and robust:
@@ -262,18 +266,21 @@ class SpatialPlotter(BaseSpatialPlotter):
             lats,
             lons,
             plot_type=plot_type,
-            cmap=cmap,
+            cmap=cmap_obj if levels is not None else cmap,
             vmin=vmin,
             vmax=vmax,
             norm=norm,
             marker_size=ms,
             alpha=a,
+            field_dims=tuple(field.dims),
+            lat_dim=resolved_lat if resolved_lat in field.dims else None,
+            lon_dim=resolved_lon if resolved_lon in field.dims else None,
         )
 
         units = get_variable_units(ds, variable)
         # Colorbar carries units only; the title carries the quantity (+ source),
         # so the quantity is not repeated in both places.
-        colorbar_kwargs = {"extend": extend} if norm is not None and extend else {}
+        colorbar_kwargs: dict[str, Any] = {"extend": extend} if norm is not None and extend else {}
         self.add_colorbar(
             fig,
             mappable,
@@ -454,9 +461,9 @@ class SpatialPlotter(BaseSpatialPlotter):
         field: xr.DataArray,
         lat_var: str,
         lon_var: str,
-    ) -> tuple[np.ndarray, np.ndarray, xr.DataArray]:
+    ) -> tuple[np.ndarray, np.ndarray, xr.DataArray, str, str]:
         """Resolve lat/lon arrays, shifting 0..360 lon to -180..180 for cartopy."""
-        _, resolved_lon, lats, lons = resolve_spatial_coords(ds, lat_var, lon_var)
+        resolved_lat, resolved_lon, lats, lons = resolve_spatial_coords(ds, lat_var, lon_var)
 
         # A 1-D lon axis that the 0..360 -> -180..180 shift left non-monotonic
         # must be re-sorted, reordering the field along the lon dim to match so
@@ -472,7 +479,7 @@ class SpatialPlotter(BaseSpatialPlotter):
             lons = lons[sort_idx]
             field = field.isel({resolved_lon: sort_idx})
 
-        return lats, lons, field
+        return lats, lons, field, resolved_lat, resolved_lon
 
     @staticmethod
     def _resolve_coord_name(ds: xr.Dataset, candidates: list[str], preferred: str) -> str | None:

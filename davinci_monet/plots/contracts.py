@@ -7,9 +7,12 @@ dispatch must consume this module instead of re-declaring plot type sets.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Set
 from enum import Enum
+from typing import Any
 
 from davinci_monet.core.exceptions import PlottingError
+from davinci_monet.core.registry import plotter_registry
 
 
 class PlotArity(str, Enum):
@@ -20,62 +23,88 @@ class PlotArity(str, Enum):
     MULTI_SOURCE = "multi_source"
 
 
-SINGLE_SOURCE_PLOTS = frozenset(
-    {
-        "spatial",
-        "flight_track",
-        "histogram",
-        "lma_density",
-        "vertical_profile",
-        "eof_pattern",
-        "eof_scree",
-        "wavelet_scalogram",
-    }
-)
+def _ensure_default_plotters_registered() -> None:
+    if "timeseries" not in plotter_registry:
+        import davinci_monet.plots.renderers  # noqa: F401
 
-PAIRWISE_PLOTS = frozenset(
-    {
-        "scatter",
-        "spatial_bias",
-        "spatial_overlay",
-        "diurnal",
-        "taylor",
-        "boxplot",
-        "curtain",
-        "scorecard",
-        "track_map_3d",
-    }
-)
 
-MULTI_SOURCE_PLOTS = frozenset({"timeseries"})
+def _coerce_plot_arity(value: Any) -> PlotArity:
+    return value if isinstance(value, PlotArity) else PlotArity(str(value))
 
-TEMPORAL_PLOTS = frozenset({"timeseries", "diurnal"})
-STATISTICAL_PLOTS = frozenset({"taylor", "boxplot", "scatter", "histogram", "eof_scree"})
-SPATIAL_PLOTS = frozenset({"spatial", "spatial_bias", "spatial_overlay", "eof_pattern"})
-SPECIALIZED_PLOTS = frozenset(
-    {
-        "curtain",
-        "scorecard",
-        "vertical_profile",
-        "flight_track",
-        "lma_density",
-        "track_map_3d",
-        "wavelet_scalogram",
-    }
-)
 
-ALL_PLOT_TYPES = TEMPORAL_PLOTS | STATISTICAL_PLOTS | SPATIAL_PLOTS | SPECIALIZED_PLOTS
+class _PlotTypeSet(Set[str]):
+    """Live set view over plotter class contract metadata."""
+
+    def __init__(
+        self,
+        *,
+        arity: PlotArity | None = None,
+        category: str | None = None,
+    ) -> None:
+        self._arity = arity
+        self._category = category
+
+    def __contains__(self, value: object) -> bool:
+        return isinstance(value, str) and value in self._values()
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(sorted(self._values()))
+
+    def __len__(self) -> int:
+        return len(self._values())
+
+    def __repr__(self) -> str:
+        return repr(self._values())
+
+    def _values(self) -> frozenset[str]:
+        _ensure_default_plotters_registered()
+        names: list[str] = []
+        for name, plotter_cls in plotter_registry.items():
+            if self._arity is not None:
+                declared_arity = getattr(plotter_cls, "plot_arity", None)
+                if declared_arity is None or _coerce_plot_arity(declared_arity) != self._arity:
+                    continue
+            if self._category is not None:
+                declared_category = getattr(plotter_cls, "plot_category", None)
+                if declared_category != self._category:
+                    continue
+            names.append(name)
+        return frozenset(names)
+
+
+SINGLE_SOURCE_PLOTS = _PlotTypeSet(arity=PlotArity.SINGLE_SOURCE)
+PAIRWISE_PLOTS = _PlotTypeSet(arity=PlotArity.PAIRWISE)
+MULTI_SOURCE_PLOTS = _PlotTypeSet(arity=PlotArity.MULTI_SOURCE)
+
+TEMPORAL_PLOTS = _PlotTypeSet(category="temporal")
+STATISTICAL_PLOTS = _PlotTypeSet(category="statistical")
+SPATIAL_PLOTS = _PlotTypeSet(category="spatial")
+SPECIALIZED_PLOTS = _PlotTypeSet(category="specialized")
+ALL_PLOT_TYPES = _PlotTypeSet()
+
+
+def _registered_plotter_attr(plot_type: str, attr: str) -> Any:
+    _ensure_default_plotters_registered()
+    plotter_cls = plotter_registry.get_or_none(plot_type)
+    if plotter_cls is None:
+        return None
+    return getattr(plotter_cls, attr, None)
 
 
 def plot_arity(plot_type: str) -> PlotArity:
     """Return the canonical arity for a registered plot type."""
-    if plot_type in SINGLE_SOURCE_PLOTS:
-        return PlotArity.SINGLE_SOURCE
-    if plot_type in PAIRWISE_PLOTS:
-        return PlotArity.PAIRWISE
-    if plot_type in MULTI_SOURCE_PLOTS:
-        return PlotArity.MULTI_SOURCE
-    raise PlottingError(f"Unknown plot type '{plot_type}'")
+    declared = _registered_plotter_attr(plot_type, "plot_arity")
+    if declared is None:
+        raise PlottingError(f"Plot type '{plot_type}' does not declare plot_arity")
+    return _coerce_plot_arity(declared)
+
+
+def plot_category(plot_type: str) -> str | None:
+    """Return the public category for a registered plot type, if known."""
+    declared = _registered_plotter_attr(plot_type, "plot_category")
+    if declared is not None:
+        return str(declared)
+    return None
 
 
 def validate_plot_shape(
@@ -143,5 +172,6 @@ __all__ = [
     "SPECIALIZED_PLOTS",
     "ALL_PLOT_TYPES",
     "plot_arity",
+    "plot_category",
     "validate_plot_shape",
 ]

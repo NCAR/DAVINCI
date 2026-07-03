@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Run a DAVINCI-MONET analysis pipeline.
+Run a DAVINCI analysis pipeline.
 
 This script provides a simple way to run any analysis given a YAML config file.
 It uses the full pipeline runner with progress bars and Markdown logging.
@@ -26,7 +26,7 @@ from pathlib import Path
 def main() -> int:
     """Run the analysis pipeline."""
     parser = argparse.ArgumentParser(
-        description="Run a DAVINCI-MONET analysis pipeline.",
+        description="Run a DAVINCI analysis pipeline.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -45,7 +45,8 @@ automatically expanded. Set them before running:
         help="Path to the YAML configuration file.",
     )
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress progress bar output.",
     )
@@ -60,7 +61,7 @@ automatically expanded. Set them before running:
 
     # Print header
     print("=" * 70)
-    print("DAVINCI-MONET Analysis Pipeline")
+    print("DAVINCI Analysis Pipeline")
     print("=" * 70)
     print(f"\nConfig: {config_path.absolute()}")
     print()
@@ -74,7 +75,7 @@ automatically expanded. Set them before running:
     print()
     print("=" * 70)
     if result.success:
-        print(f"Analysis completed successfully!")
+        print("Analysis completed successfully!")
         print(f"Total time: {result.total_duration_seconds:.1f} seconds")
         print(f"Stages: {', '.join(result.completed_stages)}")
     else:

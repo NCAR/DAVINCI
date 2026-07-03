@@ -372,6 +372,24 @@ class TestStatisticsCalculator:
         assert int(stats["N"].iloc[0]) == 500
         assert "MB" in stats.columns
 
+    def test_min_samples_preserves_true_sample_count(self):
+        """N reports valid-pair count even when other metrics are below the floor."""
+        from davinci_monet.stats import StatisticsCalculator, StatisticsConfig
+
+        ds = xr.Dataset(
+            {
+                "x_o3": ("time", np.array([1.0, 2.0])),
+                "y_o3": ("time", np.array([2.0, 3.0])),
+            },
+            coords={"time": np.arange(2)},
+        )
+        calc = StatisticsCalculator(StatisticsConfig(min_samples=3))
+
+        stats = calc.compute(ds, "x_o3", "y_o3", metrics=["N", "MB"])
+
+        assert stats["N"].iloc[0] == 2
+        assert np.isnan(stats["MB"].iloc[0])
+
 
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
@@ -415,6 +433,15 @@ class TestConvenienceFunctions:
         assert "R" in stats
         # Check positive bias (we added positive offset)
         assert stats["MB"] > 0
+
+    def test_quick_stats_respects_min_samples_floor(self):
+        """quick_stats uses the same floor semantics as StatisticsCalculator."""
+        from davinci_monet.stats import quick_stats
+
+        stats = quick_stats(np.array([1.0, 2.0]), np.array([2.0, 3.0]), metrics=["N", "MB"])
+
+        assert stats["N"] == 2
+        assert np.isnan(stats["MB"])
 
 
 # =============================================================================

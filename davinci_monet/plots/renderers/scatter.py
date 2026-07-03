@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
 
-@register_plotter("scatter")
+@register_plotter("scatter", arity="pairwise", category="statistical")
 class ScatterPlotter(BasePlotter):
     """Plotter for scatter comparisons.
 

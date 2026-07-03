@@ -2,7 +2,7 @@
 
 **Data Analysis and Visual Intelligence for Climate/Chemistry**
 
-A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air quality datasets against datasets, based on MELODIES-MONET.
+A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air quality models against observations, based on MELODIES-MONET.
 
 ---
 
@@ -24,7 +24,7 @@ A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air 
 
 ## Cross-Dataset Handoff Convention
 
-This repo uses **cross-dataset code reviews and hand-offs** (e.g., Claude Opus writes implementation, Codex reviews, then back). Handoff files follow a consistent structure so any dataset can pick up context quickly.
+This repo uses **cross-dataset code reviews and hand-offs** (e.g., Claude Opus writes implementation, Codex reviews, then back). Handoff files follow a consistent structure so any agent can pick up context quickly.
 
 ### Handoff File Format
 
@@ -51,7 +51,7 @@ Specific actionable items
 
 - **One file per task/feature** — scoped context, not a running log
 - **Always include Decisions & Rationale** — this is the highest-value section
-- **Geometry file paths and line numbers** — so the next dataset can verify without searching
+- **Give file paths and line numbers** — so the next agent can verify without searching
 - **Check for handoff files at session start** — look for `REVIEW_*.md` or `HANDOFF_*.md` in repo root
 - **Git diff supplements the handoff** — the file gives intent, `git diff` gives the changes
 - **Do NOT track handoff files in git** — these are ephemeral working artifacts, not permanent records. Delete them once the handoff is complete.
@@ -190,13 +190,13 @@ conda activate davinci
 - **Maintainability**: Small, focused modules (<500 lines each)
 - **Type Safety**: Full type hints, mypy strict mode
 - **Performance**: Parallel processing, lazy loading
-- **Extensibility**: Plugin architecture for datasets/datasets/plotters
+- **Extensibility**: Plugin architecture for data sources and plotters
 
 ## Key Design Principles
 
 1. **Uniform Pairing Logic**: Strategy based on data geometry (point, track, profile, swath, grid) not data source
 
-2. **xarray-Only Data Dataset**: All data as `xr.Dataset` throughout pairing/analysis. Pandas only for I/O adapters and stats output tables.
+2. **xarray-Only Data Model**: All data as `xr.Dataset` throughout pairing/analysis. Pandas only for I/O adapters and stats output tables.
 
 3. **Synthetic Data for Testing**: Generate test data programmatically - no external dataset dependencies
 
@@ -206,8 +206,11 @@ conda activate davinci
 davinci_monet/
 ├── core/           # Protocols, registry, base classes, exceptions
 ├── config/         # Pydantic schemas, YAML parsing
-├── datasets/         # Dataset implementations (CMAQ, WRF-Chem, etc.)
-├── datasets/   # Dataset handlers (surface, aircraft, satellite)
+├── analysis/       # Derived analysis products (EOF, wavelet, gridded analysis)
+├── assets/         # Logos and bundled visual assets
+├── datasets/       # Model and observation readers
+├── geography/      # Geographic helpers and map assets
+├── inspection/     # Output inspection presets and preview generation
 ├── pairing/        # Unified pairing engine + strategies
 │   └── strategies/ # point, track, profile, swath, grid
 ├── plots/          # Modular plotting system
@@ -216,6 +219,7 @@ davinci_monet/
 ├── pipeline/       # Execution orchestration
 ├── ai/             # AI analysis summary (optional; Anthropic/OpenRouter)
 ├── io/             # File readers/writers
+│   └── download/   # External data staging helpers
 ├── cli/            # Command-line interface
 ├── logging/        # Structured logging
 ├── util/           # Shared utilities
@@ -225,7 +229,7 @@ davinci_monet/
 
 ## Implementation Status
 
-**STATUS: COMPLETE** — 1,262 tests passing (pytest, mypy, black, isort), run **locally** in the `davinci` conda env. A CI workflow is defined (`.github/workflows/ci.yml`: pytest + mypy + black/isort on a 3.11/3.12 matrix), but **GitHub Actions is currently disabled for the repository**, so it does not execute on push — treat the local gates as the source of truth until Actions is enabled.
+**Gate reality** — do not assume the full gate is green. `FABLE_REVIEW.md` recorded pytest passing on 2026-07-02 (`1,657 passed`, `6 skipped`) but mypy, black, and isort failures on `develop`. A CI workflow is defined (`.github/workflows/ci.yml`: pytest + mypy + black/isort on a 3.11/3.12 matrix), but **GitHub Actions is currently disabled for the repository**, so rerun the local gates in the `davinci` conda env and report actual output before relying on gate status.
 
 ## Running Analyses
 
@@ -233,12 +237,17 @@ davinci_monet/
 
 ### Pipeline Stages
 
-The standard pipeline executes these stages in order:
+The standard pipeline executes these stages in order (optional stages may skip):
 1. `load_sources` - Load source data, apply unit conversions
-2. `pairing` - Pair datasets with geometries using geometry-specific strategies
-3. `statistics` - Calculate evaluation metrics (N, MB, RMSE, R, NMB, NME, IOA)
-4. `plotting` - Generate scatter, spatial bias, time series plots
-5. `save_results` - Write statistics to CSV
+2. `analyses` - Generate derived analysis products
+3. `plot_suites` - Expand configured plot suites into plot specs
+4. `pairing` - Pair sources using geometry-specific strategies
+5. `statistics` - Calculate evaluation metrics (N, MB, RMSE, R, NMB, NME, IOA)
+6. `save_results` - Write statistics to CSV
+7. `plotting` - Generate configured plots
+8. `summary` - Generate optional AI summary output
+9. `inspection` - Inspect generated products when configured
+10. `manifest` - Write the run manifest
 
 ### Running a Pipeline
 
@@ -308,11 +317,11 @@ stats:
 
 summary:
   enabled: true
-  dataset: claude-haiku-4-5  # cheapest vision dataset
+  model: claude-haiku-4-5  # cheapest vision model
   max_images: 8
 ```
 
-**Note**: The old pair shape (`sources: [a, b]` + `geometry:` + `variables:`) is rejected with a migration error. Use the nested `x:`/`y:` shape above.
+**Note**: The old pair shape (`sources: [a, b]` + `geometry:` + `variables:`) is rejected by validation. Use the nested `x:`/`y:` shape above.
 
 ### Config Naming Convention
 
@@ -476,7 +485,7 @@ plots:
 
 4. **Pipeline Architecture**: Composable stages replace monolithic methods
 
-## Data Dataset (xarray-only)
+## Data Model (xarray-only)
 
 ```
 Dataset:   xr.Dataset with dims (time, level, lat, lon)
@@ -485,7 +494,7 @@ Track:   xr.Dataset with dims (time,) + lat/lon/alt coords
 Profile: xr.Dataset with dims (time, level) + lat/lon coords
 Swath:   xr.Dataset with dims (time, scanline, pixel)
 Grid:    xr.Dataset with dims (time, lat, lon)
-Paired:  xr.Dataset with aligned dataset + geometry variables
+Paired:  xr.Dataset with aligned x/y source variables
 ```
 
 ## External Dependencies
@@ -500,7 +509,7 @@ The going-forward config format is a single `sources:` block plus binary `pairs:
 with nested `x:`/`y:` keys. All data sources (model, satellite, surface network)
 are defined in `sources:`; the pair specifies which variable from each source goes
 on each axis. The old shape (`sources: [a, b]` + `geometry:` + `variables:`) is
-rejected with a migration error.
+rejected by validation.
 
 ```yaml
 sources:
@@ -553,7 +562,7 @@ analyses/asia-aq/
 ├── scripts/
 │   ├── download_airnow.py          # Data download
 │   └── run_evaluation.py           # Pipeline execution
-├── data/                           # Dataset data (gitignored)
+├── data/                           # Model and observation data (gitignored)
 ├── output/                         # Plots and statistics (gitignored)
 └── logs/                           # Pipeline logs (gitignored)
 ```
@@ -651,7 +660,7 @@ Rules (enforced by `tests/unit/plots/test_labeling.py` + `test_labels_rendered.p
 
 ## Common Gotchas
 
-1. **Unit conversions**: Dataset variables often need `unit_scale` in config:
+1. **Unit conversions**: Model variables often need `unit_scale` in config:
    - CESM mixing ratios (mol/mol) → ppb: `unit_scale: 1.0e9`
    - CESM PM mass (kg/kg) → µg/m³: `unit_scale: 1.2e9`
 
@@ -659,11 +668,11 @@ Rules (enforced by `tests/unit/plots/test_labeling.py` + `test_labels_rendered.p
 
 3. **CESM vertical levels**: Surface is `lev=-1` (last index), NOT `lev=0`. See CRITICAL warning above. This has caused bugs 4+ times.
 
-4. **Dataset coordinates**: Must have `latitude`, `longitude` as coordinates or variables
+4. **Source coordinates**: Must have `latitude`, `longitude` as coordinates or variables
 
-5. **Time alignment**: Pipeline uses nearest-neighbor interpolation for dataset→geometry times
+5. **Time alignment**: Pipeline uses nearest-neighbor interpolation for source-to-source times
 
-6. **High-frequency datasets**: Use `resample` to average sub-hourly data to match dataset resolution:
+6. **High-frequency observations**: Use `resample` to average sub-hourly data to match model resolution:
    ```yaml
    sources:
      pandora:
@@ -694,7 +703,7 @@ Rules (enforced by `tests/unit/plots/test_labeling.py` + `test_labels_rendered.p
 9. **AI summary stage**: The `summary:` block enables an opt-in final stage that
    sends stats + plot images to the Claude API (`pip install -e ".[ai]"`,
    `ANTHROPIC_API_KEY`). It is always non-fatal — missing key/network just skips
-   it. Default dataset `claude-haiku-4-5`. Vision images are downscaled to ≤1568px.
+   it. Default model `claude-haiku-4-5`. Vision images are downscaled to ≤1568px.
    The provider can be `anthropic` (default, `ANTHROPIC_API_KEY`) or `openrouter`
    (`provider: openrouter`, key via `api_key_file:` or `OPENROUTER_API_KEY`,
-   default dataset `anthropic/claude-haiku-4.5`).
+   default model `anthropic/claude-haiku-4.5`).

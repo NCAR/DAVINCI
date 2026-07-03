@@ -411,7 +411,10 @@ class StatisticsCalculator:
         # Check minimum samples
         if len(x) < self.config.min_samples:
             for metric_name in metrics:
-                results[metric_name] = np.nan
+                if metric_name == "N":
+                    results[metric_name] = float(len(x))
+                else:
+                    results[metric_name] = np.nan
             return results
 
         # Compute each metric
@@ -538,6 +541,7 @@ def quick_stats(
     x: np.ndarray,
     y: np.ndarray,
     metrics: Sequence[str] | None = None,
+    min_samples: int = 3,
 ) -> dict[str, float]:
     """Quick statistics calculation from arrays.
 
@@ -549,6 +553,8 @@ def quick_stats(
         Comparison array.
     metrics
         List of metric names. If None, uses standard set.
+    min_samples
+        Minimum valid-pair count required for metrics other than ``N``.
 
     Returns
     -------
@@ -562,25 +568,9 @@ def quick_stats(
     """
     metrics = list(metrics) if metrics is not None else STANDARD_METRICS
 
-    x = np.asarray(x).flatten()
-    y = np.asarray(y).flatten()
-
-    # Remove NaN
-    mask = np.isfinite(x) & np.isfinite(y)
-    x = x[mask]
-    y = y[mask]
-
-    results = {}
-    for metric_name in metrics:
-        try:
-            metric = get_metric(metric_name)
-            results[metric_name] = metric.compute(x, y)
-        except Exception as exc:
-            logger.warning(
-                "Metric '%s' raised an exception and will be set to NaN: %s",
-                metric_name,
-                exc,
-            )
-            results[metric_name] = np.nan
-
-    return results
+    config = StatisticsConfig(metrics=metrics, min_samples=min_samples)
+    return StatisticsCalculator(config)._compute_metrics(
+        np.asarray(x).flatten(),
+        np.asarray(y).flatten(),
+        list(metrics),
+    )

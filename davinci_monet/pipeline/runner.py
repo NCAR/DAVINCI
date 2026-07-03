@@ -98,7 +98,8 @@ class PipelineResult:
         """Collect per-item errors from all stages.
 
         Stages stash per-item error lists in ``context.metadata`` under keys
-        such as ``pairing_errors``, ``stats_errors``, and ``plot_errors``.
+        such as ``pairing_errors``, ``stats_errors``, ``plot_errors``, and
+        ``analysis_errors``.
         This property aggregates those lists alongside any stage-level
         failures so that all errors are discoverable in one place without
         changing the ``success`` flag semantics.
@@ -118,6 +119,7 @@ class PipelineResult:
                 "pairing_errors",
                 "stats_errors",
                 "plot_errors",
+                "analysis_errors",
             )
             for key in _METADATA_ERROR_KEYS:
                 value = self.context.metadata.get(key)
@@ -187,7 +189,9 @@ class PipelineRunner:
             Close source datasets before returning. Set False when programmatic
             callers need to inspect data in ``PipelineResult.context``.
         """
-        self._stages = list(stages) if stages is not None else create_standard_pipeline()
+        self._stages: list[Stage] = (
+            list(stages) if stages is not None else list(create_standard_pipeline())
+        )
         self._fail_fast = fail_fast
         self._hooks = hooks or {}
         self._show_progress = show_progress
@@ -413,16 +417,21 @@ class PipelineRunner:
                 error_message=error_message,
             )
 
-            # Surface non-fatal per-item errors (pairing/stats/plot) that stages
-            # collected in metadata. These do not flip success, but were
-            # previously silent — a run could "succeed" while dropping items.
+            # Surface non-fatal per-item errors that stages collected in
+            # metadata. These do not flip success, but were previously silent —
+            # a run could "succeed" while dropping items.
             item_errors = {
                 key: context.metadata.get(key)
-                for key in ("pairing_errors", "stats_errors", "plot_errors")
+                for key in (
+                    "pairing_errors",
+                    "stats_errors",
+                    "plot_errors",
+                    "analysis_errors",
+                )
                 if context.metadata.get(key)
             }
             if item_errors:
-                formatter.print_item_errors(item_errors)
+                formatter.print_item_errors(item_errors, pipeline_success=result.success)
 
             # Display the AI summary brief (if produced) to the terminal. The
             # summary stage cannot print durably itself (its log_progress is

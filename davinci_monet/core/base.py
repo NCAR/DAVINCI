@@ -383,7 +383,7 @@ def validate_dataset_geometry(
 
     if expected_geometry == DataGeometry.POINT:
         # Point: (time, site) or (time, x)
-        if not (("time" in dims and ("site" in dims or "x" in dims)) or "time" in dims):
+        if not ("time" in dims and ("site" in dims or "x" in dims)):
             raise DataValidationError(f"POINT geometry expects dims (time, site), got {dims}")
 
     elif expected_geometry == DataGeometry.TRACK:

@@ -34,10 +34,21 @@ class ManifestStage(BaseStage):
         failed = [
             name for name, result in context.results.items() if result.status == StageStatus.FAILED
         ]
+        errors = {
+            key: list(value)
+            for key in (
+                "pairing_errors",
+                "stats_errors",
+                "plot_errors",
+                "analysis_errors",
+            )
+            if (value := context.metadata.get(key))
+        }
         status = "failed" if failed else "completed"
         manifest: dict[str, Any] = {
             "status": status,
             "failed_stages": failed,
+            "errors": errors,
             "products": context.metadata.get("product_artifacts", {}),
             "plots": plots,
             "inspection": (

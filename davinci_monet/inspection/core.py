@@ -28,6 +28,7 @@ def inspect_run_directory(
     *,
     presets: list[str] | tuple[str, ...],
     preview_format: Literal["png"] | None = None,
+    plot_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
 ) -> InspectionResult:
     """Inspect a run directory and write deterministic inspection artifacts."""
     root = Path(run_dir)
@@ -37,11 +38,7 @@ def inspect_run_directory(
         raise NotADirectoryError(f"run directory is not a directory: {root}")
 
     plots_dir = root / "plots"
-    pdfs = (
-        sorted(path for path in plots_dir.rglob("*.pdf") if path.is_file())
-        if plots_dir.exists()
-        else []
-    )
+    pdfs = _collect_final_pdfs(root, plots_dir, plot_paths)
 
     unknown_presets = sorted(set(presets) - BUILTIN_INSPECTION_PRESETS)
     checks: list[dict[str, Any]] = [
@@ -49,7 +46,7 @@ def inspect_run_directory(
             "name": "final_pdf_products_exist",
             "passed": bool(pdfs),
             "detail": f"{len(pdfs)} PDF plot(s) found",
-            "pdfs": [str(path.relative_to(root)) for path in pdfs],
+            "pdfs": [_format_relative(root, path) for path in pdfs],
         },
         {
             "name": "known_preset_selected",
@@ -97,9 +94,29 @@ def inspect_run_directory(
     )
 
 
-def _write_png_previews(
-    root: Path, plots_dir: Path, pdfs: list[Path]
-) -> dict[str, Any]:
+def _collect_final_pdfs(
+    root: Path,
+    plots_dir: Path,
+    plot_paths: list[str | Path] | tuple[str | Path, ...] | None,
+) -> list[Path]:
+    if plot_paths is not None:
+        pdfs: list[Path] = []
+        for raw_path in plot_paths:
+            path = Path(raw_path)
+            if not path.is_absolute():
+                path = root / path
+            if path.suffix.lower() == ".pdf" and path.is_file():
+                pdfs.append(path)
+        return sorted(pdfs)
+
+    return (
+        sorted(path for path in plots_dir.rglob("*.pdf") if path.is_file())
+        if plots_dir.exists()
+        else []
+    )
+
+
+def _write_png_previews(root: Path, plots_dir: Path, pdfs: list[Path]) -> dict[str, Any]:
     preview_root = root / "inspection" / "previews"
     if preview_root.exists():
         shutil.rmtree(preview_root)
@@ -107,7 +124,7 @@ def _write_png_previews(
     errors: list[str] = []
 
     for pdf in pdfs:
-        relative_plot = pdf.relative_to(plots_dir)
+        relative_plot = _plot_relative_path(root, plots_dir, pdf)
         preview_path = preview_root / relative_plot.with_suffix(".png")
         preview_path.parent.mkdir(parents=True, exist_ok=True)
         output_prefix = preview_path.with_suffix("")
@@ -129,16 +146,16 @@ def _write_png_previews(
             break
         except subprocess.CalledProcessError as exc:
             message = exc.stderr.strip() or exc.stdout.strip() or str(exc)
-            errors.append(f"{pdf.relative_to(root)}: {message}")
+            errors.append(f"{_format_relative(root, pdf)}: {message}")
             continue
         except subprocess.TimeoutExpired:
-            errors.append(f"{pdf.relative_to(root)}: preview conversion timed out")
+            errors.append(f"{_format_relative(root, pdf)}: preview conversion timed out")
             continue
 
         if preview_path.is_file():
             preview_paths.append(preview_path)
         else:
-            errors.append(f"{pdf.relative_to(root)}: preview file was not created")
+            errors.append(f"{_format_relative(root, pdf)}: preview file was not created")
 
     passed = len(preview_paths) == len(pdfs) and not errors
     return {
@@ -147,6 +164,23 @@ def _write_png_previews(
         "errors": errors,
         "detail": f"{len(preview_paths)} of {len(pdfs)} preview PNG(s) written",
     }
+
+
+def _plot_relative_path(root: Path, plots_dir: Path, pdf: Path) -> Path:
+    try:
+        return pdf.relative_to(plots_dir)
+    except ValueError:
+        try:
+            return pdf.relative_to(root)
+        except ValueError:
+            return Path(pdf.name)
+
+
+def _format_relative(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def _render_markdown(payload: dict[str, Any]) -> str:

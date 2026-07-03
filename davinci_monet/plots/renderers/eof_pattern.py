@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("eof_pattern")
+@register_plotter("eof_pattern", arity="single_source", category="spatial")
 class EOFPatternPlotter(BaseSpatialPlotter):
     """Render each EOF mode as a signed spatial map (diverging, centered at 0)."""
 

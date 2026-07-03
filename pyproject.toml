@@ -33,7 +33,6 @@ dependencies = [
     "numpy>=1.20",
     "pandas>=1.5,<2",
     "xarray>=2022.0",
-    "uxarray",
     "matplotlib>=3.5,<3.9",
     "cartopy>=0.20",
     "netCDF4>=1.5",
@@ -135,6 +134,7 @@ module = [
     "pyhdf.*",
     "pycwt",
     "pycwt.*",
+    "cftime",
 ]
 ignore_missing_imports = true
 
@@ -150,6 +150,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "integration: end-to-end tests that run PipelineRunner.run_from_config",
+    "real_data: opt-in smoke tests that require externally staged data",
 ]
 filterwarnings = [
     "error::UserWarning",

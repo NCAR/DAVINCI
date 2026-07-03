@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("vertical_profile")
+@register_plotter("vertical_profile", arity="single_source", category="specialized")
 class VerticalProfilePlotter(BasePlotter):
     """Altitude vs. value profile for one source series."""
 

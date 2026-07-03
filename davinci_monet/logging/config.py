@@ -103,6 +103,7 @@ class StructuredFormatter(logging.Formatter):
         "name",
         "msg",
         "args",
+        "asctime",
         "created",
         "filename",
         "funcName",
@@ -290,8 +291,6 @@ def configure_logging(
                     # First apply structured formatting
                     message = StructuredFormatter.format(self, record)
                     # Then apply color
-                    record.msg = message
-                    record.args = ()
                     color = self.COLORS.get(record.levelno, "")
                     if color:
                         return f"{color}{message}{self.RESET}"

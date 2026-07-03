@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from davinci_monet.core.coordinates import surface_index, vertical_dim_name
 from davinci_monet.core.exceptions import PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
@@ -181,9 +182,7 @@ class TrackStrategy(BasePairingStrategy):
 
         # Determine vertical coordinate
         x_altitude = self._get_altitude(x_data, altitude_var)
-        y_has_vertical = any(
-            dim in y_data.dims for dim in ["z", "lev", "level", "altitude", "height"]
-        )
+        y_has_vertical = vertical_dim_name(y_data) is not None
 
         # Extract and interpolate y values along track
         y_along_track = self._extract_along_track(
@@ -285,11 +284,7 @@ class TrackStrategy(BasePairingStrategy):
         lon_indexer = xr.DataArray(np.where(valid_mask, lon_idx, 0), dims=["track_point"])
 
         # Detect vertical dimension
-        level_dim = None
-        for dim_name in ["lev", "z", "level", "altitude", "height"]:
-            if dim_name in y_data.dims:
-                level_dim = dim_name
-                break
+        level_dim = vertical_dim_name(y_data)
 
         # If the y source has a vertical dimension and we have altitude, do 3D interpolation
         # Otherwise fall back to surface extraction
@@ -421,13 +416,7 @@ class TrackStrategy(BasePairingStrategy):
         # This gives us (time, level, track_point) for each variable
         extracted_3d = y_data.isel({lat_dim: lat_indexer, lon_dim: lon_indexer})
 
-        # Determine surface index (where pressure is highest)
-        if y_levels[-1] > y_levels[0]:
-            # Pressure increases with index - surface at end (CESM style)
-            surface_idx = len(y_levels) - 1
-        else:
-            # Pressure decreases with index - surface at start
-            surface_idx = 0
+        surface_idx = surface_index(y_data, level_dim)
 
         # Build result variables
         result_vars = {}

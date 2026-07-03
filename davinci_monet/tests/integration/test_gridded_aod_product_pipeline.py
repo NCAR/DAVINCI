@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 import xarray as xr
 
 from davinci_monet.pipeline.runner import PipelineRunner
 
 
+@pytest.mark.integration
 def test_gridded_aod_product_pipeline_creates_artifacts_plots_inspection_and_manifest(
     tmp_path,
 ) -> None:

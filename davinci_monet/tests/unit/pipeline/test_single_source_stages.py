@@ -7,7 +7,7 @@ there are loaded sources but no pairs, and descriptive statistics are written to
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -87,7 +87,8 @@ class TestUnifiedPlottingStage:
 
     def test_execute_honors_single_source_output_subdir(self, tmp_path: Any) -> None:
         ctx = _geometry_ctx(tmp_path)
-        ctx.config["plots"]["o3_hist"]["output_subdir"] = "plots/daily"
+        config = cast(dict[str, Any], ctx.config)
+        config["plots"]["o3_hist"]["output_subdir"] = "plots/daily"
 
         res = PlottingStage().execute(ctx)
 
@@ -100,9 +101,10 @@ class TestUnifiedPlottingStage:
 
     def test_execute_honors_single_source_plot_formats(self, tmp_path: Any) -> None:
         ctx = _geometry_ctx(tmp_path)
-        plot = ctx.config["plots"].pop("o3_hist")
+        config = cast(dict[str, Any], ctx.config)
+        plot = config["plots"].pop("o3_hist")
         plot["formats"] = ["pdf"]
-        ctx.config["plots"]["o3.hist"] = plot
+        config["plots"]["o3.hist"] = plot
         stale_png = tmp_path / "out" / "o3.hist.png"
         stale_png.parent.mkdir(parents=True, exist_ok=True)
         stale_png.write_text("stale")

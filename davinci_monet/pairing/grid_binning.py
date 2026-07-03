@@ -259,6 +259,10 @@ def edges_from_centers(centers: np.ndarray) -> np.ndarray:
     np.ndarray
         Array of length ``len(centers) + 1`` containing bin edges.
     """
+    centers = np.asarray(centers, dtype=np.float64)
+    if len(centers) > 1 and centers[0] > centers[-1]:
+        centers = centers[::-1]
+
     if len(centers) == 1:
         # Single center — use a default half-day spacing for time,
         # or 1.0 for spatial coords

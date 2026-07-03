@@ -577,11 +577,11 @@ class PairingStage(BaseStage):
         if execution_errors:
             context.metadata.setdefault("pairing_errors", []).extend(execution_errors)
             return self._create_result(
-                StageStatus.FAILED,
+                StageStatus.COMPLETED,
                 data={"paired_keys": list(context.paired.keys())},
-                error="Source pair execution failed: " + "; ".join(execution_errors),
                 duration=time.time() - start,
                 count=paired_count,
+                warnings=list(execution_errors),
             )
         return self._create_result(
             StageStatus.COMPLETED,

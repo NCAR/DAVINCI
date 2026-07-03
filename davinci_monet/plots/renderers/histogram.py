@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from davinci_monet.core.base import PlotSeries
 
 
-@register_plotter("histogram")
+@register_plotter("histogram", arity="single_source", category="statistical")
 class HistogramPlotter(BasePlotter):
     """Distribution histogram for one source series."""
 

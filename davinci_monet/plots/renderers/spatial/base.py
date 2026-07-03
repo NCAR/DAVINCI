@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from davinci_monet.core.coordinates import surface_index
 from davinci_monet.plots.base import BasePlotter, PlotConfig
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ def detect_spatial_geometry(
     - ``"regular_grid"``: lat and lon are both 1-D but do **not** share a
       single site dimension (i.e. they are independent axis arrays), and
       the field has at least two dimensions.  This is the geometry of
-      structured rectilinear dataset output where lat and lon define a
+      structured rectilinear model output where lat and lon define a
       Cartesian product.
 
     - ``"curvilinear_grid"``: lat and/or lon are 2-D arrays whose values
@@ -129,11 +130,7 @@ def surface_level_index(field_da: xr.DataArray, level_dim: str) -> int:
     index; for other conventions it is the first. Falls back to ``0`` when the
     level coordinate is absent or has fewer than two values.
     """
-    if level_dim in field_da.coords:
-        vert_vals = field_da.coords[level_dim].values
-        if len(vert_vals) > 1 and vert_vals[-1] > vert_vals[0]:
-            return -1
-    return 0
+    return surface_index(field_da, level_dim)
 
 
 def draw_spatial_field(
@@ -149,6 +146,9 @@ def draw_spatial_field(
     norm: Any | None = None,
     marker_size: float,
     alpha: float,
+    field_dims: tuple[Any, ...] | None = None,
+    lat_dim: Any | None = None,
+    lon_dim: Any | None = None,
 ) -> Any:
     """Draw a single spatial field on a GeoAxes as scatter or pcolormesh.
 
@@ -205,10 +205,11 @@ def draw_spatial_field(
         )
     if plot_type == "pcolormesh" and lats.ndim == 1 and data.ndim >= 2:
         # Regular grid with 1-D coords — pcolormesh handles natively
+        mesh_data = _orient_regular_grid_data(data, lats, lons, field_dims, lat_dim, lon_dim)
         return ax.pcolormesh(
             lons,
             lats,
-            data.T if data.shape[0] == len(lons) else data,
+            mesh_data,
             **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
@@ -224,6 +225,32 @@ def draw_spatial_field(
         alpha=alpha,
         edgecolors="none",
     )
+
+
+def _orient_regular_grid_data(
+    data: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+    field_dims: tuple[Any, ...] | None,
+    lat_dim: Any | None,
+    lon_dim: Any | None,
+) -> np.ndarray:
+    """Orient 2-D regular-grid data as ``(lat, lon)`` for pcolormesh."""
+    if data.ndim != 2:
+        return data
+    if field_dims is not None and lat_dim in field_dims and lon_dim in field_dims:
+        lat_axis = field_dims.index(lat_dim)
+        lon_axis = field_dims.index(lon_dim)
+        if (lat_axis, lon_axis) == (0, 1):
+            return data
+        if (lat_axis, lon_axis) == (1, 0):
+            return data.T
+
+    if data.shape == (len(lats), len(lons)):
+        return data
+    if data.shape == (len(lons), len(lats)):
+        return data.T
+    return data
 
 
 @dataclass

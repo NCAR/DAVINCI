@@ -2,9 +2,9 @@ import sys
 import types
 from datetime import datetime, timezone
 
+import monetio.sat as monetio_sat
 import numpy as np
 import xarray as xr
-import monetio.sat as monetio_sat
 
 from davinci_monet.datasets.satellite.modis_l2_aod import MODISL2AODReader
 

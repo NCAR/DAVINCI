@@ -76,7 +76,7 @@ def regularize(series: xr.DataArray) -> tuple[xr.DataArray, float, str, float]:
     if not irregular or unit == "steps":
         return series, dt, unit, 0.0
     n_before = int(series.sizes["time"])
-    freq = pd.Timedelta(seconds=med)
+    freq = pd.tseries.frequencies.to_offset(pd.Timedelta(seconds=med)).freqstr
     regular = series.resample(time=freq).mean()
     n_after = int(regular.sizes["time"])
     frac = max(0.0, (n_after - n_before) / max(n_after, 1))

@@ -32,7 +32,7 @@ class DataGeometry(Enum):
     """Enumeration of supported data geometry types.
 
     The geometry type determines which pairing strategy will be used
-    to match datasets with dataset output.
+    to match observations with model output.
     """
 
     POINT = auto()
@@ -48,7 +48,7 @@ class DataGeometry(Enum):
     """2D satellite swath (time, scanline, pixel) - L2 products."""
 
     GRID = auto()
-    """Regular grid (time, lat, lon) - L3 products, reanalysis, dataset output."""
+    """Regular grid (time, lat, lon) - L3 products, reanalysis, model output."""
 
     SPECTRUM = auto()
     """Time-frequency spectrum (time, period) - wavelet power. Not pairable."""

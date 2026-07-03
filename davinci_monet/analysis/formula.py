@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import ast
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
 import xarray as xr
@@ -15,6 +16,7 @@ _ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod)
 _ALLOWED_UNARY = (ast.UAdd, ast.USub, ast.Not)
 _ALLOWED_COMPARE = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 _ALLOWED_BOOL = (ast.And, ast.Or)
+_MAX_INTEGER_POWER_BITS = 4096
 
 
 def _mean(value: xr.DataArray, *, dim: str | list[str] | None = None) -> xr.DataArray:
@@ -59,7 +61,25 @@ def _percentile(
     return value.quantile(q / 100.0, dim=dim, skipna=True)
 
 
-_FUNCTIONS = {
+def _is_integer_scalar(value: Any) -> bool:
+    return isinstance(value, (int, np.integer)) and not isinstance(value, (bool, np.bool_))
+
+
+def _check_safe_power(left: Any, right: Any) -> None:
+    if not (_is_integer_scalar(left) and _is_integer_scalar(right)):
+        return
+    base = int(left)
+    exponent = int(right)
+    if exponent < 0 or abs(base) <= 1:
+        return
+    estimated_bits = abs(base).bit_length() * exponent
+    if estimated_bits > _MAX_INTEGER_POWER_BITS:
+        raise FormulaError("integer exponent exceeds safe formula limit")
+
+
+_FormulaFunction = Callable[..., xr.DataArray]
+
+_FUNCTIONS: dict[str, _FormulaFunction] = {
     "mean": _mean,
     "sum": _sum,
     "count": _count,
@@ -104,6 +124,7 @@ class _Evaluator(ast.NodeVisitor):
         if isinstance(node.op, ast.Div):
             return left / right
         if isinstance(node.op, ast.Pow):
+            _check_safe_power(left, right)
             return left**right
         return left % right
 
@@ -157,7 +178,7 @@ class _Evaluator(ast.NodeVisitor):
         args = [self.visit(arg) for arg in node.args]
         if any(kw.arg is None for kw in node.keywords):
             raise FormulaError("keyword unpacking is not supported in formulas")
-        kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        kwargs: dict[str, Any] = {cast(str, kw.arg): self.visit(kw.value) for kw in node.keywords}
         return _FUNCTIONS[node.func.id](*args, **kwargs)
 
     def generic_visit(self, node: ast.AST) -> Any:
@@ -170,7 +191,7 @@ def evaluate_formula(expression: str, env: xr.Dataset | dict[str, Any]) -> xr.Da
     except SyntaxError as exc:
         raise FormulaError(str(exc)) from exc
     if isinstance(env, xr.Dataset):
-        eval_env = {name: env[name] for name in env.data_vars}
+        eval_env: dict[str, Any] = {str(name): env[str(name)] for name in env.data_vars}
     else:
         eval_env = dict(env)
     try:
