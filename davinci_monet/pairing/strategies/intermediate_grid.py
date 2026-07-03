@@ -3,9 +3,6 @@
 Bins satellite L2 swath pixels onto a uniform (time, lon, lat) grid,
 then pairs with the y data on the same grid. This is the recommended
 strategy for all L2 satellite products at scale.
-
-Ported from the MELODIES-MONET intermediate grid approach
-(grid_util.update_data_grid).
 """
 
 from __future__ import annotations

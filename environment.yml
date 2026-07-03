@@ -6,8 +6,9 @@ dependencies:
   # Python version
   - python=3.11
 
-  # Core scientific stack (via melodies-monet)
-  - melodies-monet
+  # Core scientific stack
+  - monet
+  - monetio
 
   # Additional I/O support
   - pyhdf  # HDF4/HDF-EOS for MODIS

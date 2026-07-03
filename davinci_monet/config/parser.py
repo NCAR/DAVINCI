@@ -262,7 +262,7 @@ def _validate_strict_core_fields(config: MonetConfig) -> None:
 
 
 def load_config(source: str | Path | TextIO, *, strict: bool = False) -> MonetConfig:
-    """Load and validate a MELODIES-MONET configuration.
+    """Load and validate a DAVINCI configuration.
 
     This is the main entry point for loading configuration files.
     It handles YAML parsing, preprocessing, and Pydantic validation.
@@ -316,7 +316,7 @@ def load_config(source: str | Path | TextIO, *, strict: bool = False) -> MonetCo
 
 
 def validate_config(data: dict[str, Any], *, strict: bool = False) -> MonetConfig:
-    """Validate a dictionary as a MELODIES-MONET configuration.
+    """Validate a dictionary as a DAVINCI configuration.
 
     Parameters
     ----------

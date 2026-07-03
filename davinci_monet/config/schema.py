@@ -126,7 +126,7 @@ class AnalysisConfig(StrictSchema):
         if isinstance(v, datetime):
             return v
         if isinstance(v, str):
-            # Handle MELODIES-MONET format: '2019-08-02-12:00:00'
+            # Handle the legacy hyphenated format: '2019-08-02-12:00:00'
             for fmt in [
                 "%Y-%m-%d-%H:%M:%S",
                 "%Y-%m-%d %H:%M:%S",
@@ -787,7 +787,7 @@ class InspectionConfig(StrictSchema):
 
 
 class MonetConfig(StrictSchema):
-    """Root configuration dataset for MELODIES-MONET.
+    """Root configuration model for DAVINCI.
 
     This is the top-level configuration that contains all sections.
 

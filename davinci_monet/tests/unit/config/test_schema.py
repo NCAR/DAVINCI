@@ -37,8 +37,8 @@ class TestAnalysisConfig:
         assert config.start_time == datetime(2024, 1, 1)
         assert config.end_time == datetime(2024, 1, 2)
 
-    def test_datetime_parsing_melodies_format(self) -> None:
-        """Test MELODIES-MONET datetime format."""
+    def test_datetime_parsing_legacy_hyphenated_format(self) -> None:
+        """Test the legacy hyphenated datetime format."""
         config = AnalysisConfig(start_time="2019-08-02-12:00:00")
         assert config.start_time == datetime(2019, 8, 2, 12, 0, 0)
 

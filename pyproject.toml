@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "davinci-monet"
 version = "26.06"
-description = "Data Analysis and Visual Intelligence for Climate/Chemistry - A modern refactor of MELODIES-MONET"
+description = "Data Analysis and Visual Intelligence for Climate/Chemistry - atmospheric model and observation evaluation"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
@@ -71,6 +71,7 @@ docs = [
 ]
 
 [project.scripts]
+davinci = "davinci_monet.cli.app:app"
 davinci-monet = "davinci_monet.cli.app:app"
 davinci-stage-merra2 = "davinci_monet.io.download.merra2:main"
 davinci-stage-ceres = "davinci_monet.io.download.ceres:main"
