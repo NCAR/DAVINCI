@@ -18,6 +18,10 @@ FORBIDDEN_PHRASES = (
     "dataset output",
     "datasets against datasets",
     "datasets/datasets",
+    "mental dataset",
+    "Cross-Dataset",
+    "Base dataset with strict",
+    "the next dataset",
 )
 
 

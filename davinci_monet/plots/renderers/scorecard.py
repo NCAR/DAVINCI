@@ -186,7 +186,7 @@ class ScorecardPlotter(BasePlotter):
             norm = TwoSlopeNorm(vcenter=center, vmin=vmin_calc, vmax=vmax_calc)
 
         # Create heatmap
-        imshow_kwargs: dict[str, Any] = {"cmap": cmap, "aspect": "auto"}
+        imshow_kwargs: dict[str, Any] = {"cmap": cmap, "aspect": "auto", "rasterized": True}
         if norm is None:
             imshow_kwargs.update({"vmin": vmin_calc, "vmax": vmax_calc})
         else:

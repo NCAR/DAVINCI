@@ -69,13 +69,34 @@ def test_group_dataset_labels_cftime_calendar_values() -> None:
 
     assert list(group_dataset(ds, "day")) == ["2008-07-01", "2008-10-01"]
     assert list(group_dataset(ds, "month")) == ["2008-07", "2008-10"]
-    assert list(group_dataset(ds, "season")) == ["2008-Q3", "2008-Q4"]
+    assert list(group_dataset(ds, "season")) == ["2008-JJA", "2008-SON"]
 
 
-def test_group_dataset_season_groups_quarter_dates_together() -> None:
+def test_group_dataset_season_groups_meteorological_season_dates_together() -> None:
+    """July/August dates (JJA) fall in a single meteorological-season group."""
     seasonal = group_dataset(_ds(), "season")
-    assert list(seasonal) == ["2008-Q3"]
-    assert seasonal["2008-Q3"].sizes["time"] == 4
+    assert list(seasonal) == ["2008-JJA"]
+    assert seasonal["2008-JJA"].sizes["time"] == 4
+
+
+def test_group_dataset_season_rolls_december_into_next_years_djf() -> None:
+    """Dec 2008 groups with Jan/Feb 2009 as a single '2009-DJF' winter."""
+    ds = xr.Dataset(
+        {"aod": (("time", "lat", "lon"), np.ones((3, 1, 1)))},
+        coords={
+            "time": np.array(
+                ["2008-12-15T00:00", "2009-01-15T00:00", "2009-02-15T00:00"],
+                dtype="datetime64[ns]",
+            ),
+            "lat": [0.0],
+            "lon": [0.0],
+        },
+    )
+
+    seasonal = group_dataset(ds, "season")
+
+    assert list(seasonal) == ["2009-DJF"]
+    assert seasonal["2009-DJF"].sizes["time"] == 3
 
 
 def test_group_dataset_custom_windows() -> None:

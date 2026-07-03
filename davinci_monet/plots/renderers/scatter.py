@@ -159,6 +159,7 @@ class ScatterPlotter(BasePlotter):
                 alpha=a,
                 cmap=density_cmap,
                 norm=LogNorm() if density.max() / density.min() > 10 else None,
+                rasterized=True,
             )
             fig.colorbar(scatter, ax=ax, label="Point Density")
         elif color_by is not None and color_by in paired_data:
@@ -171,6 +172,7 @@ class ScatterPlotter(BasePlotter):
                 s=ms**2,
                 alpha=a,
                 cmap=density_cmap,
+                rasterized=True,
             )
             color_label = get_variable_label(paired_data, color_by)
             fig.colorbar(scatter, ax=ax, label=color_label)
@@ -182,6 +184,7 @@ class ScatterPlotter(BasePlotter):
                 s=ms**2,
                 alpha=a,
                 edgecolors="none",
+                rasterized=True,
             )
 
         # 1:1 line

@@ -251,6 +251,7 @@ class LMADensityPlotter(BasePlotter):
             transform=ccrs.PlateCarree(),
             shading="auto",
             zorder=2,
+            rasterized=True,
         )
 
         if flight_tracks:

@@ -286,6 +286,7 @@ class CurtainPlotter(BasePlotter):
             vmax=vmax if norm is None else None,
             alpha=style.alpha,
             edgecolors="none",
+            rasterized=True,
         )
 
         # Add colorbar
@@ -355,7 +356,9 @@ class CurtainPlotter(BasePlotter):
 
         levels = np.linspace(vmin, vmax, n_levels)
 
-        # Contourf plot
+        # Contourf plot. ContourSet does not support rasterization in the
+        # pinned matplotlib (<3.9): both the constructor kwarg and
+        # set_rasterized() raise a UserWarning, so this layer stays vector.
         contour = ax.contourf(
             time_grid,
             alt_grid,

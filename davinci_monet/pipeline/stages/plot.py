@@ -745,6 +745,14 @@ class PlottingStage(BaseStage):
 
         errors = context.metadata.get("plot_errors") or []
         if errors:
+            if plot_count == 0:
+                return self._create_result(
+                    StageStatus.FAILED,
+                    data={"plot_count": plot_count, "plots_generated": plots_generated},
+                    error=f"all {len(errors)} plots failed",
+                    duration=time.time() - start,
+                    warnings=list(errors),
+                )
             return self._create_result(
                 StageStatus.COMPLETED,
                 data={"plot_count": plot_count, "plots_generated": plots_generated},

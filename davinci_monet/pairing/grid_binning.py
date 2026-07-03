@@ -1,8 +1,10 @@
-"""Numba-accelerated binning of sparse datasets onto a uniform grid.
+"""Numba-accelerated binning of sparse datasets onto a grid.
 
 Ported from MELODIES-MONET grid_util.py. Bins satellite swath pixels
-(or any sparse 2D datasets) into (time, lon, lat) grid cells using
-simple floor-division arithmetic, accumulated in-place.
+(or any sparse 2D datasets) into (time, lon, lat) grid cells by locating
+each value against the true bin edges with ``searchsorted``, accumulated
+in-place. This bins correctly on non-uniform (Gaussian/stretched) grids,
+not just uniformly-spaced ones.
 
 The numba JIT inner loop operates on flat numpy arrays with zero
 Python/xarray overhead, making it suitable for 100M+ pixel datasets.
@@ -30,8 +32,9 @@ def bin_swath_to_grid(
 ) -> None:
     """Accumulate swath pixels into (time, lon, lat) grid cells.
 
-    Each valid (non-NaN) pixel is assigned to a grid cell via floor
-    division on the bin edges. Running sums and counts are accumulated
+    Each valid (non-NaN) pixel is assigned to a grid cell via a binary
+    search (``searchsorted``) against the true bin edges, so cells of
+    unequal width bin correctly. Running sums and counts are accumulated
     in-place in *data_grid* and *count_grid*.
 
     Parameters
@@ -55,9 +58,6 @@ def bin_swath_to_grid(
     data_grid
         Pre-allocated (ntime, nlon, nlat) float array — modified in-place.
     """
-    dt = time_edges[1] - time_edges[0]
-    dx = lon_edges[1] - lon_edges[0]
-    dy = lat_edges[1] - lat_edges[0]
     nt, nx, ny = data_grid.shape
     for i in range(len(data_values)):
         if (
@@ -72,9 +72,9 @@ def bin_swath_to_grid(
             and lat_values[i] >= lat_edges[0]
             and lat_values[i] <= lat_edges[-1]
         ):
-            it = int((time_values[i] - time_edges[0]) / dt)
-            ix = int((lon_values[i] - lon_edges[0]) / dx)
-            iy = int((lat_values[i] - lat_edges[0]) / dy)
+            it = np.searchsorted(time_edges, time_values[i], side="right") - 1
+            ix = np.searchsorted(lon_edges, lon_values[i], side="right") - 1
+            iy = np.searchsorted(lat_edges, lat_values[i], side="right") - 1
             # Clamp exact upper-edge coordinates into the final bin.
             if it < 0:
                 it = 0
@@ -128,9 +128,6 @@ def bin_swath_to_grid_uncertainty(
 ) -> None:
     """Accumulate inverse-variance swath pixels into grid cells."""
 
-    dt = time_edges[1] - time_edges[0]
-    dx = lon_edges[1] - lon_edges[0]
-    dy = lat_edges[1] - lat_edges[0]
     nt, nx, ny = count_grid.shape
     for i in range(len(data_values)):
         if (
@@ -147,9 +144,9 @@ def bin_swath_to_grid_uncertainty(
             and lat_values[i] >= lat_edges[0]
             and lat_values[i] <= lat_edges[-1]
         ):
-            it = int((time_values[i] - time_edges[0]) / dt)
-            ix = int((lon_values[i] - lon_edges[0]) / dx)
-            iy = int((lat_values[i] - lat_edges[0]) / dy)
+            it = np.searchsorted(time_edges, time_values[i], side="right") - 1
+            ix = np.searchsorted(lon_edges, lon_values[i], side="right") - 1
+            iy = np.searchsorted(lat_edges, lat_values[i], side="right") - 1
             if it < 0:
                 it = 0
             elif it >= nt:
@@ -198,10 +195,6 @@ def bin_points_to_grid_4d(
     data_grid: np.ndarray,
 ) -> None:
     """Accumulate points into (time, lon, lat, alt) grid cells (sum + count, in-place)."""
-    dt = time_edges[1] - time_edges[0]
-    dx = lon_edges[1] - lon_edges[0]
-    dy = lat_edges[1] - lat_edges[0]
-    dz = alt_edges[1] - alt_edges[0]
     nt, nx, ny, nz = data_grid.shape
     for i in range(len(data_values)):
         if (
@@ -219,10 +212,10 @@ def bin_points_to_grid_4d(
             and alt_values[i] >= alt_edges[0]
             and alt_values[i] <= alt_edges[-1]
         ):
-            it = int((time_values[i] - time_edges[0]) / dt)
-            ix = int((lon_values[i] - lon_edges[0]) / dx)
-            iy = int((lat_values[i] - lat_edges[0]) / dy)
-            iz = int((alt_values[i] - alt_edges[0]) / dz)
+            it = np.searchsorted(time_edges, time_values[i], side="right") - 1
+            ix = np.searchsorted(lon_edges, lon_values[i], side="right") - 1
+            iy = np.searchsorted(lat_edges, lat_values[i], side="right") - 1
+            iz = np.searchsorted(alt_edges, alt_values[i], side="right") - 1
             if it < 0:
                 it = 0
             elif it >= nt:
@@ -244,15 +237,16 @@ def bin_points_to_grid_4d(
 
 
 def edges_from_centers(centers: np.ndarray) -> np.ndarray:
-    """Derive bin edges from uniformly-spaced center coordinates.
+    """Derive bin edges from monotonic center coordinates.
 
-    Edges are placed at midpoints between consecutive centers, with
-    half-spacing extensions at the boundaries.
+    Interior edges are placed at the midpoints between consecutive
+    centers (correct for non-uniform spacing), with half-spacing
+    extensions of the first/last cell at the boundaries.
 
     Parameters
     ----------
     centers
-        1D array of grid center values (must be uniformly spaced).
+        1D array of monotonic grid center values.
 
     Returns
     -------

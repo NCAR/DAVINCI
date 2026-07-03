@@ -86,7 +86,14 @@ class VerticalProfilePlotter(BasePlotter):
         altitudes = s.dataset[alt_coord].values.ravel()
         valid = np.isfinite(values) & np.isfinite(altitudes)
         ax.scatter(
-            values[valid], altitudes[valid], c=color, s=8, alpha=0.5, edgecolors="none", label=label
+            values[valid],
+            altitudes[valid],
+            c=color,
+            s=8,
+            alpha=0.5,
+            edgecolors="none",
+            label=label,
+            rasterized=True,
         )
 
     def _plot_binned(
@@ -111,5 +118,10 @@ class VerticalProfilePlotter(BasePlotter):
         vb = np.isfinite(means)
         ax.plot(means[vb], bin_centers[vb], color=color, linewidth=1.5, label=label)
         ax.fill_betweenx(
-            bin_centers[vb], (means - stds)[vb], (means + stds)[vb], color=color, alpha=0.2
+            bin_centers[vb],
+            (means - stds)[vb],
+            (means + stds)[vb],
+            color=color,
+            alpha=0.2,
+            rasterized=True,
         )

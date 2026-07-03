@@ -19,10 +19,17 @@ class TestPairedData:
 
     @pytest.fixture
     def paired_dataset(self) -> xr.Dataset:
-        """Create a paired dataset for testing."""
+        """Create a paired dataset for testing.
+
+        Mirrors the ``axis``/``source_label``/``canonical_name`` attrs the
+        pairing engine attaches to real paired variables (see
+        ``pairing/engine.py:381-395``) so ``get_x``/``get_y``/``get_pair``
+        can be checked against the real contract, not just the ``x_``/``y_``
+        name-prefix fallback.
+        """
         times = np.arange(10)
         sites = np.arange(5)
-        return xr.Dataset(
+        ds = xr.Dataset(
             {
                 "x_ozone": (["time", "site"], np.random.randn(10, 5) + 40),
                 "y_ozone": (["time", "site"], np.random.randn(10, 5) + 42),
@@ -36,6 +43,13 @@ class TestPairedData:
                 "lon": ("site", np.linspace(-100, -90, 5)),
             },
         )
+        ds["x_ozone"].attrs.update(
+            {"axis": "x", "source_label": "airnow", "canonical_name": "ozone"}
+        )
+        ds["y_ozone"].attrs.update({"axis": "y", "source_label": "cmaq", "canonical_name": "ozone"})
+        ds["x_pm25"].attrs.update({"axis": "x", "source_label": "airnow", "canonical_name": "pm25"})
+        ds["y_pm25"].attrs.update({"axis": "y", "source_label": "cmaq", "canonical_name": "pm25"})
+        return ds
 
     def test_pair_label(self, paired_dataset: xr.Dataset) -> None:
         """Test pair label generation."""
@@ -109,10 +123,14 @@ class TestPairedData:
         )
         # With prefix
         x = paired.get_x("x_ozone")
-        assert x is not None
+        xr.testing.assert_equal(x, paired_dataset["x_ozone"])
+        assert x.attrs["axis"] == "x"
+        assert x.attrs["source_label"] == "airnow"
         # Without prefix
         x = paired.get_x("ozone")
-        assert x is not None
+        xr.testing.assert_equal(x, paired_dataset["x_ozone"])
+        assert x.attrs["axis"] == "x"
+        assert x.attrs["source_label"] == "airnow"
 
     def test_get_y(self, paired_dataset: xr.Dataset) -> None:
         """Test getting y (dataset) variable."""
@@ -124,10 +142,14 @@ class TestPairedData:
         )
         # With prefix
         y = paired.get_y("y_ozone")
-        assert y is not None
+        xr.testing.assert_equal(y, paired_dataset["y_ozone"])
+        assert y.attrs["axis"] == "y"
+        assert y.attrs["source_label"] == "cmaq"
         # Without prefix
         y = paired.get_y("ozone")
-        assert y is not None
+        xr.testing.assert_equal(y, paired_dataset["y_ozone"])
+        assert y.attrs["axis"] == "y"
+        assert y.attrs["source_label"] == "cmaq"
 
     def test_get_pair(self, paired_dataset: xr.Dataset) -> None:
         """Test getting paired arrays."""
@@ -138,8 +160,12 @@ class TestPairedData:
             geometry=DataGeometry.POINT,
         )
         x, y = paired.get_pair("ozone")
-        assert x is not None
-        assert y is not None
+        xr.testing.assert_equal(x, paired_dataset["x_ozone"])
+        xr.testing.assert_equal(y, paired_dataset["y_ozone"])
+        assert x.attrs["axis"] == "x"
+        assert x.attrs["source_label"] == "airnow"
+        assert y.attrs["axis"] == "y"
+        assert y.attrs["source_label"] == "cmaq"
 
     def test_n_points(self, paired_dataset: xr.Dataset) -> None:
         """Test counting data points."""

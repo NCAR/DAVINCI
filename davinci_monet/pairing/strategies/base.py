@@ -6,6 +6,7 @@ must inherit from, along with common utility functions.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -21,6 +22,8 @@ from davinci_monet.core.coordinates import (
 from davinci_monet.core.exceptions import InterpolationError, PairingError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.types import TimeDelta
+
+_logger = logging.getLogger(__name__)
 
 
 class BasePairingStrategy(ABC):
@@ -351,10 +354,23 @@ class BasePairingStrategy(ABC):
             if time_tolerance is not None:
                 # Reindex (not sel) so out-of-tolerance targets become NaN
                 # rather than snapping to a far-away time.
+                tolerance = pd.Timedelta(time_tolerance)
+                target_index = pd.Index(np.asarray(target_times.values))
+                matched = data.get_index("time").get_indexer(
+                    target_index, method="nearest", tolerance=tolerance
+                )
+                masked = int(np.count_nonzero(matched == -1))
+                if masked:
+                    _logger.warning(
+                        "time tolerance %s masked %d of %d target times",
+                        time_tolerance,
+                        masked,
+                        target_index.size,
+                    )
                 return data.reindex(
                     time=target_times.values,
                     method="nearest",
-                    tolerance=pd.Timedelta(time_tolerance),
+                    tolerance=tolerance,
                 )
             # Select nearest times and assign target times as coordinate.
             # This ensures alignment when combining sources.

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from davinci_monet.stats.calculator import MONTH_TO_METEOROLOGICAL_SEASON
+
 
 class _WindowSpec(Protocol):
     @property
@@ -37,8 +39,11 @@ def _label_time(value: Any, freq: str) -> str:
     if freq == "month":
         return f"{year:04d}-{month:02d}"
     if freq == "season":
-        quarter = ((month - 1) // 3) + 1
-        return f"{year}-Q{quarter}"
+        season = MONTH_TO_METEOROLOGICAL_SEASON[month]
+        # December belongs to the following year's DJF (e.g. Dec 2008 -> 2009-DJF),
+        # matching the meteorological convention in stats/calculator.py.
+        season_year = year + 1 if month == 12 else year
+        return f"{season_year}-{season}"
     return "all"
 
 

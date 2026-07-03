@@ -166,7 +166,13 @@ class TestTemporalAveraging:
 
         assert "no2_column" in result.data_vars
         assert "o3_column" in result.data_vars
-        assert "sample_count" in result.data_vars
+
+        # With more than one data variable, the diagnostic count is emitted
+        # per variable rather than as a single (potentially misleading)
+        # shared "sample_count".
+        assert "sample_count" not in result.data_vars
+        assert "sample_count_no2_column" in result.data_vars
+        assert "sample_count_o3_column" in result.data_vars
 
         # Both variables should be resampled
         assert len(result["no2_column"]) == 4
@@ -187,7 +193,11 @@ class TestTemporalAveraging:
 
         assert np.isnan(result["no2_column"].isel(time=0))
         assert result["o3_column"].isel(time=0).item() == pytest.approx(12.5)
-        assert result["sample_count"].isel(time=0).item() == 6
+
+        # Per-variable sample counts describe each variable's own coverage,
+        # not a max-across-variables value that overstates the sparser one.
+        assert result["sample_count_no2_column"].isel(time=0).item() == 1
+        assert result["sample_count_o3_column"].isel(time=0).item() == 6
 
 
 class TestTemporalAveragingEdgeCases:

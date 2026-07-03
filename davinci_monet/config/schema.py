@@ -21,7 +21,7 @@ class StrictSchema(
     validate_default=True,
     str_strip_whitespace=True,
 ):
-    """Base dataset with strict validation settings."""
+    """Base model with strict validation settings."""
 
 
 class FlexibleSchema(

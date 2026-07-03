@@ -24,6 +24,29 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Season definitions
+# =============================================================================
+
+#: Meteorological (not calendar-quarter) season by month: DJF/MAM/JJA/SON.
+#: The canonical definition for season-based grouping across the package;
+#: `analysis/gridded_reductions.py` imports this to stay in sync.
+MONTH_TO_METEOROLOGICAL_SEASON: dict[int, str] = {
+    12: "DJF",
+    1: "DJF",
+    2: "DJF",
+    3: "MAM",
+    4: "MAM",
+    5: "MAM",
+    6: "JJA",
+    7: "JJA",
+    8: "JJA",
+    9: "SON",
+    10: "SON",
+    11: "SON",
+}
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -271,14 +294,28 @@ class StatisticsCalculator:
             x_grouped = x_data.groupby(coord, squeeze=False)
             y_grouped = y_data.groupby(coord, squeeze=False)
 
+        y_by_key = dict(y_grouped)
+
         results = []
-        for (x_key, x_group), (_, y_group) in zip(x_grouped, y_grouped):
+        for x_key, x_group in x_grouped:
+            if x_key not in y_by_key:
+                raise StatisticsError(
+                    f"Grouped stats for '{name}': key {x_key!r} present in x but missing from y"
+                )
+            y_group = y_by_key.pop(x_key)
+
             x = x_group.values.flatten()
             y = y_group.values.flatten()
 
             row = {name: x_key}
             row.update(self._compute_metrics(x, y, metrics, **kwargs))
             results.append(row)
+
+        if y_by_key:
+            extra_key = next(iter(y_by_key))
+            raise StatisticsError(
+                f"Grouped stats for '{name}': key {extra_key!r} present in y but missing from x"
+            )
 
         df = pd.DataFrame(results)
         if self.config.round_precision is not None:
@@ -339,22 +376,7 @@ class StatisticsCalculator:
                     elif accessor == "dayofweek":
                         df[name] = df["time"].dt.dayofweek
                     elif accessor == "season":
-                        df[name] = df["time"].dt.month.map(
-                            {
-                                12: "DJF",
-                                1: "DJF",
-                                2: "DJF",
-                                3: "MAM",
-                                4: "MAM",
-                                5: "MAM",
-                                6: "JJA",
-                                7: "JJA",
-                                8: "JJA",
-                                9: "SON",
-                                10: "SON",
-                                11: "SON",
-                            }
-                        )
+                        df[name] = df["time"].dt.month.map(MONTH_TO_METEOROLOGICAL_SEASON)
             group_cols.append(name)
 
         # Group and compute

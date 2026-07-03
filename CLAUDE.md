@@ -6,7 +6,7 @@ A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air 
 
 ---
 
-**Session Reminder**: Agentic AI coding is cognitively intense - you're managing a fast-moving collaborator while maintaining your own mental dataset. Remember to:
+**Session Reminder**: Agentic AI coding is cognitively intense - you're managing a fast-moving collaborator while maintaining your own mental model. Remember to:
 - Take breaks between major tasks (stretch, move around)
 - Step away when stuck - insights often come when you're not at the keyboard
 - You control the pace - slow down when needed
@@ -22,13 +22,13 @@ A modern, type-safe Python toolkit for evaluating atmospheric chemistry and air 
 
 ---
 
-## Cross-Dataset Handoff Convention
+## Cross-Model Handoff Convention
 
-This repo uses **cross-dataset code reviews and hand-offs** (e.g., Claude Opus writes implementation, Codex reviews, then back). Handoff files follow a consistent structure so any agent can pick up context quickly.
+This repo uses **cross-model code reviews and hand-offs** (e.g., Claude Opus writes implementation, Codex reviews, then back). Handoff files follow a consistent structure so any agent can pick up context quickly.
 
 ### Handoff File Format
 
-Use `REVIEW_<DATASET>.md` or `HANDOFF_<TOPIC>.md` in the repo root. Structure:
+Use `REVIEW_<MODEL>.md` or `HANDOFF_<TOPIC>.md` in the repo root. Structure:
 
 ```markdown
 ## Context
@@ -38,10 +38,10 @@ Branch, task description, which files are involved
 What was done, with file paths and line links
 
 ## Decisions & Rationale
-Why choices were made — prevents the next dataset from undoing or redoing work
+Why choices were made — prevents the next model from undoing or redoing work
 
 ## Open Questions / Concerns
-Things the next dataset should investigate or address
+Things the next model should investigate or address
 
 ## Suggested Next Steps
 Specific actionable items
@@ -93,7 +93,7 @@ CESM uses hybrid sigma-pressure coordinates where **pressure increases with leve
 - `lev=0` → **Top of Atmosphere** (stratosphere, ~3 hPa)
 - `lev=-1` (last index) → **Surface** (highest pressure, ~1000 hPa)
 
-**Common symptom**: Dataset O3 values of 5000-10000 ppb (stratospheric) instead of 30-80 ppb (surface).
+**Common symptom**: Model O3 values of 5000-10000 ppb (stratospheric) instead of 30-80 ppb (surface).
 
 **The fix** is single-sourced in `_extract_surface()` in `pairing/strategies/base.py` (the live pairing path). Spatial renderers that slice a vertical level use the matching `surface_level_index()` helper in `plots/renderers/spatial/base.py` so map overlays default to the surface, not the top of atmosphere:
 ```python

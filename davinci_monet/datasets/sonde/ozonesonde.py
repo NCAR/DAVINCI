@@ -71,6 +71,33 @@ def _mask_missing_values(df: pd.DataFrame, sentinels: set[float]) -> pd.DataFram
     return result
 
 
+_SHADOZ_OZONE_FLOOR = 9000.0
+
+
+def _is_shadoz_ozone_column(name: str) -> bool:
+    """Identify SHADOZ ozone mixing-ratio/partial-pressure columns by name."""
+    lowered = name.lower()
+    return "o3" in lowered or "ozone" in lowered
+
+
+def _apply_shadoz_ozone_floor(df: pd.DataFrame) -> pd.DataFrame:
+    """Mask SHADOZ ozone-column values >= 9000, the SHADOZ missing-data floor.
+
+    SHADOZ files additionally use values >= 9000 as a missing-data floor in
+    ozone mixing-ratio/partial-pressure columns, independent of the header's
+    declared missing-value code (e.g. 9005 or 9999 in an ``O3`` column are
+    fills even when only ``-9999`` is declared). Altitude/geopotential-height
+    columns legitimately exceed 9000 and are never floored; pressure columns
+    are never floored either.
+    """
+    result = df.copy()
+    for column in result.columns:
+        if _is_shadoz_ozone_column(column) and pd.api.types.is_numeric_dtype(result[column]):
+            values = result[column].to_numpy(dtype=float, copy=False)
+            result[column] = result[column].mask(values >= _SHADOZ_OZONE_FLOOR)
+    return result
+
+
 @source_registry.register("ozonesonde")
 class OzonesondeReader:
     """Reader for ozonesonde vertical profile datasets.
@@ -339,6 +366,7 @@ class OzonesondeReader:
 
         df = pd.DataFrame(data_rows, columns=headers[: len(data_rows[0])])
         df = _mask_missing_values(df, missing_values)
+        df = _apply_shadoz_ozone_floor(df)
         df["level"] = range(len(df))
         df = df.set_index("level")
 

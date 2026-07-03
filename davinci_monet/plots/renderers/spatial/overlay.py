@@ -173,6 +173,9 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
             # Already 2D
             lon_grid, lat_grid = y_lons, y_lats
 
+        # ContourSet does not support rasterization in the pinned matplotlib
+        # (<3.9): both the constructor kwarg and set_rasterized() raise a
+        # UserWarning, so this filled layer stays vector.
         contour = ax.contourf(
             lon_grid,
             lat_grid,
@@ -225,6 +228,7 @@ class SpatialOverlayPlotter(BaseSpatialPlotter):
             edgecolors=x_edgecolor,
             linewidths=x_linewidth,
             zorder=5,
+            rasterized=True,
         )
 
         # Add colorbar. The contour and scatter share this scale, so the label

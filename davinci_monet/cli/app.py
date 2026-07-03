@@ -76,12 +76,11 @@ def _get_system_info() -> str:
             pass
     elif platform.system() == "Linux":
         # Linux: parse /proc/cpuinfo
+        from davinci_monet.util.system import _cpu_name_from_cpuinfo
+
         try:
             with open("/proc/cpuinfo") as f:
-                for line in f:
-                    if line.startswith("model name"):
-                        cpu_name = line.split(":")[1].strip()
-                        break
+                cpu_name = _cpu_name_from_cpuinfo(f.read())
         except Exception:
             pass
 

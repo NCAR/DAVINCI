@@ -52,8 +52,11 @@ def altitude_to_pressure(
 
     exponent = g * M / (R * L)  # ≈ 5.2559
 
-    # Barometric formula
-    pressure = P0 * (1 - L * altitude_m / T0) ** exponent
+    # Barometric formula. Above ~44.3 km the base goes negative, and raising
+    # a negative base to this fractional exponent yields NaN; clamp the base
+    # at 0.0 so pressure saturates at 0 for very high altitudes instead.
+    base = np.maximum(1 - L * altitude_m / T0, 0.0)
+    pressure = P0 * base**exponent
 
     return pressure
 

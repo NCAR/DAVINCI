@@ -525,6 +525,72 @@ class TestPairingStage:
         assert "keep" in ctx.paired
         assert ctx.metadata["pairing_errors"] == ["bad: forced pair failure"]
 
+    def test_time_tolerance_masks_out_of_range_targets_warns(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Time-tolerance masking of at least one target time emits a counted warning."""
+        import logging
+
+        from davinci_monet.pairing.strategies.point import PointStrategy
+
+        data = xr.Dataset(
+            {"o3": ("time", np.array([20.0, 21.0]))},
+            coords={"time": pd.to_datetime(["2024-01-01T00:00", "2024-01-01T01:00"])},
+        )
+        targets = xr.DataArray(
+            pd.to_datetime(["2024-01-01T12:00", "2024-01-01T00:30"]), dims="time"
+        )
+
+        # The davinci_monet package logger may have propagate=False (set by a
+        # prior configure_logging() call in another test in the full suite),
+        # which keeps records from reaching caplog's root handler. Attach
+        # caplog's handler to the emitting logger directly so capture is robust
+        # to that global logging state.
+        pairing_logger = logging.getLogger("davinci_monet.pairing.strategies.base")
+        pairing_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.WARNING, logger=pairing_logger.name):
+                PointStrategy()._interpolate_time(
+                    data, targets, method="nearest", time_tolerance="1h"
+                )
+        finally:
+            pairing_logger.removeHandler(caplog.handler)
+
+        assert "time tolerance 1h masked 1 of 2 target times" in caplog.text
+
+    def test_time_tolerance_within_range_no_warning(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """A fully-within-tolerance alignment masks nothing and warns nothing."""
+        import logging
+
+        from davinci_monet.pairing.strategies.point import PointStrategy
+
+        data = xr.Dataset(
+            {"o3": ("time", np.array([20.0, 21.0]))},
+            coords={"time": pd.to_datetime(["2024-01-01T00:00", "2024-01-01T01:00"])},
+        )
+        targets = xr.DataArray(
+            pd.to_datetime(["2024-01-01T00:20", "2024-01-01T00:50"]), dims="time"
+        )
+
+        # Attach caplog's handler to the emitting logger directly so capture is
+        # robust to a global propagate=False set by another test's
+        # configure_logging() call (see the masked-warning test above).
+        pairing_logger = logging.getLogger("davinci_monet.pairing.strategies.base")
+        pairing_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.WARNING, logger=pairing_logger.name):
+                PointStrategy()._interpolate_time(
+                    data, targets, method="nearest", time_tolerance="1h"
+                )
+        finally:
+            pairing_logger.removeHandler(caplog.handler)
+
+        assert "masked" not in caplog.text
+
 
 class TestStatisticsStage:
     """Tests for StatisticsStage."""
@@ -647,22 +713,31 @@ class TestStatisticsStage:
 
     def test_stats_item_error_completes_with_warning(
         self,
-        context_with_paired: PipelineContext,
+        sample_paired_dataset: xr.Dataset,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Per-pair stats errors should complete the stage with warning metadata."""
+        """A per-pair stats error is a warning as long as another pair succeeds."""
+        ctx = PipelineContext(
+            config={"stats": {"metrics": ["N", "MB"]}},
+            paired={"bad": sample_paired_dataset, "keep": sample_paired_dataset.copy()},
+        )
         stage = StatisticsStage()
+        calls = {"n": 0}
 
-        def _raise(*args: Any, **kwargs: Any) -> dict[str, Any]:
-            raise RuntimeError("forced stats failure")
+        def _selective(paired_data: Any, stats_cfg: Any) -> dict[str, Any]:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("forced stats failure")
+            return {"o3": {"N": 1, "MB": 0.0}}
 
-        monkeypatch.setattr(stage, "_calculate_stats", _raise)
+        monkeypatch.setattr(stage, "_calculate_stats", _selective)
 
-        result = stage.execute(context_with_paired)
+        result = stage.execute(ctx)
 
         assert result.status == StageStatus.COMPLETED
         assert result.error is None
-        assert context_with_paired.metadata["stats_errors"]
+        assert ctx.metadata["stats_errors"]
+        assert "keep" in result.data
 
     def test_domain_filter_restricts_stats_to_conus(self):
         """Stats config domain_type / domain_name must filter paired_data before metrics.
@@ -832,18 +907,34 @@ class TestPlottingStage:
     def test_missing_plot_pair_completes_with_warning(
         self,
         context_with_paired: PipelineContext,
+        tmp_path: Any,
+        monkeypatch: pytest.MonkeyPatch,
     ):
-        """A missing plot data reference is collected as warning metadata."""
+        """A missing plot data reference is a warning while another plot renders."""
         context_with_paired.config = {
-            "analysis": {"output_dir": "."},
-            "plots": {"scatter": {"type": "scatter", "pairs": ["missing_pair"]}},
+            "analysis": {"output_dir": str(tmp_path)},
+            "plots": {
+                "good": {"type": "scatter", "pairs": ["test_dataset_test_geometry"]},
+                "bad": {"type": "scatter", "pairs": ["missing_pair"]},
+            },
         }
+        stage = PlottingStage()
 
-        result = PlottingStage().execute(context_with_paired)
+        def _fake_render_pair(
+            *, pair_name: str, file_index: int, plots_generated: list[str], **kwargs: Any
+        ) -> int:
+            if pair_name == "missing_pair":
+                raise RuntimeError("Pair 'missing_pair' not found")
+            plots_generated.append(str(tmp_path / f"{pair_name}.png"))
+            return file_index + 1
+
+        monkeypatch.setattr(stage, "_render_pair", _fake_render_pair)
+
+        result = stage.execute(context_with_paired)
 
         assert result.status == StageStatus.COMPLETED
         assert result.error is None
-        assert "missing_pair" in context_with_paired.metadata["plot_errors"][0]
+        assert any("missing_pair" in e for e in context_with_paired.metadata["plot_errors"])
 
     def test_labeled_render_results_are_saved_without_legacy_split_helpers(
         self,
@@ -1165,8 +1256,9 @@ class TestPipelineRunner:
         self,
         context_with_paired: PipelineContext,
         tmp_path: Any,
+        monkeypatch: pytest.MonkeyPatch,
     ):
-        """Per-item plotting warnings do not stop later stages."""
+        """Per-item plotting warnings (with a surviving plot) do not stop later stages."""
 
         class MarkerStage(BaseStage):
             def execute(self, context: PipelineContext) -> StageResult:
@@ -1175,10 +1267,24 @@ class TestPipelineRunner:
 
         context_with_paired.config = {
             "analysis": {"output_dir": str(tmp_path)},
-            "plots": {"scatter": {"type": "scatter", "pairs": ["missing_pair"]}},
+            "plots": {
+                "good": {"type": "scatter", "pairs": ["test_dataset_test_geometry"]},
+                "bad": {"type": "scatter", "pairs": ["missing_pair"]},
+            },
         }
+        plotting = PlottingStage()
+
+        def _fake_render_pair(
+            *, pair_name: str, file_index: int, plots_generated: list[str], **kwargs: Any
+        ) -> int:
+            if pair_name == "missing_pair":
+                raise RuntimeError("Pair 'missing_pair' not found")
+            plots_generated.append(str(tmp_path / f"{pair_name}.png"))
+            return file_index + 1
+
+        monkeypatch.setattr(plotting, "_render_pair", _fake_render_pair)
         runner = PipelineRunner(
-            stages=[PlottingStage(), MarkerStage(name="marker")],
+            stages=[plotting, MarkerStage(name="marker")],
             fail_fast=True,
             show_progress=False,
         )

@@ -202,6 +202,7 @@ def draw_spatial_field(
             **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
+            rasterized=True,
         )
     if plot_type == "pcolormesh" and lats.ndim == 1 and data.ndim >= 2:
         # Regular grid with 1-D coords — pcolormesh handles natively
@@ -213,6 +214,7 @@ def draw_spatial_field(
             **color_kwargs,
             transform=ccrs.PlateCarree(),
             alpha=alpha,
+            rasterized=True,
         )
     # Point/track/site data — scatter
     return ax.scatter(
@@ -224,6 +226,7 @@ def draw_spatial_field(
         transform=ccrs.PlateCarree(),
         alpha=alpha,
         edgecolors="none",
+        rasterized=True,
     )
 
 

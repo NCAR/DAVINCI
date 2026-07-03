@@ -6,7 +6,9 @@ including NetCDF and pickle.
 
 from __future__ import annotations
 
+import os
 import pickle
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +57,7 @@ def write_dataset(
         if suffix in (".pkl", ".pickle"):
             write_pickle(ds, path)
         elif suffix == ".zarr":
-            ds.to_zarr(str(path), **kwargs)
+            _write_zarr(ds, path, **kwargs)
         else:
             # Default to NetCDF
             if engine is None:
@@ -71,9 +73,50 @@ def write_dataset(
                     encoding[var].setdefault("complevel", 4)
                 kwargs["encoding"] = encoding
 
-            ds.to_netcdf(str(path), engine=engine, **kwargs)  # type: ignore[call-overload]
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            try:
+                ds.to_netcdf(str(tmp_path), engine=engine, **kwargs)  # type: ignore[call-overload]
+                os.replace(tmp_path, path)
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
     except Exception as e:
         raise DataFormatError(f"Failed to write {path}: {e}") from e
+
+
+def _write_zarr(ds: xr.Dataset, path: Path, **kwargs: Any) -> None:
+    """Write a dataset to a Zarr store, swapping it into place best-effort.
+
+    Zarr stores are directories, so unlike the file writers this cannot use
+    a single atomic ``os.replace``: an existing target directory must be
+    removed before the temp directory can take its place, leaving a brief
+    window where nothing valid exists at ``path``. The swap is therefore
+    best-effort rather than atomic. The write itself still lands entirely
+    in a temp directory first, so a crash during writing never truncates
+    or corrupts an existing store.
+
+    Parameters
+    ----------
+    ds
+        Dataset to write.
+    path
+        Output Zarr store path.
+    **kwargs
+        Additional arguments passed to ``xr.Dataset.to_zarr``.
+    """
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    if tmp_path.exists():
+        shutil.rmtree(tmp_path)
+
+    try:
+        ds.to_zarr(str(tmp_path), **kwargs)
+    except Exception:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+        raise
+
+    if path.exists():
+        shutil.rmtree(path)
+    os.replace(tmp_path, path)
 
 
 def write_pickle(
@@ -95,8 +138,11 @@ def write_pickle(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        with open(path, "wb") as f:
+        with open(tmp_path, "wb") as f:
             pickle.dump(data, f, protocol=protocol)
+        os.replace(tmp_path, path)
     except Exception as e:
+        tmp_path.unlink(missing_ok=True)
         raise DataFormatError(f"Failed to write pickle {path}: {e}") from e
