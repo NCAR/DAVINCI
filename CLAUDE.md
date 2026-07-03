@@ -62,6 +62,12 @@ Specific actionable items
 
 - **NEVER auto commit or push**: Do NOT commit or push changes until the user explicitly confirms
 - **Hold off on merge to main**: Do NOT merge to `main` until the user has verified the runs and explicitly asks for a merge
+- **Merge to main with fast-forward only**: Merge `develop` into `main` using `git merge --ff-only develop` (never `--no-ff`). `--no-ff` creates a merge commit on `main` that `develop` lacks, which makes the branches diverge and blocks the next fast-forward. Keeping merges linear keeps `main` and `develop` pointing at the same commit.
+  ```bash
+  git checkout main && git merge --ff-only develop && git push origin main
+  git checkout develop   # then return to develop (below)
+  ```
+  If a fast-forward ever fails ("Not possible to fast-forward"), the branches have diverged — realign by fast-forwarding the behind branch up to the ahead one (after confirming `git diff main develop` is empty) rather than reaching for `--no-ff`.
 - **After merge, return to develop**: Always switch back to `develop` branch after merging to `main`
 
 ---
