@@ -79,8 +79,10 @@ A modern, type-safe Python toolkit for evaluating climate and atmospheric compos
 # Install from environment file
 git clone https://github.com/NCAR/DAVINCI.git
 cd DAVINCI
-conda env create -f environment.yml
-conda activate davinci
+mamba env create -f environment.yml
+mamba activate davinci
+python -m pip install --no-deps pycwt==0.4.0b0
+python -m pip install --no-deps -e .
 
 # Run analysis
 davinci-monet run config.yaml
@@ -110,7 +112,7 @@ plots and write a structured markdown brief (`AI_summary.md`) into the output
 directory. Requires the `[ai]` extra and an Anthropic API key.
 
 ```bash
-pip install -e ".[ai]"
+python -m pip install --no-deps -e ".[ai]"
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
@@ -219,11 +221,17 @@ Obs Files ────► Obs Reader ───► xr.Dataset ──┘         �
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11+; the development environment targets Python 3.13
 - Core: xarray, numpy, pandas, matplotlib, cartopy
 - I/O: netCDF4, monet, monetio
 - Config: pydantic, pyyaml
 - CLI: typer
+
+DAVINCI's scientific stack is conda-first. Install pip packages with
+`--no-deps` so pip does not overlay conda-forge builds of NumPy, pandas,
+xarray, Matplotlib, Cartopy, MONET, MONETIO, netCDF4, or numba. PyCWT
+`0.4.0b0` is installed manually for wavelet analysis; its package metadata
+still declares `numpy<2`, but DAVINCI's NumPy 2.4 runtime smoke tests pass.
 
 ## Citation
 

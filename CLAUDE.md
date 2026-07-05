@@ -80,6 +80,8 @@ These are standing directives for any agent or contributor running this project:
   ```bash
   source ~/miniconda3/etc/profile.d/conda.sh
   conda activate davinci
+  python -m pip install --no-deps pycwt==0.4.0b0
+  python -m pip install --no-deps -e .
   HDF5_USE_FILE_LOCKING=FALSE python -m pytest
   ```
 
@@ -147,8 +149,10 @@ else:
 # Activate conda environment
 conda activate davinci
 
-# Install in development mode
-pip install -e ".[dev]"
+# Install pip packages without dependency resolution so pip cannot overlay
+# the conda-forge scientific stack
+python -m pip install --no-deps pycwt==0.4.0b0
+python -m pip install --no-deps -e .
 
 # Run tests
 pytest
@@ -166,9 +170,17 @@ black davinci_monet && isort davinci_monet
 
 **Create from environment.yml**:
 ```bash
-conda env create -f environment.yml
-conda activate davinci
+mamba env create -f environment.yml
+mamba activate davinci
+python -m pip install --no-deps pycwt==0.4.0b0
+python -m pip install --no-deps -e .
 ```
+
+Use `--no-deps` for pip installs so pip does not replace conda-forge builds of
+NumPy, pandas, xarray, Matplotlib, Cartopy, MONET, MONETIO, netCDF4, numba, or
+related compiled packages. PyCWT `0.4.0b0` is installed manually for wavelet
+analysis; its metadata still declares `numpy<2`, but the NumPy 2.4 runtime smoke
+test passes.
 
 **Key packages**:
 - monet, monetio - atmospheric data I/O
