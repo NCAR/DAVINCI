@@ -6,6 +6,10 @@ composition models and datasets against observations.
 
 from __future__ import annotations
 
+from davinci_monet.runtime_warnings import apply_runtime_warning_filters
+
+apply_runtime_warning_filters()
+
 # Single display version for the toolkit. Kept in lock-step with the
 # ``version`` field in pyproject.toml and the top entry of CHANGELOG.md; the
 # packaging metadata test (tests/unit/test_packaging_metadata.py) fails if they
