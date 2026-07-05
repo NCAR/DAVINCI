@@ -5,7 +5,9 @@ This module implements the configuration validation command.
 
 from __future__ import annotations
 
+from glob import glob
 from pathlib import Path
+from typing import Iterable
 
 import typer
 
@@ -16,6 +18,87 @@ from davinci_monet.cli.app import (
     display_error,
 )
 from davinci_monet.core.exceptions import ConfigurationError
+
+
+def _iter_source_paths(value: str | Path | list[str | Path] | None) -> Iterable[Path]:
+    """Yield configured source paths, preserving glob patterns."""
+    if value is None:
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield Path(item)
+        return
+    yield Path(value)
+
+
+def _resolve_config_path(path: Path, config_dir: Path) -> Path:
+    """Resolve relative source paths against the config file directory."""
+    if path.is_absolute():
+        return path
+    return config_dir / path
+
+
+def _path_has_glob(path: Path) -> bool:
+    return any(char in path.as_posix() for char in "*?[]")
+
+
+def _validate_declared_source_paths(config: object, config_dir: Path) -> None:
+    """Reject configured source paths that do not exist."""
+    sources = getattr(config, "sources", {})
+    for source_name, source_cfg in sources.items():
+        for field_name in ("files", "filename"):
+            raw_value = getattr(source_cfg, field_name, None)
+            for raw_path in _iter_source_paths(raw_value):
+                path = _resolve_config_path(raw_path.expanduser(), config_dir)
+                if _path_has_glob(path):
+                    if not glob(path.as_posix()):
+                        raise ConfigurationError(
+                            f"sources.{source_name}.{field_name} matched no files: {path}"
+                        )
+                elif not path.exists():
+                    raise ConfigurationError(
+                        f"sources.{source_name}.{field_name} does not exist: {path}"
+                    )
+
+
+def _validate_registered_source_types(config: object) -> None:
+    """Reject source types not registered with DAVINCI."""
+    import davinci_monet.datasets  # noqa: F401  # ensure built-in readers register
+    from davinci_monet.core.registry import source_registry
+
+    sources = getattr(config, "sources", {})
+    for source_name, source_cfg in sources.items():
+        source_type = getattr(source_cfg, "type", None)
+        if not source_type:
+            raise ConfigurationError(f"sources.{source_name}.type is required")
+        if source_type not in source_registry:
+            available = ", ".join(sorted(source_registry))
+            raise ConfigurationError(
+                f"sources.{source_name}.type {source_type!r} is not registered. "
+                f"Available source types: {available}"
+            )
+
+
+def _validate_analysis_window(config: object) -> None:
+    """Reject missing or inverted analysis windows in CLI control files."""
+    analysis = getattr(config, "analysis", None)
+    if analysis is None:
+        raise ConfigurationError("analysis section is required")
+    start_time = getattr(analysis, "start_time", None)
+    end_time = getattr(analysis, "end_time", None)
+    if start_time is None:
+        raise ConfigurationError("analysis.start_time is required")
+    if end_time is None:
+        raise ConfigurationError("analysis.end_time is required")
+    if end_time <= start_time:
+        raise ConfigurationError("analysis.end_time must be after analysis.start_time")
+
+
+def _validate_control_file_semantics(config: object, config_path: Path) -> None:
+    """Run semantic checks expected from ``davinci-monet validate``."""
+    _validate_analysis_window(config)
+    _validate_registered_source_types(config)
+    _validate_declared_source_paths(config, config_path.parent)
 
 
 def validate_config_command(
@@ -47,6 +130,7 @@ def validate_config_command(
 
         # Parse and validate.
         config = load_config(p, strict=strict)
+        _validate_control_file_semantics(config, p)
 
         # Report what was found
         typer.echo()

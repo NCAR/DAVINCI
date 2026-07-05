@@ -249,6 +249,8 @@ class TestCLIValidate:
     @pytest.fixture
     def valid_config(self, tmp_path: Path) -> Path:
         """Create a valid minimal configuration file (unified sources schema)."""
+        (tmp_path / "test.nc").touch()
+        (tmp_path / "geometry.nc").touch()
         config_content = """
 analysis:
   start_time: 2024-01-01
@@ -719,6 +721,8 @@ class TestCLICommands:
     @pytest.fixture
     def complete_config(self, tmp_path: Path) -> Path:
         """Create a complete configuration file."""
+        (tmp_path / "dataset.nc").touch()
+        (tmp_path / "geometry.nc").touch()
         config_content = """
 analysis:
   start_time: 2024-01-01
