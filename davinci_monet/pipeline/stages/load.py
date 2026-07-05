@@ -353,6 +353,8 @@ class LoadSourcesStage(BaseStage):
                 arr.attrs["units"] = cfg["units"]
             elif orig_units and scale_is_identity and not arr.attrs.get("units"):
                 arr.attrs["units"] = orig_units
+            elif orig_units and not scale_is_identity and arr.attrs.get("units") == orig_units:
+                del arr.attrs["units"]
             if cfg.get("display_name"):
                 arr.attrs["display_name"] = cfg["display_name"]
             ds[var_name] = arr

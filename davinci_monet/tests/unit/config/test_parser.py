@@ -330,15 +330,13 @@ class TestValidateConfig:
             ConfigurationError,
             match=r"analysis\.extra_field",
         ):
-            load_config(
-                """
+            load_config("""
 analysis:
   extra_field: nope
 sources:
   cam:
     type: generic
-"""
-            )
+""")
 
     def test_default_rejects_extra_analysis_field(self) -> None:
         """Default validation rejects unknown core fields."""

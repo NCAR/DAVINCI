@@ -33,6 +33,7 @@ dependencies:
   # Plotting
   - matplotlib=3.11.*
   - seaborn=0.13.*
+  - poppler
 
   # Configuration/CLI/AI support
   - pydantic

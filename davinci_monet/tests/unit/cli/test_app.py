@@ -317,8 +317,7 @@ sources:
     def test_validate_strict_mode_rejects_core_extra_field(self, tmp_path: Path) -> None:
         """The --strict flag changes validation behavior."""
         config_file = tmp_path / "config_extra.yaml"
-        config_file.write_text(
-            """
+        config_file.write_text("""
 analysis:
   start_time: 2024-01-01
   end_time: 2024-01-02
@@ -327,8 +326,7 @@ analysis:
 sources:
   test_dataset:
     type: generic
-"""
-        )
+""")
 
         from typer.testing import CliRunner
 
@@ -471,10 +469,10 @@ class TestGetDataCommands:
 
         ds = _dataframe_to_xarray(df, daily=False)
 
-        assert tuple(ds.sizes.keys()) == ("time", "y", "x")
         assert ds.sizes["time"] == 3
         assert ds.sizes["y"] == 1
         assert ds.sizes["x"] == 2
+        assert ds["OZONE"].dims == ("time", "y", "x")
         assert "OZONE" in ds.data_vars
         assert "PM2.5" in ds.data_vars
         assert ds["OZONE"].attrs.get("units") == "ppb"

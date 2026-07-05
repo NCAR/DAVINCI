@@ -73,8 +73,7 @@ def synthetic_data(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     output_dir = tmp_path / "output"
     log_dir = tmp_path / "logs"
 
-    config_text = textwrap.dedent(
-        f"""\
+    config_text = textwrap.dedent(f"""\
         analysis:
           start_time: "2024-01-15"
           end_time: "2024-01-16"
@@ -118,8 +117,7 @@ def synthetic_data(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 
         stats:
           metrics: [N, MB, RMSE]
-    """
-    )
+    """)
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(config_text)
@@ -174,15 +172,11 @@ class TestCLIRunE2E:
         from typer.testing import CliRunner
 
         config_path = tmp_path / "bad.yaml"
-        config_path.write_text(
-            textwrap.dedent(
-                """\
+        config_path.write_text(textwrap.dedent("""\
             analysis:
               start_time: not-a-date
               end_time: also-not-a-date
-        """
-            )
-        )
+        """))
 
         runner = CliRunner()
         result = runner.invoke(app, ["run", str(config_path)])

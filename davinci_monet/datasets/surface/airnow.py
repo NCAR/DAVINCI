@@ -244,7 +244,9 @@ def _dataframe_to_xarray(df: pd.DataFrame, daily: bool = False) -> xr.Dataset:
             ds[vn].attrs["units"] = u
 
     if not daily and "utcoffset" in ds.data_vars:
-        ds["time_local"] = ds.time + ds.utcoffset.astype("timedelta64[h]")
+        ds["time_local"] = (ds.time + ds.utcoffset.astype("timedelta64[h]")).astype(
+            "datetime64[ns]"
+        )
 
     ds = ds.expand_dims("y").transpose("time", "y", "x")
 
