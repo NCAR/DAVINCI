@@ -62,7 +62,7 @@ class PlotSuiteStage(BaseStage):
             expanded = expand_plot_suite(
                 suite_name,
                 suite,
-                available_fields=list(ds.data_vars),
+                available_fields=[str(name) for name in ds.data_vars],
                 field_metadata=field_metadata,
             )
             plots.update(expanded)

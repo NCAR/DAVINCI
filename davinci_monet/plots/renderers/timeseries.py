@@ -342,7 +342,7 @@ class TimeSeriesPlotter(BasePlotter):
 
             sdim = aggregate_dim if (aggregate_dim in non_time_dims) else non_time_dims[0]
             n = ds.sizes[sdim]
-            palette = cm.tab20(np.linspace(0, 1, min(n, 20)))  # type: ignore[attr-defined]
+            palette = cm.tab20(np.linspace(0, 1, min(n, 20)))
             for i in range(n):
                 ax.plot(
                     time_values,
@@ -400,9 +400,7 @@ class TimeSeriesPlotter(BasePlotter):
 
         if show_altitude and alt_coord in ds.coords:
             ax2 = ax.twinx()
-            ax2.plot(  # type: ignore[attr-defined]
-                time_values, ds[alt_coord].values, color="#AAAAAA", linewidth=0.8, alpha=0.6
-            )
+            ax2.plot(time_values, ds[alt_coord].values, color="#AAAAAA", linewidth=0.8, alpha=0.6)
             alt_units = ds[alt_coord].attrs.get("units", "")
             ax2.set_ylabel(
                 f"Altitude ({alt_units})" if alt_units else "Altitude",
@@ -512,15 +510,16 @@ class TimeSeriesPlotter(BasePlotter):
         time_values = pd.to_datetime(paired_data[time_dim].values)
 
         # Get site labels
+        site_labels: Any
         if site_label_var in paired_data.coords:
             site_labels = paired_data[site_label_var].values
         else:
-            site_labels = [f"Site {i}" for i in range(paired_data.sizes[site_dim])]  # type: ignore[assignment]
+            site_labels = [f"Site {i}" for i in range(paired_data.sizes[site_dim])]
 
         n_sites = paired_data.sizes[site_dim]
 
         # Use a colormap for different sites
-        colors = cm.tab20(np.linspace(0, 1, min(n_sites, 20)))  # type: ignore[attr-defined]
+        colors = cm.tab20(np.linspace(0, 1, min(n_sites, 20)))
 
         # Plot each site
         for i in range(n_sites):

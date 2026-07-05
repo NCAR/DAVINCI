@@ -173,7 +173,7 @@ class SpatialPlotter(BaseSpatialPlotter):
             maybe_fig = ax.get_figure()
             if maybe_fig is None:
                 raise RuntimeError("Axes is not attached to a figure")
-            fig = maybe_fig
+            fig = cast("matplotlib.figure.Figure", maybe_fig)
         self.add_map_features(ax, map_config)
 
         extent = self._resolve_extent(domain_type, domain_name)

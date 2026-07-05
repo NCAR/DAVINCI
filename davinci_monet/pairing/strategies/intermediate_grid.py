@@ -198,7 +198,7 @@ class IntermediateGridStrategy(BasePairingStrategy):
 
         # Get x timestamps as epoch seconds, aligned to the same
         # flattening order as ``data_flat`` (i.e. the binned x variable).
-        time_flat = self._get_x_timestamps(x_data, len(data_flat), align_var=x_var)
+        time_flat = self._get_x_timestamps(x_data, len(data_flat), align_var=str(x_var))
 
         # Allocate accumulation arrays
         count_grid = np.zeros((ntime, nlon, nlat), dtype=np.int32)

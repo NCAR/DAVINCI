@@ -167,7 +167,11 @@ def test_real_ebaf_file_opens() -> None:
     assert lon.min() >= -180.0 and lon.max() < 180.0
     # Area-weighted global-mean OLR for one month must be physical.
     da = ds["toa_lw_all_mon"].isel(time=-1)
-    weights = np.cos(np.deg2rad(ds["lat"]))
+    weights = xr.DataArray(
+        np.cos(np.deg2rad(ds["lat"])).clip(min=0.0),
+        dims=ds["lat"].dims,
+        coords=ds["lat"].coords,
+    )
     gmean = float(da.weighted(weights).mean())
     assert 220.0 <= gmean <= 260.0, f"global-mean OLR {gmean:.1f} W m-2 unphysical"
 

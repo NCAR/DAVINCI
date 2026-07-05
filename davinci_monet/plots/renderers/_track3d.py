@@ -282,7 +282,7 @@ def _render_surface_map(
     fig_size = resolution / fig_dpi
     fig = plt.figure(figsize=(fig_size, fig_size), dpi=fig_dpi)
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())  # type: ignore[attr-defined]
+    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
 
     # Remove margins
     ax.set_frame_on(False)
@@ -300,9 +300,9 @@ def _render_surface_map(
         "physical", "coastline", "50m", facecolor="none", edgecolor=coastline_color
     )
 
-    ax.add_feature(ocean)  # type: ignore[attr-defined]
-    ax.add_feature(land)  # type: ignore[attr-defined]
-    ax.add_feature(coastline, linewidth=coastline_linewidth)  # type: ignore[attr-defined]
+    ax.add_feature(ocean)
+    ax.add_feature(land)
+    ax.add_feature(coastline, linewidth=coastline_linewidth)
 
     if show_borders:
         borders = cfeature.NaturalEarthFeature(
@@ -312,7 +312,7 @@ def _render_surface_map(
             facecolor="none",
             edgecolor=border_color,
         )
-        ax.add_feature(borders, linewidth=border_linewidth)  # type: ignore[attr-defined]
+        ax.add_feature(borders, linewidth=border_linewidth)
 
     ax.set_xticks([])
     ax.set_yticks([])

@@ -44,8 +44,8 @@ def _vertical_dim(da: xr.DataArray, lat: xr.DataArray, lon: xr.DataArray) -> str
 
 def _area_weight(da: xr.DataArray, lat: xr.DataArray) -> xr.DataArray:
     """sqrt(cos(lat)) broadcast over the latitude dimension."""
-    coslat = np.cos(np.deg2rad(lat)).clip(min=0.0)
-    return np.sqrt(coslat)
+    coslat = xr.DataArray(np.cos(np.deg2rad(lat)).clip(min=0.0), dims=lat.dims, coords=lat.coords)
+    return coslat**0.5
 
 
 def _layer_mass_weight(data: xr.Dataset, vdim: str) -> xr.DataArray | None:
@@ -89,7 +89,7 @@ def _fix_sign(mode: xr.DataArray, pc: xr.DataArray) -> tuple[xr.DataArray, xr.Da
 
 def _effective_n(anom: xr.DataArray, lat: xr.DataArray) -> float:
     """Effective independent sample count from the area-mean series lag-1 autocorr."""
-    coslat = np.cos(np.deg2rad(lat)).clip(min=0.0)
+    coslat = xr.DataArray(np.cos(np.deg2rad(lat)).clip(min=0.0), dims=lat.dims, coords=lat.coords)
     spatial = [d for d in anom.dims if d != "time"]
     am = anom.weighted(coslat).mean(dim=spatial)
     x = np.asarray(am.values, dtype=float)

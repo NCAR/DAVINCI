@@ -132,14 +132,11 @@ module = [
     "seaborn",
     "shapely",
     "shapely.geometry",
-    "shapely.*",
     "tqdm",
-    "tqdm.*",
     "yaml.*",
     "pyhdf",
     "pyhdf.*",
     "pycwt",
-    "pycwt.*",
     "cftime",
 ]
 ignore_missing_imports = true

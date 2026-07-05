@@ -50,7 +50,8 @@ def write_product_artifacts(
     analysis_path = root / "analysis.nc"
     summary_path = root / "summary.json"
     encoding: dict[str, dict[str, Any]] = {}
-    for name, da in ds.data_vars.items():
+    for raw_name, da in ds.data_vars.items():
+        name = str(raw_name)
         if np.issubdtype(da.dtype, np.floating):
             encoding[name] = {"dtype": "float32", "_FillValue": np.float32(np.nan)}
     _netcdf_safe_dataset(ds).to_netcdf(analysis_path, engine="netcdf4", encoding=encoding)

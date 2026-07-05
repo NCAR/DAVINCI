@@ -41,7 +41,7 @@ def select_series(data: xr.Dataset, spec: "WaveletSpec") -> xr.DataArray:
     reduce = spec.reduce
     if reduce is None or reduce == "area_mean":
         lat = _coord(da, _LAT_NAMES, "latitude")
-        w = np.cos(np.deg2rad(lat)).clip(min=0.0)
+        w = xr.DataArray(np.cos(np.deg2rad(lat)).clip(min=0.0), dims=lat.dims, coords=lat.coords)
         return da.weighted(w).mean(dim=spatial)
     if isinstance(reduce, PointReduce):
         lat = _coord(da, _LAT_NAMES, "latitude")

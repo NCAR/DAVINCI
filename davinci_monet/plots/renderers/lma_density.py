@@ -203,15 +203,15 @@ class LMADensityPlotter(BasePlotter):
         ax = fig.add_subplot(1, 1, 1, projection=projection)
 
         pad = 0.3
-        ax.set_extent(  # type: ignore[attr-defined]
+        ax.set_extent(
             [lon.min() - pad, lon.max() + pad, lat.min() - pad, lat.max() + pad],
             crs=ccrs.PlateCarree(),
         )
 
-        ax.add_feature(cfeature.LAND, facecolor="#F0F0F0", zorder=0)  # type: ignore[attr-defined]
-        ax.add_feature(cfeature.OCEAN, facecolor="white", zorder=0)  # type: ignore[attr-defined]
+        ax.add_feature(cfeature.LAND, facecolor="#F0F0F0", zorder=0)
+        ax.add_feature(cfeature.OCEAN, facecolor="white", zorder=0)
         if "states" in features:
-            ax.add_feature(  # type: ignore[attr-defined]
+            ax.add_feature(
                 cfeature.STATES,
                 edgecolor="gray",
                 linewidth=0.5,
@@ -219,7 +219,7 @@ class LMADensityPlotter(BasePlotter):
             )
         if "counties" in features:
             try:
-                ax.add_feature(  # type: ignore[attr-defined]
+                ax.add_feature(
                     cfeature.NaturalEarthFeature(
                         "cultural",
                         "admin_2_counties_lakes_shp",
@@ -234,7 +234,7 @@ class LMADensityPlotter(BasePlotter):
                 # 10m county shapefile may not be cached; fall back silently
                 pass
         if "coastlines" in features:
-            ax.add_feature(  # type: ignore[attr-defined]
+            ax.add_feature(
                 cfeature.COASTLINE,
                 edgecolor="black",
                 linewidth=0.5,
@@ -257,7 +257,7 @@ class LMADensityPlotter(BasePlotter):
         if flight_tracks:
             self._overlay_tracks(ax, flight_tracks, hour_label, **kwargs)
 
-        gl = ax.gridlines(draw_labels=True, linewidth=0.3, color="gray", alpha=0.5)  # type: ignore[attr-defined]
+        gl = ax.gridlines(draw_labels=True, linewidth=0.3, color="gray", alpha=0.5)
         gl.top_labels = False
         gl.right_labels = False
 
