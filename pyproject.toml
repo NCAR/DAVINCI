@@ -163,7 +163,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:matplotlib.*",
     "ignore::DeprecationWarning:pyparsing.*",
     "ignore:numpy.ndarray size changed:RuntimeWarning",
-    "ignore:Polyfit may be poorly conditioned:numpy.RankWarning",
+    "ignore:Polyfit may be poorly conditioned:numpy.exceptions.RankWarning",
     "ignore::RuntimeWarning:numpy.lib.*",
     "ignore:The return type of `Dataset.dims`:FutureWarning",
 ]

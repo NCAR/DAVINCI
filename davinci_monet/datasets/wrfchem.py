@@ -243,7 +243,10 @@ class WRFChemReader:
                 # WRF format: 'YYYY-MM-DD_HH:MM:SS' — replace '_' for parsing
                 import numpy as _np
 
-                times_np = _np.array([_np.datetime64(s.replace("_", "T")) for s in time_strs])
+                times_np = _np.array(
+                    [_np.datetime64(s.replace("_", "T"), "ns") for s in time_strs],
+                    dtype="datetime64[ns]",
+                )
                 ds = ds.assign_coords(time=("time", times_np))
                 ds = ds.drop_vars("Times")
             except (ValueError, TypeError, AttributeError):
