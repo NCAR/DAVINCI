@@ -57,6 +57,52 @@ def _aod_grid() -> xr.Dataset:
     )
 
 
+def test_spatial_save_uses_full_figure_bbox_by_default(monkeypatch, tmp_path):
+    plotter = SpatialPlotter()
+    fig = _single_figure(plotter.render(build_series(_aod_grid(), "aod")))
+    captured: dict[str, object] = {}
+
+    def fake_savefig(path, **kwargs):
+        captured.update(kwargs)
+        path.write_bytes(b"pdf")
+
+    monkeypatch.setattr(fig, "savefig", fake_savefig)
+
+    plotter.save(fig, tmp_path / "map.pdf")
+
+    assert captured["bbox_inches"] is fig.bbox_inches
+    plt.close(fig)
+
+
+def test_spatial_title_position_is_finite_with_subtitle():
+    plotter = SpatialPlotter(
+        config=PlotConfig(title="SW05 Column AOD", subtitle="2008-07-01")
+    )
+    fig = _single_figure(
+        plotter.render(
+            build_series(_aod_grid(), "aod"),
+            show_coastlines=False,
+            show_countries=False,
+            show_states=False,
+            show_gridlines=False,
+            land_color="none",
+            ocean_color="none",
+        )
+    )
+
+    fig.canvas.draw()
+    ax = fig.axes[0]
+    _, title_y = ax.title.get_position()
+    title_bbox = ax.title.get_window_extent(fig.canvas.get_renderer())
+
+    assert ax.get_title() == "SW05 Column AOD"
+    assert np.isfinite(title_y)
+    assert np.all(np.isfinite(title_bbox.bounds))
+    assert title_y > 1.01
+    assert any(text.get_text() == "2008-07-01" for text in ax.texts)
+    plt.close(fig)
+
+
 def test_domain_type_sets_fixed_map_extent():
     """A named domain pins the map extent so sparse-data maps aren't auto-clipped
     to their few sites — every map shares the same fixed extent."""
