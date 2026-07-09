@@ -7,6 +7,7 @@ using cartopy projections.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
@@ -14,6 +15,7 @@ import numpy as np
 
 from davinci_monet.core.coordinates import surface_index
 from davinci_monet.plots.base import BasePlotter, PlotConfig
+from davinci_monet.plots.labels import format_plot_title
 
 if TYPE_CHECKING:
     import cartopy.crs
@@ -385,6 +387,60 @@ class BaseSpatialPlotter(BasePlotter):
         ax = fig.add_subplot(111, projection=projection)
 
         return fig, ax
+
+    def set_title(
+        self,
+        ax: matplotlib.axes.Axes,
+        title: str | None = None,
+        subtitle: str | None = None,
+        *,
+        fontsize: float | None = None,
+    ) -> None:
+        """Set a map title with explicit finite positions for Cartopy axes."""
+        cfg = self.config.text
+        title_text = title or self.config.title
+        subtitle_text = subtitle if subtitle is not None else self.config.subtitle
+
+        if title_text:
+            ax.set_title(
+                format_plot_title(title_text),
+                fontsize=fontsize or cfg.title_fontsize,
+                fontweight=cfg.fontweight,
+                y=1.08 if subtitle_text else 1.03,
+                pad=0,
+                wrap=False,
+            )
+            ax.title.set_clip_on(False)
+        if subtitle_text:
+            ax.text(
+                0.5,
+                1.01,
+                subtitle_text,
+                ha="center",
+                va="bottom",
+                transform=ax.transAxes,
+                fontsize=cfg.annotation_small,
+                color="#58595B",
+                clip_on=False,
+            )
+
+    def save(
+        self,
+        fig: matplotlib.figure.Figure,
+        output_path: str | Path,
+        dpi: int | None = None,
+        bbox_inches: Any | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        """Save map figures without rcParam tight-bbox cropping Cartopy GeoAxes."""
+        save_bbox = fig.bbox_inches if bbox_inches is None else bbox_inches
+        return super().save(
+            fig,
+            output_path,
+            dpi=dpi,
+            bbox_inches=save_bbox,
+            **kwargs,
+        )
 
     def add_map_features(
         self,
