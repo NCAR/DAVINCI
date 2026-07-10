@@ -26,17 +26,20 @@ class TestDataGeometry:
         assert hasattr(DataGeometry, "PROFILE")
         assert hasattr(DataGeometry, "SWATH")
         assert hasattr(DataGeometry, "GRID")
+        assert hasattr(DataGeometry, "SPECTRUM")
+        assert hasattr(DataGeometry, "ARTIFACT")
 
     def test_geometry_count(self) -> None:
-        """Verify exactly 6 geometry types."""
-        assert len(DataGeometry) == 6
+        """Verify exactly 7 geometry types."""
+        assert len(DataGeometry) == 7
 
     def test_geometry_iteration(self) -> None:
         """Verify geometry can be iterated."""
         geometries = list(DataGeometry)
-        assert len(geometries) == 6
+        assert len(geometries) == 7
         assert DataGeometry.POINT in geometries
         assert DataGeometry.GRID in geometries
+        assert DataGeometry.ARTIFACT in geometries
 
 
 class TestPairingStrategyProtocol:

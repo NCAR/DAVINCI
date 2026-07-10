@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
 import xarray as xr
 
-from davinci_monet.analysis.base import DerivedAnalysis
+from davinci_monet.analysis.base import (
+    AnalysisResult,
+    AnalysisRuntime,
+    ArtifactDeclaration,
+    DerivedAnalysis,
+)
 from davinci_monet.analysis.formula import FormulaError, evaluate_formula
 from davinci_monet.analysis.gridded_reductions import group_dataset
 from davinci_monet.core.protocols import DataGeometry
@@ -32,6 +38,23 @@ class GriddedAnalysis(DerivedAnalysis):
     name = "gridded_analysis"
     long_name = "Gridded Analysis Product"
     output_geometry = DataGeometry.GRID
+
+    def analyze_inputs(
+        self,
+        inputs: Mapping[str, xr.Dataset],
+        spec: GriddedAnalysisSpec,
+        runtime: AnalysisRuntime,
+    ) -> AnalysisResult:
+        """Declare the existing product persistence policy through the result contract."""
+        del runtime
+        try:
+            source = inputs["source"]
+        except KeyError as exc:
+            raise ValueError("gridded_analysis requires a named 'source' input") from exc
+        return AnalysisResult(
+            dataset=self.analyze(source, spec),
+            artifacts=(ArtifactDeclaration(kind="product", role="product", reload=True),),
+        )
 
     def analyze(self, data: xr.Dataset, spec: GriddedAnalysisSpec) -> xr.Dataset:
         role_ds = _role_dataset(data, spec.roles)

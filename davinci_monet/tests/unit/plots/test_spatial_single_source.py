@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 import xarray as xr  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 from matplotlib.collections import PathCollection, QuadMesh  # noqa: E402
 from matplotlib.colors import BoundaryNorm  # noqa: E402
 
@@ -75,9 +76,7 @@ def test_spatial_save_uses_full_figure_bbox_by_default(monkeypatch, tmp_path):
 
 
 def test_spatial_title_position_is_finite_with_subtitle():
-    plotter = SpatialPlotter(
-        config=PlotConfig(title="SW05 Column AOD", subtitle="2008-07-01")
-    )
+    plotter = SpatialPlotter(config=PlotConfig(title="SW05 Column AOD", subtitle="2008-07-01"))
     fig = _single_figure(
         plotter.render(
             build_series(_aod_grid(), "aod"),
@@ -91,6 +90,7 @@ def test_spatial_title_position_is_finite_with_subtitle():
     )
 
     fig.canvas.draw()
+    assert isinstance(fig.canvas, FigureCanvasAgg)
     ax = fig.axes[0]
     _, title_y = ax.title.get_position()
     title_bbox = ax.title.get_window_extent(fig.canvas.get_renderer())

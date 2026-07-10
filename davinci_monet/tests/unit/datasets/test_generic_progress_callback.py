@@ -163,6 +163,36 @@ def test_generic_nested_concat_with_progress_callback_stacks_scalar_time_files(
     np.testing.assert_allclose(ds["aod"].isel(time=1), 2.0)
 
 
+def test_generic_nested_minimal_keeps_static_variables_out_of_time(tmp_path: Path) -> None:
+    first = tmp_path / "chunk-00000.nc"
+    second = tmp_path / "chunk-00001.nc"
+    coords = {"lat": [0.0, 1.0], "lon": [0.0, 1.0]}
+    xr.Dataset(
+        {
+            "value": (("time", "lat", "lon"), np.ones((2, 2, 2))),
+            "eofs": (("mode", "lat", "lon"), np.ones((1, 2, 2))),
+        },
+        coords={"time": pd.date_range("2024-01-01", periods=2, freq="D"), "mode": [1], **coords},
+    ).to_netcdf(first)
+    xr.Dataset(
+        {"value": (("time", "lat", "lon"), np.full((2, 2, 2), 2.0))},
+        coords={"time": pd.date_range("2024-01-03", periods=2, freq="D"), **coords},
+    ).to_netcdf(second)
+
+    dataset = GenericReader().open(
+        [first, second],
+        combine="nested",
+        concat_dim="time",
+        data_vars="minimal",
+        coords="minimal",
+        compat="override",
+        join="exact",
+    )
+
+    assert dataset.sizes["time"] == 4
+    assert dataset["eofs"].dims == ("mode", "lat", "lon")
+
+
 @pytest.mark.parametrize(
     ("parallel_kwarg", "expected_parallel"),
     [(None, False), (True, True)],

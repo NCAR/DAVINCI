@@ -148,11 +148,11 @@ class TestRunCommand:
     @pytest.fixture
     def sample_config(self, tmp_path: Path) -> Path:
         """Create a sample configuration file."""
-        config_content = """
+        config_content = f"""
 analysis:
   start_time: 2024-01-01
   end_time: 2024-01-02
-  output_dir: output
+  output_dir: "{tmp_path / 'output'}"
 
 sources:
   test_dataset:
@@ -164,8 +164,8 @@ sources:
 
 pairs:
   test_dataset_test_geometry:
-    x: { source: test_geometry, variable: o3 }
-    y: { source: test_dataset, variable: O3 }
+    x: {{ source: test_geometry, variable: o3 }}
+    y: {{ source: test_dataset, variable: O3 }}
 """
         config_file = tmp_path / "config.yaml"
         config_file.write_text(config_content)

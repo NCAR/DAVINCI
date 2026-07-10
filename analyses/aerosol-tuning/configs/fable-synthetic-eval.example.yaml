@@ -1,0 +1,78 @@
+# Post-fit evaluation only. Run after the fitting artifacts are frozen.
+
+analysis:
+  workflow: synthetic_evaluation
+  start_time: "2006-01-01"
+  end_time: "2006-12-31 23:59:59"
+  output_dir: ${FABLE_SYNTH}/evaluation
+  log_dir: ${FABLE_SYNTH}/evaluation-logs
+
+sources:
+  corrected_aod:
+    type: generic
+    files: ${FABLE_SYNTH}/output/artifacts/scaling/chunk-*.nc
+    artifact_manifest: ${FABLE_SYNTH}/output/manifest.json
+    artifact_role: scaling
+    artifact_analysis: scaling
+    combine: nested
+    concat_dim: time
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    join: exact
+    variables:
+      aod_target: {units: "1"}
+      delta_log_applied: {units: "1"}
+      clip_reason: {units: "1"}
+      spatial_support: {units: "1"}
+      coefficient_available: {units: "1"}
+      eofs: {units: "1"}
+      pc: {units: "1"}
+      resolution: {units: "1"}
+      valid_segment: {units: "1"}
+      coi: {units: days}
+  known_truth_input:
+    type: satellite_l3
+    files: ${FABLE_SYNTH}/oracle/truth.nc
+    evaluation_only: true
+    dim_mapping: {mode_lat: lat, mode_lon: lon}
+    variables:
+      aod_filter_target_true: {units: "1"}
+      aod_target_applied_true: {units: "1"}
+      delta_filter_target_true: {units: "1"}
+      delta_applied_true: {units: "1"}
+      delta_in_span_true: {units: "1"}
+      delta_perp_true: {units: "1"}
+      model_aod_overpass_true: {units: "1"}
+      delta_best_representable_true: {units: "1"}
+      pattern_true: {units: "1"}
+      correction_pc_true: {units: "1"}
+      correction_pc_filter_target_true: {units: "1"}
+      mode_observable_true: {units: "1"}
+      spatial_support_true: {units: "1"}
+      innovation_noise_true: {units: "1"}
+      obs_holdout_aod: {units: "1"}
+      split: {}
+
+pairs:
+  corrected_vs_truth:
+    x: {source: known_truth_input, variable: aod_filter_target_true}
+    y: {source: corrected_aod, variable: aod_target}
+
+analyses:
+  recovery:
+    type: known_truth
+    estimate: corrected_aod
+    truth: known_truth_input
+    estimate_delta_variable: delta_log_applied
+    truth_delta_variable: delta_filter_target_true
+    estimate_aod_variable: aod_target
+    truth_aod_variable: aod_filter_target_true
+    model_aod_variable: model_aod_overpass_true
+    truth_coefficient_variable: correction_pc_filter_target_true
+    evaluation_splits: [development_test]
+    required: true
+
+stats:
+  metrics: [N, RMSE, R]
+  output_table: true

@@ -51,6 +51,8 @@ class PipelineResourcePolicy:
         closed_ids: set[int] = set()
         for _label, source_data in list(context.sources.items()):
             self._close_source_data(source_data, closed_ids)
+        for _label, paired_data in list(context.paired.items()):
+            self._close_source_data(paired_data, closed_ids)
 
         gc.collect()
         try:

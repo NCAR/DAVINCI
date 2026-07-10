@@ -71,6 +71,7 @@ def x_context(x_data: SourceData, tmp_path: Any) -> PipelineContext:
             "analysis": {
                 "output_dir": str(tmp_path / "output"),
             },
+            "stats": {},
             "plots": {
                 "o3_histogram": {
                     "type": "histogram",

@@ -15,6 +15,8 @@ Data Geometry Types:
     - profile: Vertical profiles (sondes, lidar)
     - swath: 2D satellite footprints (L2 products)
     - grid: Regular gridded data (L3 products, reanalysis)
+    - spectrum: Time-frequency analysis output (not pairable)
+    - artifact: Manifest-only analysis output (not pairable)
 """
 
 from __future__ import annotations
@@ -52,6 +54,9 @@ class DataGeometry(Enum):
 
     SPECTRUM = auto()
     """Time-frequency spectrum (time, period) - wavelet power. Not pairable."""
+
+    ARTIFACT = auto()
+    """Manifest-only analysis output. Not pairable or implicitly plottable."""
 
 
 # =============================================================================

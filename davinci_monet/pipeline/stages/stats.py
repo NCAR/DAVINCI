@@ -21,6 +21,42 @@ from davinci_monet.pipeline.stages.base import (
 from davinci_monet.pipeline.stages.helpers import iter_single_source_datasets
 
 
+def _is_artifact_derived(source: Any, dataset: xr.Dataset) -> bool:
+    """Identify persisted derived sources without inspecting their array payloads."""
+    geometry = getattr(source, "geometry", None)
+    if str(getattr(geometry, "name", "")).upper() == "ARTIFACT":
+        return True
+    config = getattr(source, "config", None)
+    if isinstance(config, dict) and any(
+        key in config for key in ("artifact_path", "artifact_dir", "artifact_glob")
+    ):
+        return True
+    return str(dataset.attrs.get("artifact_finalized", "")).lower() == "true"
+
+
+def _descriptive_sources(
+    context: PipelineContext,
+) -> tuple[list[tuple[str, Any, xr.Dataset]], list[str]]:
+    included: list[tuple[str, Any, xr.Dataset]] = []
+    skipped: list[str] = []
+    for label, source, dataset in iter_single_source_datasets(context):
+        if _is_artifact_derived(source, dataset):
+            skipped.append(label)
+        else:
+            included.append((label, source, dataset))
+    return included, skipped
+
+
+def _effective_stats_config(context: PipelineContext) -> StatsConfig | None:
+    """Preserve implicit legacy statistics only for standard workflows."""
+    configured = context.stats_config()
+    if configured is not None:
+        return configured
+    if context.analysis_config().workflow == "standard":
+        return StatsConfig()
+    return None
+
+
 class StatisticsStage(BaseStage):
     """Stage for calculating statistics on paired or single-source data."""
 
@@ -28,8 +64,13 @@ class StatisticsStage(BaseStage):
         super().__init__("statistics")
 
     def validate(self, context: PipelineContext) -> bool:
-        """Run for paired comparisons or descriptive stats on loaded sources."""
-        return bool(context.paired) or bool(iter_single_source_datasets(context))
+        """Run for configured stats or standard-workflow legacy defaults."""
+        if _effective_stats_config(context) is None:
+            return False
+        if context.paired:
+            return True
+        sources, _skipped = _descriptive_sources(context)
+        return bool(sources)
 
     def _execute_descriptive(
         self,
@@ -44,12 +85,16 @@ class StatisticsStage(BaseStage):
         context.metadata["statistics_kind"] = "descriptive"
         start = time.time()
         all_stats: dict[str, dict[str, dict[str, float]]] = {}
-        source_items = sources if sources is not None else iter_single_source_datasets(context)
+        source_items = sources if sources is not None else _descriptive_sources(context)[0]
         for source_label, _source_obj, ds in source_items:
             source_stats: dict[str, dict[str, float]] = {}
             for var_name in ds.data_vars:
                 var_key = str(var_name)
+                if ds[var_key].dtype.kind not in "biuf":
+                    continue
                 values = ds[var_key].values.flatten()
+                if values.dtype.kind == "b":
+                    values = values.astype(np.float64)
                 values = values[np.isfinite(values)]
                 if len(values) < 1:
                     continue
@@ -77,16 +122,23 @@ class StatisticsStage(BaseStage):
         unpaired sources."""
         import time
 
-        single_sources = iter_single_source_datasets(context)
+        stats_cfg = _effective_stats_config(context)
+        if stats_cfg is None:
+            return self._create_result(StageStatus.SKIPPED, data={})
+
+        single_sources, skipped_sources = _descriptive_sources(context)
+        if skipped_sources:
+            context.metadata["statistics_skipped_artifact_sources"] = skipped_sources
         if not context.paired and single_sources:
             return self._execute_descriptive(context, single_sources)
+        if not context.paired:
+            return self._create_result(StageStatus.SKIPPED, data={})
 
         context.metadata["statistics_kind"] = "comparison"
         start = time.time()
         stats_results: dict[str, Any] = {}
 
-        stats_cfg = context.stats_config()
-        effective_cfg = stats_cfg or StatsConfig()
+        effective_cfg = stats_cfg
         requested_pairs = effective_cfg.data or []
         if isinstance(requested_pairs, str):
             requested_pairs = [requested_pairs]
@@ -129,7 +181,7 @@ class StatisticsStage(BaseStage):
                 )
 
                 # Calculate basic statistics
-                pair_stats = self._calculate_stats(paired_data, stats_cfg)
+                pair_stats = self._calculate_stats(paired_data, effective_cfg)
                 stats_results[pair_key] = pair_stats
 
                 # Summary
@@ -175,19 +227,12 @@ class StatisticsStage(BaseStage):
 
         stats: dict[str, Any] = {}
 
-        # An absent stats section keeps the legacy behavior of computing the
-        # full standard metric set (metrics=None); a present section uses its
-        # explicit ``metrics`` / ``stat_list``.
-        metrics: list[str] | None
-        if stats_cfg is None:
-            metrics = None
-            stats_cfg = StatsConfig()
-        else:
-            metrics = stats_cfg.metrics or stats_cfg.stat_list
-        round_precision = stats_cfg.round_output
-        include_counts = stats_cfg.include_counts
-        remove_nan = stats_cfg.remove_nan
-        min_samples = stats_cfg.min_samples
+        effective_cfg = stats_cfg or StatsConfig()
+        metrics = effective_cfg.metrics or effective_cfg.stat_list
+        round_precision = effective_cfg.round_output
+        include_counts = effective_cfg.include_counts
+        remove_nan = effective_cfg.remove_nan
+        min_samples = effective_cfg.min_samples
 
         calc_config = StatisticsConfig(
             metrics=list(metrics) if metrics else list(STANDARD_METRICS),
@@ -231,7 +276,7 @@ class StatisticsStage(BaseStage):
             stats[base_name] = row
 
         # Per-flight statistics (if flight coord exists and enabled)
-        per_flight = stats_cfg.per_flight
+        per_flight = effective_cfg.per_flight
         if per_flight and "flight" in paired_data.coords:
             stats["_per_flight"] = self._calculate_per_flight_stats(paired_data)
 

@@ -152,6 +152,11 @@ class GenericReader:
         concat_dim = kwargs.pop("concat_dim", "time")
         combine = kwargs.pop("combine", "by_coords")
         parallel = kwargs.pop("parallel", False)
+        data_vars = kwargs.pop("data_vars", "all")
+        combine_options = {"data_vars": data_vars}
+        for name in ("coords", "compat", "join"):
+            if name in kwargs:
+                combine_options[name] = kwargs.pop(name)
 
         # Detect engine if not specified
         if "engine" not in kwargs:
@@ -180,17 +185,17 @@ class GenericReader:
                     return xr.open_mfdataset(
                         [str(f) for f in file_list],
                         combine=combine,
-                        data_vars="all",
                         parallel=False,
                         preprocess=_progress_preprocess,
+                        **combine_options,
                         **concat_kwargs,
                         **kwargs,
                     )
                 return xr.open_mfdataset(
                     [str(f) for f in file_list],
                     combine=combine,
-                    data_vars="all",
                     parallel=parallel,
+                    **combine_options,
                     **concat_kwargs,
                     **kwargs,
                 )

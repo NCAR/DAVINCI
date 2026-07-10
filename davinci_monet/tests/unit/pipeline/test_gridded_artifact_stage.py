@@ -55,6 +55,10 @@ def test_gridded_analysis_pipeline_writes_and_uses_product_artifact(tmp_path) ->
         "artifact_path": str(analysis_nc),
         "summary_path": str(summary_json),
     }
+    artifact_entry = result.context.metadata["analysis_artifacts"][0]
+    assert artifact_entry["analysis"] == "daily_aod"
+    assert artifact_entry["role"] == "product"
+    assert len(artifact_entry["checksums"]["analysis_sha256"]) == 64
     assert source.data.attrs["source_label"] == "daily_aod"
     assert source.data.attrs["derived"] is True
     assert source.data["analyzed_aod"].dtype == np.dtype("float32")

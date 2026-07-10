@@ -30,6 +30,11 @@ SOURCE_LOADER_CONFIG_KEYS = frozenset(
         "resample",
         "min_sample_count",
         "track_sample_count",
+        "time_padding",
+        "evaluation_only",
+        "artifact_manifest",
+        "artifact_role",
+        "artifact_analysis",
     }
 )
 
@@ -198,11 +203,26 @@ class LoadSourcesStage(BaseStage):
         ]
         variable_names = variable_names or None
         file_paths = self._file_list(cfg.get("files") or cfg.get("filename"))
+        artifact_entry = None
+        if cfg.get("artifact_manifest") is not None:
+            from davinci_monet.analysis.artifacts import validate_finalized_artifact_manifest
+
+            artifact_entry = validate_finalized_artifact_manifest(
+                str(cfg["artifact_manifest"]),
+                file_paths,
+                role=str(cfg["artifact_role"]),
+                analysis=(
+                    str(cfg["artifact_analysis"])
+                    if cfg.get("artifact_analysis") is not None
+                    else None
+                ),
+            )
 
         analysis = context.config_dict().get("analysis", {})
         time_range = None
         if analysis.get("start_time") and analysis.get("end_time"):
             time_range = (analysis["start_time"], analysis["end_time"])
+        load_time_range = self._padded_time_range(time_range, cfg.get("time_padding"))
 
         try:
             reader_cls = source_registry.get(source_type)
@@ -218,7 +238,7 @@ class LoadSourcesStage(BaseStage):
 
         open_kwargs = self._reader_kwargs(reader, cfg)
         if "time_range" in inspect.signature(reader.open).parameters:
-            open_kwargs["time_range"] = time_range
+            open_kwargs["time_range"] = load_time_range
         if "progress_callback" in inspect.signature(reader.open).parameters:
 
             def _per_file_progress(i: int, total: int, name: str) -> None:
@@ -231,8 +251,19 @@ class LoadSourcesStage(BaseStage):
 
             open_kwargs["progress_callback"] = _per_file_progress
         data = reader.open(file_paths, variables=variable_names, **open_kwargs)
-        if time_range and "time" in data:
-            start_time, end_time = time_range
+        if artifact_entry is not None:
+            import json
+
+            data.attrs.update(
+                artifact_finalized="true",
+                artifact_manifest=str(cfg["artifact_manifest"]),
+                artifact_role=str(cfg["artifact_role"]),
+                artifact_identity=json.dumps(
+                    artifact_entry["identity"], sort_keys=True, default=str
+                ),
+            )
+        if load_time_range and "time" in data:
+            start_time, end_time = load_time_range
             data = data.sel(time=self._time_slice_for_coord(data["time"], start_time, end_time))
         if variables:
             data = self._apply_variable_config(data, variables)
@@ -270,6 +301,23 @@ class LoadSourcesStage(BaseStage):
             config=cfg,
         )
         return source
+
+    @staticmethod
+    def _padded_time_range(
+        time_range: tuple[Any, Any] | None,
+        padding: Any,
+    ) -> tuple[Any, Any] | None:
+        """Expand a source load window without changing the analysis window."""
+        if time_range is None or padding is None:
+            return time_range
+
+        import pandas as pd
+
+        delta = pd.Timedelta(padding)
+        if delta < pd.Timedelta(0):
+            raise ValueError("source time_padding must be non-negative")
+        start, end = time_range
+        return (pd.Timestamp(start) - delta, pd.Timestamp(end) + delta)
 
     @staticmethod
     def _time_slice_for_coord(coord: xr.DataArray, start: Any, end: Any) -> slice:
@@ -327,18 +375,22 @@ class LoadSourcesStage(BaseStage):
             if "unit_scale" in cfg:
                 scale = cfg["unit_scale"]
                 method = cfg.get("unit_scale_method", "*")
-                if method == "*":
-                    arr = arr * scale
-                    scale_is_identity = scale == 1.0
-                elif method == "/":
-                    arr = arr / scale
-                    scale_is_identity = scale == 1.0
-                elif method == "+":
-                    arr = arr + scale
-                    scale_is_identity = scale == 0
-                elif method == "-":
-                    arr = arr - scale
-                    scale_is_identity = scale == 0
+                identity = 1.0 if method in {"*", "/"} else 0.0
+                scale_is_identity = scale == identity
+                if not scale_is_identity:
+                    if arr.dtype.kind not in "biufc":
+                        raise TypeError(
+                            f"variable {var_name!r} cannot apply nonidentity "
+                            f"unit scaling to dtype {arr.dtype}"
+                        )
+                    if method == "*":
+                        arr = arr * scale
+                    elif method == "/":
+                        arr = arr / scale
+                    elif method == "+":
+                        arr = arr + scale
+                    elif method == "-":
+                        arr = arr - scale
             nan_value = cfg.get("nan_value")
             if nan_value is not None:
                 arr = arr.where(arr != nan_value)

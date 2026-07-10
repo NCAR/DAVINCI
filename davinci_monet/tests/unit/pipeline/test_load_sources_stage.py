@@ -10,13 +10,16 @@ context API and stage logic, per the repo's existing pipeline-stage test pattern
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from typing import cast
 
 import cftime
 import numpy as np
 import pytest
 import xarray as xr
 
+from davinci_monet.config import validate_config
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.registry import source_registry
 from davinci_monet.pipeline.stages import (
@@ -115,10 +118,146 @@ class TestLoadSourcesStage:
                 "variables": {"O3": {}},
                 "display_name": "Display",
                 "resample": "1D",
+                "time_padding": "1D",
+                "artifact_manifest": "/run/manifest.json",
+                "artifact_role": "scaling",
+                "artifact_analysis": "scaling",
+                "evaluation_only": False,
                 "reader_option": "keep",
                 "none_option": None,
             },
         ) == {"reader_option": "keep"}
+
+    def test_artifact_checksum_failure_happens_before_reader_open(self, tmp_path) -> None:
+        calls = 0
+
+        class ManifestProbeReader:
+            @property
+            def geometry(self) -> DataGeometry:
+                return DataGeometry.GRID
+
+            def open(self, file_paths, variables=None, **kwargs):  # noqa: ANN001
+                nonlocal calls
+                calls += 1
+                return xr.Dataset({"aod": ("time", [1.0])})
+
+        artifact = tmp_path / "analysis.nc"
+        artifact.write_bytes(b"artifact")
+        summary = tmp_path / "summary.json"
+        summary.write_text("{}\n")
+        identity = {
+            "source_hashes": {"source_inputs_sha256": "a" * 64},
+            "config_hashes": {"config_sha256": "b" * 64},
+            "code_hashes": {"code_sha256": "c" * 64},
+        }
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "analysis_artifacts": [
+                        {
+                            "analysis": "scaling",
+                            "role": "scaling",
+                            "kind": "product",
+                            "status": "finalized",
+                            "artifact_path": str(artifact),
+                            "summary_path": str(summary),
+                            "identity": identity,
+                            "checksums": {
+                                "analysis_sha256": "0" * 64,
+                                "summary_sha256": "0" * 64,
+                            },
+                        }
+                    ],
+                }
+            )
+        )
+        source_registry.register("manifest_probe", ManifestProbeReader, replace=True)
+        try:
+            ctx = PipelineContext(
+                config={
+                    "sources": {
+                        "estimate": {
+                            "type": "manifest_probe",
+                            "files": str(artifact),
+                            "artifact_manifest": str(manifest),
+                            "artifact_role": "scaling",
+                            "artifact_analysis": "scaling",
+                        }
+                    }
+                }
+            )
+
+            result = LoadSourcesStage().execute(ctx)
+
+            assert result.status is StageStatus.FAILED
+            assert "checksum mismatch" in (result.error or "")
+            assert calls == 0
+        finally:
+            source_registry.unregister("manifest_probe")
+
+    def test_source_time_padding_expands_and_retains_load_window(self) -> None:
+        captured: dict[str, object] = {}
+
+        class PaddingReader:
+            @property
+            def name(self) -> str:
+                return "padding_probe"
+
+            @property
+            def geometry(self) -> DataGeometry:
+                return DataGeometry.GRID
+
+            def open(self, file_paths, variables=None, time_range=None, **kwargs):  # noqa: ANN001
+                captured["time_range"] = time_range
+                captured["kwargs"] = kwargs
+                times = np.arange(
+                    np.datetime64("2000-12-31"),
+                    np.datetime64("2001-01-05"),
+                    np.timedelta64(1, "D"),
+                )
+                return xr.Dataset(
+                    {"aod": (("time", "lat", "lon"), np.ones((times.size, 1, 1)))},
+                    coords={"time": times, "lat": [0.0], "lon": [0.0]},
+                )
+
+        source_registry.register("padding_probe", PaddingReader, replace=True)
+        try:
+            ctx = PipelineContext(
+                config={
+                    "analysis": {
+                        "start_time": "2001-01-01",
+                        "end_time": "2001-01-03",
+                    },
+                    "sources": {
+                        "model": {
+                            "type": "padding_probe",
+                            "filename": "ignored.nc",
+                            "variables": {"aod": {}},
+                            "time_padding": "1D",
+                        }
+                    },
+                }
+            )
+
+            result = LoadSourcesStage().execute(ctx)
+
+            assert result.status is StageStatus.COMPLETED
+            start, end = cast(tuple[object, object], captured["time_range"])
+            assert start == datetime(2000, 12, 31)
+            assert end == datetime(2001, 1, 4)
+            assert captured["kwargs"] == {}
+            assert ctx.sources["model"].data.sizes["time"] == 5
+        finally:
+            source_registry.unregister("padding_probe")
+
+    def test_negative_source_time_padding_fails(self) -> None:
+        with pytest.raises(ValueError, match="time_padding must be non-negative"):
+            LoadSourcesStage._padded_time_range(
+                ("2001-01-01", "2001-01-02"),
+                "-1D",
+            )
 
     def test_reader_kwargs_filters_to_explicit_signature(self) -> None:
         """Readers without **kwargs receive only their declared reader options."""
@@ -262,6 +401,42 @@ class TestLoadSourcesStage:
         assert set(ctx.sources) == {"cam"}
         assert ctx.sources["cam"].geometry is DataGeometry.GRID
         assert ctx.sources["cam"].data.attrs["geometry"] == "grid"
+
+    def test_identity_unit_scale_loads_text_variable(self, tmp_path) -> None:
+        source_path = tmp_path / "labels.nc"
+        xr.Dataset(
+            {"split": ("time", ["calibration", "development_test"])},
+            coords={"time": np.arange("2006-01-01", "2006-01-03", dtype="datetime64[D]")},
+        ).to_netcdf(source_path)
+        config = validate_config(
+            {
+                "sources": {
+                    "truth": {
+                        "type": "generic",
+                        "files": str(source_path),
+                        "variables": {"split": {}},
+                    }
+                }
+            }
+        )
+        ctx = PipelineContext(config=config)
+
+        result = LoadSourcesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        assert ctx.sources["truth"].data["split"].values.tolist() == [
+            "calibration",
+            "development_test",
+        ]
+
+    def test_nonidentity_unit_scale_rejects_text_variable(self) -> None:
+        data = xr.Dataset({"split": ("time", ["calibration"])})
+
+        with pytest.raises(TypeError, match="nonidentity unit scaling"):
+            LoadSourcesStage._apply_variable_config(
+                data,
+                {"split": {"unit_scale": 2.0, "unit_scale_method": "*"}},
+            )
 
     def test_source_time_filter_supports_cftime_calendar(self) -> None:
         class NoLeapReader:

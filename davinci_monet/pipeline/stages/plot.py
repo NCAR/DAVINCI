@@ -31,6 +31,29 @@ from davinci_monet.pipeline.stages.plot_options import (
 from davinci_monet.plots.contracts import PlotArity, plot_arity
 
 
+def _is_artifact_source(source: Any, dataset: Any) -> bool:
+    """Return whether a pseudo-source is manifest-only rather than plottable data."""
+    geometry = getattr(source, "geometry", None)
+    if str(getattr(geometry, "name", "")).upper() == "ARTIFACT":
+        return True
+    return str(getattr(dataset, "attrs", {}).get("geometry", "")).lower() == "artifact"
+
+
+def _has_finite_values(field: Any) -> bool:
+    """Check a selected field lazily without materializing its full payload."""
+    import numpy as np
+    import xarray as xr
+
+    if field.dtype.kind in "biufcMm":
+        valid = xr.apply_ufunc(np.isfinite, field, dask="allowed")
+    else:
+        valid = field.notnull()
+    any_valid = valid.any()
+    if any_valid.chunks is not None:
+        any_valid = any_valid.compute()
+    return bool(any_valid.item())
+
+
 class PlottingStage(BaseStage):
     """Stage for generating plots from paired or single-source data."""
 
@@ -179,7 +202,7 @@ class PlottingStage(BaseStage):
         if source_label not in source_map:
             raise PlottingError(f"Source '{source_label}' not found for plot '{plot_name}'")
 
-        _source_obj, ds = source_map[source_label]
+        source_obj, ds = source_map[source_label]
 
         if variable not in ds.data_vars:
             raise PlottingError(
@@ -187,6 +210,13 @@ class PlottingStage(BaseStage):
             )
 
         plotter = get_plotter(plot_type)
+        if _is_artifact_source(source_obj, ds) and not bool(
+            getattr(plotter, "supports_artifact", False)
+        ):
+            raise PlottingError(
+                f"Source '{source_label}' has ARTIFACT geometry, which plot type "
+                f"'{plot_type}' does not support"
+            )
         plot_kwargs = single_source_plot_kwargs(
             plot_spec,
             analysis_config=analysis_config,
@@ -221,20 +251,18 @@ class PlottingStage(BaseStage):
                 suffix = ""
                 flight_kwargs = plot_kwargs
 
-            vals = subset[variable].values
-            if not np.any(np.isfinite(vals)):
-                continue
-
-            if "flight_tracks" in plot_spec:
-                flight_kwargs["x_datasets"] = {
-                    label: source_ds for label, (_obj, source_ds) in source_map.items()
-                }
-
             try:
-                # Select a single PC mode before rendering, if requested.
+                # Select before probing so unrelated lazy mode chunks stay untouched.
                 sel_mode = plot_spec.get("mode")
                 if sel_mode is not None and variable in subset and "mode" in subset[variable].dims:
                     subset = subset.sel(mode=sel_mode)
+                if not _has_finite_values(subset[variable]):
+                    continue
+
+                if "flight_tracks" in plot_spec:
+                    flight_kwargs["x_datasets"] = {
+                        label: source_ds for label, (_obj, source_ds) in source_map.items()
+                    }
 
                 # Tag the single source so build_series picks up its source label.
                 tag_source_label(subset, source_label=source_label)

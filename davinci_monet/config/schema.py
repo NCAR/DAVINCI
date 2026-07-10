@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -106,6 +107,7 @@ class AnalysisConfig(StrictSchema):
     style: PlotStyleConfig | dict[str, Any] | None = None
     city_labels: dict[str, list[float]] | None = None
     domain: str | None = None
+    workflow: Literal["standard", "synthetic_fit", "synthetic_evaluation"] = "standard"
 
     @field_validator("style", mode="before")
     @classmethod
@@ -269,6 +271,13 @@ def _registered_plot_types() -> list[str]:
     return list_plotters()
 
 
+def _plotter_supports_artifact(plot_type: str) -> bool:
+    """Return whether a registered renderer explicitly opts into ARTIFACT inputs."""
+    from davinci_monet.plots.registry import get_plotter_class
+
+    return bool(getattr(get_plotter_class(plot_type), "supports_artifact", False))
+
+
 class SourceConfig(FlexibleSchema):
     """Unified configuration for a single data source.
 
@@ -286,6 +295,11 @@ class SourceConfig(FlexibleSchema):
     resample: str | None = None
     min_sample_count: int | None = None
     track_sample_count: bool = False
+    time_padding: str | None = None
+    evaluation_only: bool = False
+    artifact_manifest: str | Path | None = None
+    artifact_role: str | None = None
+    artifact_analysis: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -309,6 +323,44 @@ class SourceConfig(FlexibleSchema):
     def _convert_filename(cls, v: Any) -> str | None:
         return None if v is None else str(v)
 
+    @field_validator("artifact_manifest", mode="before")
+    @classmethod
+    def _convert_artifact_manifest(cls, value: Any) -> str | None:
+        return None if value is None else str(value)
+
+    @field_validator("artifact_role", "artifact_analysis")
+    @classmethod
+    def _validate_artifact_label(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("artifact role/analysis labels must be nonempty")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_artifact_identity(self) -> "SourceConfig":
+        fields = (self.artifact_manifest, self.artifact_role)
+        if any(value is not None for value in fields) and not all(
+            isinstance(value, str) and value.strip() for value in fields
+        ):
+            raise ValueError("artifact_manifest and artifact_role must be configured together")
+        if self.artifact_analysis is not None and self.artifact_manifest is None:
+            raise ValueError("artifact_analysis requires artifact_manifest and artifact_role")
+        return self
+
+    @field_validator("time_padding", mode="before")
+    @classmethod
+    def _validate_time_padding(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        import pandas as pd
+
+        try:
+            duration = pd.Timedelta(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("time_padding must be a valid duration") from exc
+        if pd.isna(duration) or duration < pd.Timedelta(0):
+            raise ValueError("time_padding must be non-negative")
+        return str(value)
+
     @field_validator("variables", mode="before")
     @classmethod
     def _parse_variables(cls, v: Any) -> dict[str, VariableConfig]:
@@ -320,6 +372,22 @@ class SourceConfig(FlexibleSchema):
                 for name, cfg in v.items()
             }
         return dict(v)
+
+
+def _source_looks_like_oracle(source: SourceConfig) -> bool:
+    """Recognize the synthetic truth sidecar without matching ordinary names."""
+    raw_paths: list[str] = []
+    for raw_value in (source.files, source.filename):
+        if isinstance(raw_value, list):
+            raw_paths.extend(str(value) for value in raw_value)
+        elif raw_value is not None:
+            raw_paths.append(str(raw_value))
+    has_oracle_component = any(
+        "oracle" in [part.lower() for part in path.replace("\\", "/").split("/")]
+        for path in raw_paths
+    )
+    has_truth_variable = any(str(name).endswith("_true") for name in source.variables)
+    return has_oracle_component or has_truth_variable
 
 
 class AxisRef(StrictSchema):
@@ -672,20 +740,76 @@ class PointReduce(StrictSchema):
     point: tuple[float, float]
 
 
-class EOFSpec(StrictSchema):
+class AnalysisSpecBase(StrictSchema):
+    """Shared execution policy for a derived-analysis specification."""
+
+    required: bool = False
+
+    def input_refs(self) -> dict[str, str]:
+        """Return input role to raw-or-derived source reference mappings."""
+        source = getattr(self, "source", None)
+        if not isinstance(source, str) or not source:
+            raise NotImplementedError(f"{type(self).__name__} must implement input_refs()")
+        return {"source": source}
+
+
+class EOFFitWindowSpec(StrictSchema):
+    """Inclusive time window used to fit EOF preprocessing and modes."""
+
+    start: datetime | str
+    end: datetime | str
+
+    @model_validator(mode="after")
+    def _validate_order(self) -> "EOFFitWindowSpec":
+        import pandas as pd
+
+        try:
+            start = pd.Timestamp(self.start)
+            end = pd.Timestamp(self.end)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("EOF fit_window bounds must be valid timestamps") from exc
+        try:
+            ordered = start <= end
+        except TypeError as exc:
+            raise ValueError("EOF fit_window bounds must use compatible time zones") from exc
+        if not ordered:
+            raise ValueError("EOF fit_window start must be at or before end")
+        return self
+
+
+class EOFSpec(AnalysisSpecBase):
     """EOF decomposition of one gridded source variable."""
 
     type: Literal["eof"]
     source: str
     variable: str
-    n_modes: int = 10
+    n_modes: int = Field(default=10, ge=1)
     standardize: bool = False
     remove_seasonal_cycle: bool = False
     rotation: Literal["none", "varimax"] = "none"
     level: int | None = None
+    solver: Literal["full", "randomized"] = "full"
+    solver_seed: int = Field(default=0, ge=0, le=4_294_967_295)
+    solver_oversampling: int = Field(default=10, ge=0)
+    solver_iterations: int = Field(default=2, ge=0)
+    fit_window: EOFFitWindowSpec | None = None
+    fit_artifact: str | None = None
+    fit_split: str = Field(default="basis_train", min_length=1)
+
+    def input_refs(self) -> dict[str, str]:
+        refs = {"source": self.source}
+        if self.fit_artifact is not None:
+            refs["fit_artifact"] = self.fit_artifact
+        return refs
+
+    @model_validator(mode="after")
+    def _validate_fit_selection(self) -> "EOFSpec":
+        if self.fit_window is not None and self.fit_artifact is not None:
+            raise ValueError("EOF fit_window and fit_artifact are mutually exclusive")
+        return self
 
 
-class WaveletSpec(StrictSchema):
+class WaveletSpec(AnalysisSpecBase):
     """Continuous wavelet transform of one source variable (a 1-D series)."""
 
     type: Literal["wavelet"]
@@ -707,6 +831,338 @@ class WaveletSpec(StrictSchema):
         return v
 
 
+class AODPreprocessSpec(AnalysisSpecBase):
+    """Screen, daily-sample, regrid, and shifted-log transform one AOD field."""
+
+    type: Literal["aod_preprocess"]
+    source: str
+    variable: str
+    target_grid: float | None = Field(default=None, gt=0.0, le=180.0)
+    target_grid_from: str | None = None
+    sample_local_time: float | None = None
+    sample_tolerance: str | None = None
+    day_anchor_hour: float = 12.0
+    log_epsilon: float = Field(default=0.01, gt=0.0)
+    uncertainty_variable: str | None = None
+    uncertainty_covariance: Literal["independent"] | None = None
+    common_factor_variables: list[str] = Field(default_factory=list)
+
+    def input_refs(self) -> dict[str, str]:
+        refs = {"source": self.source}
+        if self.target_grid_from is not None:
+            refs["target_grid_from"] = self.target_grid_from
+        return refs
+
+    @field_validator("sample_local_time", "day_anchor_hour")
+    @classmethod
+    def _validate_hour(cls, value: float | None) -> float | None:
+        if value is not None and (not math.isfinite(value) or not 0.0 <= value < 24.0):
+            raise ValueError("hour values must be finite and in [0, 24)")
+        return value
+
+    @field_validator("log_epsilon")
+    @classmethod
+    def _validate_log_epsilon(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("log_epsilon must be finite")
+        return value
+
+    @field_validator("sample_tolerance")
+    @classmethod
+    def _validate_sample_tolerance(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        import pandas as pd
+
+        try:
+            duration = pd.Timedelta(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("sample_tolerance must be a valid duration") from exc
+        if pd.isna(duration) or duration < pd.Timedelta(0):
+            raise ValueError("sample_tolerance must be non-negative")
+        return value
+
+    @field_validator("common_factor_variables")
+    @classmethod
+    def _validate_common_factors(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("common_factor_variables must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_target_grid(self) -> "AODPreprocessSpec":
+        if self.target_grid is not None and self.target_grid_from is not None:
+            raise ValueError("target_grid and target_grid_from are mutually exclusive")
+        if self.target_grid is not None:
+            latitude_cells = 180.0 / self.target_grid
+            longitude_cells = 360.0 / self.target_grid
+            if not math.isclose(latitude_cells, round(latitude_cells), abs_tol=1.0e-9):
+                raise ValueError("target_grid must divide 180 degrees exactly")
+            if not math.isclose(longitude_cells, round(longitude_cells), abs_tol=1.0e-9):
+                raise ValueError("target_grid must divide 360 degrees exactly")
+        return self
+
+
+class BiasFitWindowSpec(StrictSchema):
+    """Inclusive time window used only to fit projection bias and support."""
+
+    start: datetime | str
+    end: datetime | str
+
+    @model_validator(mode="after")
+    def _validate_order(self) -> "BiasFitWindowSpec":
+        import pandas as pd
+
+        try:
+            start = pd.Timestamp(self.start)
+            end = pd.Timestamp(self.end)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("bias_fit_window bounds must be valid timestamps") from exc
+        if start > end:
+            raise ValueError("bias_fit_window start must be at or before end")
+        return self
+
+
+class EOFProjectionObsSpec(StrictSchema):
+    """One preprocessed observation input to an EOF projection."""
+
+    source: str
+    variable: str
+    error_variable: str
+    common_factor_variables: list[str] = Field(default_factory=list)
+
+    @field_validator("common_factor_variables")
+    @classmethod
+    def _validate_common_factors(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("common_factor_variables must be unique")
+        return value
+
+
+class EOFProjectionSpec(AnalysisSpecBase):
+    """Reduced-space ridge projection of AOD innovations onto an EOF basis."""
+
+    type: Literal["eof_projection"]
+    basis: str
+    model: str
+    model_variable: str
+    obs: list[EOFProjectionObsSpec] = Field(min_length=1)
+    ridge: float = Field(default=1.0, ge=0.0)
+    bias_fit_window: BiasFitWindowSpec | None = None
+    bias_fit_artifact: str | None = None
+    clim_bias: bool = True
+    spatial_support: Literal["monthly_taper"] = "monthly_taper"
+    support_min_fraction: float = Field(default=0.2, ge=0.0, le=1.0)
+    support_full_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    support_smoothing_passes: int = Field(default=2, ge=0)
+    delta_bounds: tuple[float, float] = (-1.6094379, 1.6094379)
+    min_resolution: float = Field(default=0.3, ge=0.0, lt=1.0)
+    time_chunk_size: int = Field(default=31, ge=1)
+
+    def input_refs(self) -> dict[str, str]:
+        refs = {"basis": self.basis, "model": self.model}
+        refs.update({f"obs[{index}]": entry.source for index, entry in enumerate(self.obs)})
+        if self.bias_fit_artifact is not None:
+            refs["bias_fit_artifact"] = self.bias_fit_artifact
+        return refs
+
+    @field_validator("ridge")
+    @classmethod
+    def _validate_ridge(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("ridge must be finite")
+        return value
+
+    @field_validator("delta_bounds")
+    @classmethod
+    def _validate_delta_bounds(cls, value: tuple[float, float]) -> tuple[float, float]:
+        if not all(math.isfinite(bound) for bound in value) or value[0] >= value[1]:
+            raise ValueError("delta_bounds must be finite and increasing")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_fit_and_support(self) -> "EOFProjectionSpec":
+        if self.bias_fit_window is not None and self.bias_fit_artifact is not None:
+            raise ValueError("bias_fit_window and bias_fit_artifact are mutually exclusive")
+        if self.bias_fit_window is None and self.bias_fit_artifact is None:
+            raise ValueError("eof_projection requires bias_fit_window or bias_fit_artifact")
+        if self.support_min_fraction >= self.support_full_fraction:
+            raise ValueError("support_min_fraction must be below support_full_fraction")
+        return self
+
+
+class PeriodBandSpec(StrictSchema):
+    """Finite daily period band retained by the segmented wavelet filter."""
+
+    min: float = Field(gt=0.0)
+    max: float = Field(gt=0.0)
+    units: Literal["days"] = "days"
+
+    @model_validator(mode="after")
+    def _validate_order(self) -> "PeriodBandSpec":
+        if not math.isfinite(self.min) or not math.isfinite(self.max) or self.min >= self.max:
+            raise ValueError("wavelet band limits must be finite and increasing")
+        return self
+
+
+class WaveletFilterSpec(AnalysisSpecBase):
+    """Bounded-gap, significance-gated CWT filter for projected EOF modes."""
+
+    type: Literal["wavelet_filter"]
+    source: str
+    variable: str = "pc"
+    resolution_variable: str = "resolution"
+    min_resolution: float = Field(default=0.3, ge=0.0, lt=1.0)
+    keep_significant: bool = True
+    significance_level: float = Field(default=0.95, gt=0.0, lt=1.0)
+    band: PeriodBandSpec
+    max_bridge_days: float = Field(default=7.0, ge=0.0)
+    min_segment_days: float = Field(gt=0.0)
+    omega0: float = Field(default=6.0, gt=0.0)
+    dj: float = Field(default=0.25, gt=0.0)
+    s0: float | None = Field(default=None, gt=0.0)
+
+    @field_validator(
+        "significance_level",
+        "max_bridge_days",
+        "min_segment_days",
+        "omega0",
+        "dj",
+        "s0",
+    )
+    @classmethod
+    def _validate_finite_controls(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("wavelet filter numeric controls must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_segment_length(self) -> "WaveletFilterSpec":
+        if self.min_segment_days < 2.0 * self.band.max:
+            raise ValueError("min_segment_days must be at least twice band.max")
+        return self
+
+
+class AODScalingSpec(AnalysisSpecBase):
+    """Reconstruct and safely convert filtered log-AOD corrections to ratios."""
+
+    type: Literal["aod_scaling"]
+    basis: str
+    projection: str
+    coefficients: str
+    model: str
+    basis_variable: str = "eofs"
+    bias_variable: str = "clim_bias_applied"
+    support_variable: str = "spatial_support"
+    coefficients_variable: str = "pc"
+    model_variable: str = "aod"
+    r_bounds: tuple[float, float] = (0.2, 5.0)
+    aod_floor: float = Field(default=0.001, ge=0.0)
+    time_chunk_days: int = Field(default=31, ge=1)
+
+    def input_refs(self) -> dict[str, str]:
+        return {
+            "basis": self.basis,
+            "projection": self.projection,
+            "coefficients": self.coefficients,
+            "model": self.model,
+        }
+
+    @field_validator("r_bounds")
+    @classmethod
+    def _validate_ratio_bounds(cls, value: tuple[float, float]) -> tuple[float, float]:
+        if (
+            not all(math.isfinite(bound) for bound in value)
+            or value[0] <= 0.0
+            or value[0] >= value[1]
+        ):
+            raise ValueError("r_bounds must be finite, positive, and increasing")
+        return value
+
+    @field_validator("aod_floor")
+    @classmethod
+    def _validate_aod_floor(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("aod_floor must be finite")
+        return value
+
+
+class MMRWriterSpec(AnalysisSpecBase):
+    """Atomic per-file application of a scaling artifact to aerosol MMR fields."""
+
+    type: Literal["mmr_writer"]
+    scaling: str
+    files: str = Field(min_length=1)
+    species: list[str] | None = None
+    output_dir: str = Field(min_length=1)
+    time_interp: Literal["log_linear"] = "log_linear"
+    outside_coverage: Literal["identity", "skip", "error"] = "identity"
+    overwrite: bool = False
+    resume: bool = False
+    required: Literal[True] = True
+
+    def input_refs(self) -> dict[str, str]:
+        return {"scaling": self.scaling}
+
+    @field_validator("species")
+    @classmethod
+    def _validate_species(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if not value or any(not species.strip() for species in value):
+            raise ValueError("species must be a nonempty list of names")
+        if len(value) != len(set(value)):
+            raise ValueError("species names must be unique")
+        return value
+
+
+class KnownTruthSpec(AnalysisSpecBase):
+    """Read-only synthetic recovery metrics against an explicit oracle input."""
+
+    type: Literal["known_truth"]
+    estimate: str
+    truth: str
+    estimate_delta_variable: str = "delta_log_applied"
+    truth_delta_variable: str = "delta_filter_target_true"
+    full_truth_delta_variable: str | None = "delta_applied_true"
+    in_span_truth_delta_variable: str | None = "delta_in_span_true"
+    perpendicular_truth_delta_variable: str | None = "delta_perp_true"
+    estimate_aod_variable: str = "aod_target"
+    truth_aod_variable: str = "aod_filter_target_true"
+    full_truth_aod_variable: str | None = "aod_target_applied_true"
+    model_aod_variable: str = "model_aod_overpass_true"
+    estimate_basis_variable: str | None = "eofs"
+    truth_basis_variable: str | None = "pattern_true"
+    estimate_coefficient_variable: str | None = "pc"
+    truth_coefficient_variable: str | None = "correction_pc_filter_target_true"
+    support_variable: str | None = "spatial_support"
+    resolution_variable: str | None = "resolution"
+    observable_mode_variable: str | None = "mode_observable_true"
+    primary_mask_variable: str | None = None
+    split_variable: str | None = "split"
+    evaluation_splits: list[str] = Field(default_factory=lambda: ["development_test"])
+    best_representable_variable: str | None = "delta_best_representable_true"
+    required: bool = True
+
+    def input_refs(self) -> dict[str, str]:
+        return {"estimate": self.estimate, "truth": self.truth}
+
+    @field_validator("evaluation_splits")
+    @classmethod
+    def _validate_evaluation_splits(cls, value: list[str]) -> list[str]:
+        if not value or any(not split.strip() for split in value):
+            raise ValueError("evaluation_splits must contain at least one nonempty name")
+        if len(value) != len(set(value)):
+            raise ValueError("evaluation_splits must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_split_contract(self) -> "KnownTruthSpec":
+        if self.evaluation_splits and self.split_variable is None:
+            raise ValueError("split_variable is required when evaluation_splits are requested")
+        return self
+
+
 class FormulaFieldSpec(StrictSchema):
     """One named field produced by a gridded analysis formula."""
 
@@ -725,7 +1181,7 @@ class CustomWindowSpec(StrictSchema):
     end: datetime | str
 
 
-class GriddedAnalysisSpec(StrictSchema):
+class GriddedAnalysisSpec(AnalysisSpecBase):
     """Role/formula-driven gridded analysis product."""
 
     type: Literal["gridded_analysis"]
@@ -750,12 +1206,35 @@ class GriddedAnalysisSpec(StrictSchema):
         return value
 
 
-AnalysisSpec = EOFSpec | WaveletSpec | GriddedAnalysisSpec
+AnalysisSpec = (
+    EOFSpec
+    | WaveletSpec
+    | AODPreprocessSpec
+    | EOFProjectionSpec
+    | WaveletFilterSpec
+    | AODScalingSpec
+    | MMRWriterSpec
+    | KnownTruthSpec
+    | GriddedAnalysisSpec
+)
 
 
 def build_analysis_spec(cfg: Any) -> AnalysisSpec:
     """Build the right AnalysisSpec submodel from a dict, dispatching on type."""
-    if isinstance(cfg, (EOFSpec, WaveletSpec, GriddedAnalysisSpec)):
+    if isinstance(
+        cfg,
+        (
+            EOFSpec,
+            WaveletSpec,
+            AODPreprocessSpec,
+            EOFProjectionSpec,
+            WaveletFilterSpec,
+            AODScalingSpec,
+            MMRWriterSpec,
+            KnownTruthSpec,
+            GriddedAnalysisSpec,
+        ),
+    ):
         return cfg
     if not isinstance(cfg, dict):
         raise ValueError(f"analysis entry must be a mapping, got {type(cfg).__name__}")
@@ -764,11 +1243,25 @@ def build_analysis_spec(cfg: Any) -> AnalysisSpec:
         return EOFSpec(**cfg)
     if analysis_type == "wavelet":
         return WaveletSpec(**cfg)
+    if analysis_type == "aod_preprocess":
+        return AODPreprocessSpec(**cfg)
+    if analysis_type == "eof_projection":
+        return EOFProjectionSpec(**cfg)
+    if analysis_type == "wavelet_filter":
+        return WaveletFilterSpec(**cfg)
+    if analysis_type == "aod_scaling":
+        return AODScalingSpec(**cfg)
+    if analysis_type == "mmr_writer":
+        return MMRWriterSpec(**cfg)
+    if analysis_type == "known_truth":
+        return KnownTruthSpec(**cfg)
     if analysis_type == "gridded_analysis":
         return GriddedAnalysisSpec(**cfg)
     raise ValueError(
         "Unknown analysis type "
-        f"{analysis_type!r}. Available analysis types: eof, wavelet, gridded_analysis"
+        f"{analysis_type!r}. Available analysis types: eof, wavelet, "
+        "aod_preprocess, eof_projection, wavelet_filter, aod_scaling, "
+        "mmr_writer, known_truth, gridded_analysis"
     )
 
 
@@ -913,7 +1406,75 @@ class MonetConfig(StrictSchema):
         source_names = set(self.sources)
         pair_names = set(self.pairs)
         analysis_names = set(self.analyses)
+        artifact_analysis_names = {
+            name
+            for name, spec in self.analyses.items()
+            if isinstance(spec, (MMRWriterSpec, KnownTruthSpec))
+        }
         errors: list[str] = []
+
+        fit_types = {
+            "aod_preprocess",
+            "eof",
+            "eof_projection",
+            "wavelet_filter",
+            "aod_scaling",
+            "mmr_writer",
+        }
+        fit_analyses = {name for name, spec in self.analyses.items() if spec.type in fit_types}
+        truth_sources = {
+            name
+            for name, source in self.sources.items()
+            if source.evaluation_only or _source_looks_like_oracle(source)
+        }
+        known_truth = {
+            name: spec for name, spec in self.analyses.items() if isinstance(spec, KnownTruthSpec)
+        }
+
+        if known_truth and self.analysis.workflow != "synthetic_evaluation":
+            errors.append("known_truth requires analysis.workflow: synthetic_evaluation")
+        if self.analysis.workflow == "synthetic_fit" and fit_analyses and truth_sources:
+            names = ", ".join(sorted(truth_sources))
+            errors.append(f"synthetic fitting analyses cannot load oracle truth sources: {names}")
+        if self.analysis.workflow == "synthetic_fit":
+            if known_truth:
+                errors.append("synthetic_fit cannot contain known_truth analyses")
+            if truth_sources:
+                errors.append("synthetic_fit sources may reference only fitting inputs")
+        if self.analysis.workflow == "synthetic_evaluation":
+            disallowed = sorted(
+                name for name, spec in self.analyses.items() if not isinstance(spec, KnownTruthSpec)
+            )
+            if disallowed:
+                errors.append(
+                    "synthetic_evaluation may contain only known_truth analyses: "
+                    + ", ".join(disallowed)
+                )
+            if not known_truth:
+                errors.append("synthetic_evaluation requires at least one known_truth analysis")
+            for name, source in self.sources.items():
+                if name in truth_sources:
+                    continue
+                if source.artifact_manifest is None or source.artifact_role is None:
+                    errors.append(
+                        f"sources.{name} must be a finalized manifest-validated artifact "
+                        "in synthetic_evaluation"
+                    )
+            for name, spec in known_truth.items():
+                estimate = self.sources.get(spec.estimate)
+                truth = self.sources.get(spec.truth)
+                if estimate is not None and (
+                    spec.estimate in truth_sources
+                    or estimate.artifact_manifest is None
+                    or estimate.artifact_role is None
+                ):
+                    errors.append(
+                        f"analyses.{name}.estimate must reference a finalized fit artifact"
+                    )
+                if truth is not None and not truth.evaluation_only:
+                    errors.append(
+                        f"analyses.{name}.truth must reference an evaluation-only truth source"
+                    )
 
         for pair_name, pair in self.pairs.items():
             if source_names and pair.x.source not in source_names | analysis_names:
@@ -944,6 +1505,22 @@ class MonetConfig(StrictSchema):
             source_ref = plot.source
             if source_ref is not None and str(source_ref) not in source_names | analysis_names:
                 errors.append(f"plots.{plot_name}.source references unknown source '{source_ref}'")
+            if (
+                source_ref is not None
+                and str(source_ref) in artifact_analysis_names
+                and not _plotter_supports_artifact(plot.type)
+            ):
+                errors.append(
+                    f"plots.{plot_name}.source '{source_ref}' is an ARTIFACT analysis output "
+                    f"unsupported by plot type '{plot.type}'"
+                )
+
+        for suite_name, suite in self.plot_suites.items():
+            if suite.source in artifact_analysis_names:
+                errors.append(
+                    f"plot_suites.{suite_name}.source '{suite.source}' is an ARTIFACT "
+                    "analysis output"
+                )
 
         if self.stats is not None:
             for ref in self.stats.data:
@@ -954,13 +1531,57 @@ class MonetConfig(StrictSchema):
         for name in analysis_names & source_names:
             errors.append(f"analyses.{name} collides with a source of the same name")
 
-        # A valid source reference is a real source OR another analysis output.
+        # Every named input may reference a real source or another analysis output.
         resolvable = source_names | analysis_names
-        for a_name, a_spec in self.analyses.items():
-            if a_spec.source not in resolvable:
+
+        def require_saved_fit_source(owner: str, ref: str, expected_role: str) -> None:
+            source = self.sources.get(ref)
+            if source is None:
+                return
+            if (
+                source.artifact_manifest is None
+                or source.artifact_role != expected_role
+                or source.artifact_analysis is None
+            ):
                 errors.append(
-                    f"analyses.{a_name}.source references unknown source '{a_spec.source}'"
+                    f"analyses.{owner} saved fit source '{ref}' must configure "
+                    f"artifact_manifest, artifact_role: {expected_role}, and artifact_analysis"
                 )
+
+        for a_name, a_spec in self.analyses.items():
+            for role, ref in a_spec.input_refs().items():
+                if ref not in resolvable:
+                    errors.append(f"analyses.{a_name}.{role} references unknown source '{ref}'")
+            if isinstance(a_spec, EOFProjectionSpec):
+                if a_spec.bias_fit_artifact is not None:
+                    require_saved_fit_source(a_name, a_spec.bias_fit_artifact, "projection_fit")
+                if self.analysis.workflow == "synthetic_fit" and a_spec.basis in source_names:
+                    require_saved_fit_source(a_name, a_spec.basis, "basis_fit")
+                basis = self.analyses.get(a_spec.basis)
+                if isinstance(basis, EOFSpec):
+                    if basis.standardize:
+                        errors.append(
+                            f"analyses.{a_name}.basis '{a_spec.basis}' must use "
+                            "standardize=false"
+                        )
+                    if basis.rotation != "none":
+                        errors.append(
+                            f"analyses.{a_name}.basis '{a_spec.basis}' must use rotation=none"
+                        )
+            if isinstance(a_spec, EOFSpec) and a_spec.fit_artifact is not None:
+                require_saved_fit_source(a_name, a_spec.fit_artifact, "basis_fit")
+            if isinstance(a_spec, WaveletFilterSpec):
+                projection = self.analyses.get(a_spec.source)
+                if isinstance(projection, EOFProjectionSpec) and not math.isclose(
+                    a_spec.min_resolution,
+                    projection.min_resolution,
+                    rel_tol=0.0,
+                    abs_tol=1.0e-15,
+                ):
+                    errors.append(
+                        f"analyses.{a_name}.min_resolution must match "
+                        f"analyses.{a_spec.source}.min_resolution"
+                    )
 
         # Pairs may NOT reference a derived (analysis) source — not pairable.
         for pair_name, pair in self.pairs.items():
@@ -982,9 +1603,9 @@ class MonetConfig(StrictSchema):
                 errors.append(f"analyses dependency cycle detected at '{node}'")
                 return
             state[node] = 1
-            dep = self.analyses[node].source
-            if dep in analysis_names:
-                _visit(dep)
+            for dep in self.analyses[node].input_refs().values():
+                if dep in analysis_names:
+                    _visit(dep)
             state[node] = 2
 
         for a_name in analysis_names:

@@ -1,15 +1,22 @@
-"""Pipeline stage that runs derived analyses and registers their outputs.
-
-Each analysis consumes one source dataset (a raw source or a prior analysis
-output) and emits a derived dataset, which is wrapped in a ``SourceData`` and
-inserted back into ``context.sources`` so the rest of the pipeline treats it
-like any other source.
-"""
+"""Run derived analyses and register their outputs as pipeline sources."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, cast
 
+import xarray as xr
+
+from davinci_monet.analysis.artifacts import ArtifactService, build_analysis_artifact_identity
+from davinci_monet.analysis.base import (
+    AnalysisExecutionError,
+    AnalysisResult,
+    AnalysisRuntime,
+    ArtifactDeclaration,
+)
 from davinci_monet.core.registry import analysis_registry
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
@@ -20,27 +27,74 @@ from davinci_monet.pipeline.stages.base import (
 )
 
 
+@dataclass(frozen=True)
+class _AnalysisInputResolver:
+    """One named-input view used for both dependency ordering and execution."""
+
+    specs: Mapping[str, Any]
+
+    def input_refs(self, analysis_name: str) -> dict[str, str]:
+        spec = self.specs[analysis_name]
+        refs = spec.input_refs()
+        if not isinstance(refs, Mapping):
+            raise TypeError(f"analysis '{analysis_name}' input_refs() must return a mapping")
+        normalized: dict[str, str] = {}
+        for role, ref in refs.items():
+            if not isinstance(role, str) or not role:
+                raise ValueError(f"analysis '{analysis_name}' has an invalid input role {role!r}")
+            if not isinstance(ref, str) or not ref:
+                raise ValueError(
+                    f"analysis '{analysis_name}' input '{role}' has an invalid reference {ref!r}"
+                )
+            normalized[role] = ref
+        return normalized
+
+    def dependencies(self, analysis_name: str) -> tuple[str, ...]:
+        keys = self.specs.keys()
+        return tuple(
+            dict.fromkeys(ref for ref in self.input_refs(analysis_name).values() if ref in keys)
+        )
+
+    def topological_order(self) -> list[str]:
+        state: dict[str, int] = {}
+        order: list[str] = []
+
+        def visit(node: str) -> None:
+            if state.get(node, 0) == 2:
+                return
+            if state.get(node, 0) == 1:
+                raise ValueError(f"analyses dependency cycle detected at '{node}'")
+            state[node] = 1
+            for dependency in self.dependencies(node):
+                visit(dependency)
+            state[node] = 2
+            order.append(node)
+
+        for key in self.specs:
+            visit(key)
+        return order
+
+    def resolve(self, analysis_name: str, sources: Mapping[str, Any]) -> dict[str, xr.Dataset]:
+        inputs: dict[str, xr.Dataset] = {}
+        for role, ref in self.input_refs(analysis_name).items():
+            source_obj = sources.get(ref)
+            if source_obj is None:
+                raise ValueError(
+                    f"analysis '{analysis_name}' input '{role}' references unknown source '{ref}'"
+                )
+            dataset = source_obj.data if hasattr(source_obj, "data") else source_obj
+            if not isinstance(dataset, xr.Dataset):
+                raise TypeError(
+                    f"analysis '{analysis_name}' input '{role}' source '{ref}' is not an "
+                    "xarray.Dataset"
+                )
+            inputs[role] = dataset
+        return inputs
+
+
 def _topological_order(specs: dict[str, Any]) -> list[str]:
-    """Order analysis keys so each runs after the analysis it depends on."""
-    keys = set(specs)
-    state: dict[str, int] = {}
-    order: list[str] = []
-
-    def visit(node: str) -> None:
-        if state.get(node, 0) == 2:
-            return
-        if state.get(node, 0) == 1:
-            raise ValueError(f"analyses dependency cycle detected at '{node}'")
-        state[node] = 1
-        dep = specs[node].source
-        if dep in keys:
-            visit(dep)
-        state[node] = 2
-        order.append(node)
-
-    for key in specs:
-        visit(key)
-    return order
+    """Compatibility wrapper around the named-input resolver."""
+    return _AnalysisInputResolver(specs).topological_order()
 
 
 class AnalysesStage(BaseStage):
@@ -59,86 +113,177 @@ class AnalysesStage(BaseStage):
 
         start = time.time()
         specs = context.analyses_config()
+        resolver = _AnalysisInputResolver(specs)
         summary: dict[str, Any] = {}
+        states: dict[str, str] = {}
+        stage_errors: list[str] = []
+        fatal_errors: list[str] = []
+        success_count = 0
 
         try:
-            order = _topological_order(specs)
-        except ValueError as exc:
-            context.metadata.setdefault("analysis_errors", []).append(str(exc))
+            order = resolver.topological_order()
+        except (TypeError, ValueError) as exc:
+            message = str(exc)
+            context.metadata.setdefault("analysis_errors", []).append(message)
             return self._create_result(
-                StageStatus.FAILED, data=summary, error=str(exc), duration=time.time() - start
+                StageStatus.FAILED,
+                data=summary,
+                error=message,
+                duration=time.time() - start,
             )
+
+        analysis_config = context.analysis_config()
+        artifact_service = ArtifactService(Path(analysis_config.output_dir or "."))
+        runtime = AnalysisRuntime(
+            start_time=cast(datetime | None, analysis_config.start_time),
+            end_time=cast(datetime | None, analysis_config.end_time),
+            artifact_service=artifact_service,
+        )
+
+        def record_error(message: str) -> None:
+            stage_errors.append(message)
+            context.metadata.setdefault("analysis_errors", []).append(message)
 
         for key in order:
             spec = specs[key]
+            dependencies = resolver.dependencies(key)
+            blockers = [
+                dependency for dependency in dependencies if states.get(dependency) != "completed"
+            ]
+            if blockers:
+                message = f"{key}: dependency blocked by {', '.join(blockers)}"
+                states[key] = "dependency_blocked"
+                record_error(message)
+                blocked_entry = {
+                    "analysis": key,
+                    "dependencies": blockers,
+                    "required": bool(spec.required),
+                }
+                context.metadata.setdefault("analysis_dependency_blocked", []).append(blocked_entry)
+                summary[key] = {
+                    "type": spec.type,
+                    "status": "dependency_blocked",
+                    "dependencies": blockers,
+                }
+                if spec.required:
+                    fatal_errors.append(message)
+                continue
+
             try:
                 context.log_progress(f"    Analysis: {key} ({spec.type})")
-                src_obj = context.sources.get(spec.source)
-                if src_obj is None:
-                    raise ValueError(f"analysis '{key}' references unknown source '{spec.source}'")
-                in_ds = src_obj.data if hasattr(src_obj, "data") else src_obj
-
+                inputs = resolver.resolve(key, context.sources)
                 analysis = analysis_registry.get(spec.type)()
-                out_ds = analysis.analyze(in_ds, spec)
+                result = AnalysisResult.adapt(analysis.analyze_inputs(inputs, spec, runtime))
+                out_ds = result.dataset
 
                 geometry = analysis.output_geometry
                 out_ds.attrs["geometry"] = geometry.name.lower()
                 out_ds.attrs["derived"] = True
                 out_ds.attrs.setdefault("source_label", key)
-
-                artifact_config: dict[str, Any] = {}
-                if getattr(spec, "type", None) == "gridded_analysis":
-                    from davinci_monet.analysis.artifacts import (
-                        load_product_dataset,
-                        write_product_artifacts,
+            except Exception as exc:  # noqa: BLE001 - optional analyses are soft failures
+                if isinstance(exc, AnalysisExecutionError) and exc.manifest_entries:
+                    partial_entries = [
+                        {**dict(entry), "analysis": key} for entry in exc.manifest_entries
+                    ]
+                    context.metadata.setdefault("analysis_artifacts", []).extend(partial_entries)
+                    context.metadata.setdefault("analysis_partial_failure", []).append(
+                        {"analysis": key, "finalized_artifacts": len(partial_entries)}
                     )
-
-                    artifact = write_product_artifacts(
-                        context.analysis_config().output_dir or ".", key, out_ds
-                    )
-                    out_ds = load_product_dataset(artifact.analysis_path)
-                    artifact_config = {
-                        "artifact_path": str(artifact.analysis_path),
-                        "summary_path": str(artifact.summary_path),
-                    }
-                    context.metadata.setdefault("product_artifacts", {})[key] = artifact_config
-
-                out_ds.attrs["geometry"] = geometry.name.lower()
-                out_ds.attrs["derived"] = True
-                out_ds.attrs.setdefault("source_label", key)
-
-                context.sources[key] = SourceData(
-                    data=out_ds,
-                    label=key,
-                    source_type=spec.type,
-                    geometry=geometry,
-                    variables={},
-                    config={**spec.model_dump(), **artifact_config},
-                )
-                summary[key] = {
-                    "type": spec.type,
-                    "geometry": geometry.name.lower(),
-                    "variables": list(out_ds.data_vars),
-                }
-            except Exception as exc:  # noqa: BLE001 - soft per-analysis failure
-                context.metadata.setdefault("analysis_errors", []).append(f"{key}: {exc}")
+                message = f"{key}: {exc}"
+                states[key] = "failed"
+                record_error(message)
                 context.log_progress(f"warning: analysis failed for {key}: {exc}")
+                if spec.required:
+                    fatal_errors.append(message)
+                continue
 
-        errors = context.metadata.get("analysis_errors") or []
-        if errors:
-            if not summary:
+            try:
+                declarations: tuple[ArtifactDeclaration, ...] = ()
+                if result.artifacts:
+                    execution_identity = build_analysis_artifact_identity(spec, inputs, analysis)
+                    declarations = tuple(
+                        ArtifactDeclaration(
+                            kind=declaration.kind,
+                            role=declaration.role,
+                            reload=declaration.reload,
+                            options={
+                                **dict(declaration.options),
+                                "identity": {
+                                    **(
+                                        dict(declaration.options["identity"])
+                                        if isinstance(declaration.options.get("identity"), Mapping)
+                                        else {}
+                                    ),
+                                    **dict(execution_identity),
+                                },
+                            },
+                        )
+                        for declaration in result.artifacts
+                    )
+                materialized = artifact_service.materialize(key, out_ds, declarations)
+            except Exception as exc:  # noqa: BLE001 - persistence failures are always fatal
+                message = f"{key}: artifact write failed: {exc}"
+                states[key] = "failed"
+                record_error(message)
+                fatal_errors.append(message)
+                context.log_progress(f"error: {message}")
+                continue
+
+            out_ds = materialized.dataset
+            out_ds.attrs["geometry"] = geometry.name.lower()
+            out_ds.attrs["derived"] = True
+            out_ds.attrs.setdefault("source_label", key)
+
+            manifest_entries: list[Mapping[str, Any]] = [
+                {**dict(entry), "analysis": key} for entry in result.manifest_entries
+            ]
+            manifest_entries.extend(materialized.manifest_entries)
+            if manifest_entries:
+                context.metadata.setdefault("analysis_artifacts", []).extend(manifest_entries)
+            if materialized.product_metadata is not None:
+                context.metadata.setdefault("product_artifacts", {})[key] = dict(
+                    materialized.product_metadata
+                )
+
+            context.sources[key] = SourceData(
+                data=out_ds,
+                label=key,
+                source_type=spec.type,
+                geometry=geometry,
+                variables={},
+                config={**spec.model_dump(), **dict(materialized.source_config)},
+            )
+            summary[key] = {
+                "type": spec.type,
+                "geometry": geometry.name.lower(),
+                "variables": list(out_ds.data_vars),
+            }
+            states[key] = "completed"
+            success_count += 1
+
+        context.metadata["analysis_status"] = states
+        if fatal_errors:
+            return self._create_result(
+                StageStatus.FAILED,
+                data=summary,
+                error=fatal_errors[0],
+                duration=time.time() - start,
+                warnings=list(stage_errors),
+            )
+        if stage_errors:
+            if success_count == 0:
                 return self._create_result(
                     StageStatus.FAILED,
                     data=summary,
-                    error=f"all {len(errors)} analyses failed",
+                    error=f"all {len(specs)} analyses failed or were dependency blocked",
                     duration=time.time() - start,
-                    warnings=list(errors),
+                    warnings=list(stage_errors),
                 )
             return self._create_result(
                 StageStatus.COMPLETED,
                 data=summary,
                 duration=time.time() - start,
-                warnings=list(errors),
+                warnings=list(stage_errors),
             )
         return self._create_result(
             StageStatus.COMPLETED, data=summary, duration=time.time() - start

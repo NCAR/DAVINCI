@@ -9,6 +9,7 @@ import numpy as np
 import xarray as xr
 
 from davinci_monet.analysis.base import DerivedAnalysis
+from davinci_monet.analysis.cwt_core import cwt_transform
 from davinci_monet.analysis.reductions import (
     ar1_alpha,
     detrend_series,
@@ -34,8 +35,6 @@ class WaveletAnalysis(DerivedAnalysis):
     output_geometry = DataGeometry.SPECTRUM
 
     def analyze(self, data: xr.Dataset, spec: "WaveletSpec") -> xr.Dataset:
-        import pycwt
-
         series = select_series(data, spec)
         regular, dt, unit, frac = regularize(series)
         if frac > 0.5:
@@ -51,38 +50,18 @@ class WaveletAnalysis(DerivedAnalysis):
         alpha = ar1_alpha(y)  # estimate red noise BEFORE normalization
         y_norm, _std, _mean = normalize_series(y)
 
-        mother = pycwt.Morlet(spec.omega0)
-        s0 = spec.s0 if spec.s0 is not None else 2.0 * dt
-        big_j = spec.j if spec.j is not None else -1
-        wave, scales, freqs, coi, _, _ = pycwt.cwt(y_norm, dt, spec.dj, s0, big_j, mother)
-
-        power = np.abs(wave) ** 2  # (scale, time)
-        period = 1.0 / freqs  # (scale,)
-        n = y_norm.size
-
-        local_signif, _ = pycwt.significance(
-            1.0,
-            dt,
-            scales,
-            0,
-            alpha,
+        transform = cwt_transform(
+            y_norm,
+            dt=dt,
+            dj=spec.dj,
+            s0=spec.s0,
+            j=spec.j,
+            omega0=spec.omega0,
+            alpha=alpha,
             significance_level=spec.significance_level,
-            wavelet=mother,
         )
-        power_sig = power / local_signif[:, None]
-
-        global_power = power.mean(axis=1)  # (scale,)
-        dof = n - scales
-        global_signif, _ = pycwt.significance(
-            1.0,
-            dt,
-            scales,
-            1,
-            alpha,
-            significance_level=spec.significance_level,
-            dof=dof,
-            wavelet=mother,
-        )
+        power = transform.power
+        power_sig = power / transform.local_significance[:, None]
 
         ds = xr.Dataset(
             {
@@ -92,17 +71,25 @@ class WaveletAnalysis(DerivedAnalysis):
                     {"kind": "power", "long_name": "Wavelet power"},
                 ),
                 "power_significance": (("time", "period"), power_sig.T, {"kind": "power"}),
-                "coi": (("time",), np.asarray(coi, dtype=float), {"kind": "coi", "units": unit}),
-                "global_power": (("period",), global_power, {"kind": "global"}),
+                "coi": (
+                    ("time",),
+                    transform.coi,
+                    {"kind": "coi", "units": unit},
+                ),
+                "global_power": (("period",), transform.global_power, {"kind": "global"}),
                 "global_significance": (
                     ("period",),
-                    np.asarray(global_signif, dtype=float),
+                    transform.global_significance,
                     {"kind": "global"},
                 ),
             },
             coords={
                 "time": regular["time"].values,
-                "period": ("period", period, {"units": unit, "long_name": "Period"}),
+                "period": (
+                    "period",
+                    transform.periods,
+                    {"units": unit, "long_name": "Period"},
+                ),
             },
         )
         ds.attrs["wavelet_quantity"] = spec.variable

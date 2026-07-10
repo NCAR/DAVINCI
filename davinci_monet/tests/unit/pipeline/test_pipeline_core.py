@@ -78,7 +78,7 @@ def sample_paired_dataset() -> xr.Dataset:
 @pytest.fixture
 def context_with_paired(sample_paired_dataset: xr.Dataset) -> PipelineContext:
     """Create a context with paired data."""
-    ctx = PipelineContext()
+    ctx = PipelineContext(config={"stats": {"metrics": ["N", "MB", "RMSE", "R"]}})
     ctx.paired["test_dataset_test_geometry"] = sample_paired_dataset
     return ctx
 
@@ -212,7 +212,7 @@ class TestPipelineContext:
             assert stats.min_samples == 7
             assert isinstance(ctx.analysis_config(), AnalysisConfig)
 
-        # No stats section -> None, so the stage falls back to legacy defaults.
+        # The accessor preserves absence; workflow policy is applied by the stage.
         empty_context = PipelineContext()
         assert empty_context.stats_config() is None
         assert isinstance(empty_context.analysis_config(), AnalysisConfig)
@@ -611,6 +611,29 @@ class TestStatisticsStage:
         ctx = PipelineContext()
 
         assert stage.validate(ctx) is False
+
+    def test_standard_workflow_uses_legacy_stats_defaults_with_paired_data(
+        self, sample_paired_dataset: xr.Dataset
+    ) -> None:
+        ctx = PipelineContext(paired={"pair": sample_paired_dataset})
+
+        assert StatisticsStage().validate(ctx) is True
+        result = StatisticsStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        assert "pair" in result.data
+
+    def test_synthetic_fit_requires_explicit_stats(self, sample_paired_dataset: xr.Dataset) -> None:
+        ctx = PipelineContext(
+            config={"analysis": {"workflow": "synthetic_fit"}},
+            paired={"pair": sample_paired_dataset},
+        )
+
+        assert StatisticsStage().validate(ctx) is False
+        result = StatisticsStage().execute(ctx)
+
+        assert result.status is StageStatus.SKIPPED
+        assert result.data == {}
 
     def test_execute_calculates_stats(self, context_with_paired: PipelineContext):
         """Test statistics are calculated correctly."""

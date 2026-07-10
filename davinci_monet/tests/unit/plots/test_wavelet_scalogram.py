@@ -12,6 +12,8 @@ import pandas as pd  # noqa: E402
 import xarray as xr  # noqa: E402
 from matplotlib.collections import QuadMesh  # noqa: E402
 
+from davinci_monet.analysis.wavelet_filter import filter_projected_coefficients  # noqa: E402
+from davinci_monet.config.schema import PeriodBandSpec, WaveletFilterSpec  # noqa: E402
 from davinci_monet.plots.base import build_series  # noqa: E402
 from davinci_monet.plots.renderers.wavelet_scalogram import WaveletScalogramPlotter  # noqa: E402
 
@@ -43,4 +45,47 @@ def test_scalogram_quadmesh_and_global_panel() -> None:
     # Dense data layer is rasterized so the vector PDF stays small.
     assert meshes[0].get_rasterized() is True
     assert len(fig.axes) >= 2
+    plt.close(fig)
+
+
+def test_scalogram_uses_mode_selected_filter_arrays() -> None:
+    nt = 256
+    time = pd.date_range("2001-01-01", periods=nt, freq="D")
+    signal = np.sin(2.0 * np.pi * np.arange(nt) / 16.0)
+    projection = xr.Dataset(
+        {
+            "pc": (("time", "mode"), np.stack((signal, 0.5 * signal), axis=1)),
+            "resolution": (("time", "mode"), np.ones((nt, 2))),
+        },
+        coords={"time": time, "mode": [1, 2]},
+        attrs={
+            "projection_basis_signature": "plot-test-basis",
+            "projection_log_epsilon": 0.01,
+        },
+    )
+    spec = WaveletFilterSpec(
+        type="wavelet_filter",
+        source="projection",
+        band=PeriodBandSpec(min=8.0, max=32.0),
+        min_segment_days=64.0,
+        keep_significant=False,
+    )
+    selected = filter_projected_coefficients(projection, spec).sel(mode=2)
+
+    fig = WaveletScalogramPlotter().render(build_series(selected, "power"))
+
+    meshes = [
+        collection for collection in fig.axes[0].collections if isinstance(collection, QuadMesh)
+    ]
+    assert len(meshes) == 1
+    expected_power = selected["power"].transpose("period", "time").values
+    np.testing.assert_allclose(
+        np.asarray(meshes[0].get_array()).reshape(expected_power.shape),
+        expected_power,
+    )
+    global_lines = fig.axes[1].get_lines()
+    np.testing.assert_allclose(
+        np.asarray(global_lines[0].get_xdata(), dtype=float),
+        selected["global_power"].values,
+    )
     plt.close(fig)

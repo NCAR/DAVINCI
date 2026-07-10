@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 import xarray as xr
 
-from davinci_monet.analysis import DerivedAnalysis
+from davinci_monet.analysis import AnalysisResult, ArtifactDeclaration, DerivedAnalysis
+from davinci_monet.analysis.base import AnalysisExecutionError
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.registry import analysis_registry
 from davinci_monet.pipeline.stages.analyses import AnalysesStage
 from davinci_monet.pipeline.stages.base import PipelineContext, SourceData, StageStatus
+
+
+@dataclass(frozen=True)
+class _NamedSpec:
+    type: str
+    refs: dict[str, str]
+    required: bool = False
+
+    def input_refs(self) -> dict[str, str]:
+        return dict(self.refs)
+
+    def model_dump(self) -> dict[str, object]:
+        return {"type": self.type, "refs": dict(self.refs), "required": self.required}
 
 
 @pytest.fixture
@@ -116,6 +132,254 @@ def test_stage_analysis_item_error_completes_with_warning() -> None:
             analysis_registry.register("eof", _prev, replace=True)
         else:
             analysis_registry.unregister("eof")
+
+
+def test_stage_resolves_named_inputs_runtime_and_declared_artifacts(tmp_path, monkeypatch) -> None:
+    previous = analysis_registry.get_or_none("named_merge")
+    seen: list[float] = []
+
+    class _NamedMerge(DerivedAnalysis):
+        name = "named_merge"
+        output_geometry = DataGeometry.ARTIFACT
+
+        def analyze_inputs(self, inputs, spec, runtime):  # noqa: ANN001
+            assert runtime.start_time is not None
+            assert runtime.end_time is not None
+            merged = inputs["left"]["x"] + inputs["right"]["x"]
+            seen.append(float(merged.values[0]))
+            return AnalysisResult(
+                xr.Dataset({"x": merged}),
+                artifacts=(ArtifactDeclaration("product", role="merged", reload=True),),
+                manifest_entries=({"role": "diagnostic", "value": seen[-1]},),
+            )
+
+    analysis_registry.register("named_merge", _NamedMerge, replace=True)
+    try:
+        left = SourceData(
+            xr.Dataset({"x": ("time", [1.0])}),
+            "left",
+            "generic",
+            DataGeometry.GRID,
+        )
+        right = SourceData(
+            xr.Dataset({"x": ("time", [10.0])}),
+            "right",
+            "generic",
+            DataGeometry.GRID,
+        )
+        ctx = PipelineContext(
+            config={
+                "analysis": {
+                    "start_time": "2024-01-01",
+                    "end_time": "2024-01-02",
+                    "output_dir": str(tmp_path),
+                }
+            },
+            sources={"left": left, "right": right},
+        )
+        specs = {
+            "downstream": _NamedSpec("named_merge", {"left": "combined", "right": "right"}),
+            "combined": _NamedSpec("named_merge", {"left": "left", "right": "right"}),
+        }
+        monkeypatch.setattr(ctx, "analyses_config", lambda: specs)
+
+        result = AnalysesStage().execute(ctx)
+
+        assert result.status is StageStatus.COMPLETED
+        assert seen == [11.0, 21.0]
+        assert ctx.sources["combined"].geometry is DataGeometry.ARTIFACT
+        assert ctx.sources["downstream"].data["x"].item() == 21.0
+        assert (tmp_path / "products" / "combined" / "analysis.nc").exists()
+        assert ctx.metadata["product_artifacts"]["combined"]["artifact_path"].endswith(
+            "analysis.nc"
+        )
+        assert {entry["analysis"] for entry in ctx.metadata["analysis_artifacts"]} == {
+            "combined",
+            "downstream",
+        }
+        persisted = [
+            entry for entry in ctx.metadata["analysis_artifacts"] if entry.get("kind") == "product"
+        ]
+        assert len(persisted) == 2
+        for entry in persisted:
+            identity = entry["identity"]
+            for bucket in ("source_hashes", "config_hashes", "code_hashes"):
+                assert identity[bucket]
+                assert all(len(value) == 64 for value in identity[bucket].values())
+            assert identity["declared"]["config_normalized"]["type"] == "named_merge"
+    finally:
+        if previous is not None:
+            analysis_registry.register("named_merge", previous, replace=True)
+        else:
+            analysis_registry.unregister("named_merge")
+
+
+def test_required_failure_is_fatal_and_descendant_is_dependency_blocked() -> None:
+    previous = {name: analysis_registry.get_or_none(name) for name in ("eof", "wavelet")}
+    wavelet_calls = 0
+
+    class _FailingEOF(DerivedAnalysis):
+        name = "eof"
+        output_geometry = DataGeometry.GRID
+
+        def analyze(self, data, spec):  # noqa: ANN001
+            if spec.variable == "BAD":
+                raise RuntimeError("forced required failure")
+            return xr.Dataset({"pc": ("time", np.arange(3.0))})
+
+    class _CountingWavelet(DerivedAnalysis):
+        name = "wavelet"
+        output_geometry = DataGeometry.SPECTRUM
+
+        def analyze(self, data, spec):  # noqa: ANN001
+            nonlocal wavelet_calls
+            wavelet_calls += 1
+            return xr.Dataset({"power": ("time", np.ones(3))})
+
+    analysis_registry.register("eof", _FailingEOF, replace=True)
+    analysis_registry.register("wavelet", _CountingWavelet, replace=True)
+    try:
+        ctx = _ctx()
+        assert isinstance(ctx.config, dict)
+        ctx.config["analyses"] = {
+            "blocked_child": {
+                "type": "wavelet",
+                "source": "bad_parent",
+                "variable": "pc",
+                "required": True,
+            },
+            "bad_parent": {
+                "type": "eof",
+                "source": "cam",
+                "variable": "BAD",
+                "required": True,
+            },
+            "independent": {"type": "eof", "source": "cam", "variable": "O3"},
+        }
+
+        result = AnalysesStage().execute(ctx)
+
+        assert result.status is StageStatus.FAILED
+        assert result.error == "bad_parent: forced required failure"
+        assert wavelet_calls == 0
+        assert "independent" in ctx.sources
+        assert ctx.metadata["analysis_status"] == {
+            "bad_parent": "failed",
+            "blocked_child": "dependency_blocked",
+            "independent": "completed",
+        }
+        assert ctx.metadata["analysis_dependency_blocked"] == [
+            {
+                "analysis": "blocked_child",
+                "dependencies": ["bad_parent"],
+                "required": True,
+            }
+        ]
+    finally:
+        for name, old in previous.items():
+            if old is not None:
+                analysis_registry.register(name, old, replace=True)
+            else:
+                analysis_registry.unregister(name)
+
+
+def test_declared_artifact_failure_is_fatal_for_optional_analysis(tmp_path, monkeypatch) -> None:
+    previous = analysis_registry.get_or_none("bad_artifact")
+
+    class _BadArtifact(DerivedAnalysis):
+        name = "bad_artifact"
+        output_geometry = DataGeometry.GRID
+
+        def analyze_inputs(self, inputs, spec, runtime):  # noqa: ANN001
+            return AnalysisResult(
+                dataset=inputs["source"],
+                artifacts=(ArtifactDeclaration("unsupported"),),
+            )
+
+    analysis_registry.register("bad_artifact", _BadArtifact, replace=True)
+    try:
+        source = SourceData(
+            xr.Dataset({"x": ("time", [1.0])}),
+            "source",
+            "generic",
+            DataGeometry.GRID,
+        )
+        ctx = PipelineContext(
+            config={"analysis": {"output_dir": str(tmp_path)}},
+            sources={"source": source},
+        )
+        specs = {"bad": _NamedSpec("bad_artifact", {"source": "source"})}
+        monkeypatch.setattr(ctx, "analyses_config", lambda: specs)
+
+        result = AnalysesStage().execute(ctx)
+
+        assert result.status is StageStatus.FAILED
+        assert result.error is not None
+        assert "artifact write failed" in result.error
+        assert "bad" not in ctx.sources
+        assert ctx.metadata["analysis_status"] == {"bad": "failed"}
+    finally:
+        if previous is not None:
+            analysis_registry.register("bad_artifact", previous, replace=True)
+        else:
+            analysis_registry.unregister("bad_artifact")
+
+
+def test_analysis_failure_preserves_finalized_manifest_receipts(tmp_path, monkeypatch) -> None:
+    previous = analysis_registry.get_or_none("partial_writer")
+
+    class _PartialWriter(DerivedAnalysis):
+        name = "partial_writer"
+        output_geometry = DataGeometry.ARTIFACT
+
+        def analyze_inputs(self, inputs, spec, runtime):  # noqa: ANN001
+            raise AnalysisExecutionError(
+                "second output failed",
+                manifest_entries=(
+                    {
+                        "role": "corrected_mmr",
+                        "kind": "mmr_file",
+                        "status": "written",
+                        "path": str(tmp_path / "first.nc4"),
+                    },
+                ),
+            )
+
+    analysis_registry.register("partial_writer", _PartialWriter, replace=True)
+    try:
+        source = SourceData(
+            xr.Dataset({"x": ("time", [1.0])}),
+            "source",
+            "generic",
+            DataGeometry.GRID,
+        )
+        ctx = PipelineContext(
+            config={"analysis": {"output_dir": str(tmp_path)}},
+            sources={"source": source},
+        )
+        specs = {"writer": _NamedSpec("partial_writer", {"source": "source"}, required=True)}
+        monkeypatch.setattr(ctx, "analyses_config", lambda: specs)
+
+        result = AnalysesStage().execute(ctx)
+
+        assert result.status is StageStatus.FAILED
+        assert ctx.metadata["analysis_artifacts"] == [
+            {
+                "role": "corrected_mmr",
+                "kind": "mmr_file",
+                "status": "written",
+                "path": str(tmp_path / "first.nc4"),
+                "analysis": "writer",
+            }
+        ]
+        assert ctx.metadata["analysis_partial_failure"] == [
+            {"analysis": "writer", "finalized_artifacts": 1}
+        ]
+    finally:
+        if previous is not None:
+            analysis_registry.register("partial_writer", previous, replace=True)
+        else:
+            analysis_registry.unregister("partial_writer")
 
 
 def test_stage_defaults_gridded_analysis_source_label_to_analysis_key(tmp_path) -> None:

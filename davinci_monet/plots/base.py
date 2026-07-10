@@ -63,6 +63,7 @@ from davinci_monet.plots.series import (
 if TYPE_CHECKING:
     import matplotlib.axes
     import matplotlib.figure
+    import matplotlib.transforms
     import numpy as np
     import xarray as xr
 
@@ -359,7 +360,7 @@ class BasePlotter(ABC):
         fig: matplotlib.figure.Figure,
         output_path: str | Path,
         dpi: int | None = None,
-        bbox_inches: str = "tight",
+        bbox_inches: str | matplotlib.transforms.Bbox | None = "tight",
         **kwargs: Any,
     ) -> Path:
         """Save figure to file.

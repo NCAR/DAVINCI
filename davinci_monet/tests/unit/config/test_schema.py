@@ -30,6 +30,7 @@ class TestAnalysisConfig:
         assert config.start_time is None
         assert config.end_time is None
         assert config.debug is False
+        assert config.workflow == "standard"
 
     def test_datetime_parsing_standard(self) -> None:
         """Test standard datetime format parsing."""
@@ -172,6 +173,29 @@ class TestSourceConfig:
         """Test files are kept as strings for glob patterns."""
         config = SourceConfig(files="/path/to/*.nc")
         assert config.files == "/path/to/*.nc"
+
+    def test_time_padding_duration_is_validated(self) -> None:
+        config = SourceConfig(time_padding="1D")
+        assert config.time_padding == "1D"
+
+        with pytest.raises(ValueError, match="time_padding must be non-negative"):
+            SourceConfig(time_padding="-1h")
+
+        with pytest.raises(ValueError, match="valid duration"):
+            SourceConfig(time_padding="tomorrowish")
+
+    def test_finalized_artifact_descriptor_is_all_or_nothing(self) -> None:
+        config = SourceConfig(
+            artifact_manifest="/run/manifest.json",
+            artifact_role="scaling",
+            artifact_analysis="scaling",
+        )
+        assert config.artifact_role == "scaling"
+
+        with pytest.raises(ValueError, match="configured together"):
+            SourceConfig(artifact_manifest="/run/manifest.json")
+        with pytest.raises(ValueError, match="artifact_analysis requires"):
+            SourceConfig(artifact_analysis="scaling")
 
     def test_source_mapping_is_rejected(self) -> None:
         """Pair variables must be declared in pairs."""
@@ -395,6 +419,275 @@ class TestMonetConfig:
         )
         assert config.stats is not None
         assert config.stats.round_output == 2
+
+    @staticmethod
+    def _synthetic_evaluation_config() -> dict[str, Any]:
+        return {
+            "analysis": {"workflow": "synthetic_evaluation"},
+            "sources": {
+                "estimate": {
+                    "type": "generic",
+                    "files": "/run/artifacts/scaling/chunk-*.nc",
+                    "artifact_manifest": "/run/manifest.json",
+                    "artifact_role": "scaling",
+                    "artifact_analysis": "scaling",
+                },
+                "truth": {
+                    "type": "generic",
+                    "files": "/run/oracle/truth.nc",
+                    "evaluation_only": True,
+                },
+            },
+            "analyses": {
+                "recovery": {
+                    "type": "known_truth",
+                    "estimate": "estimate",
+                    "truth": "truth",
+                }
+            },
+        }
+
+    def test_synthetic_evaluation_requires_finalized_inputs_and_explicit_truth(self) -> None:
+        config = validate_schema(MonetConfig, self._synthetic_evaluation_config())
+        assert config.analysis.workflow == "synthetic_evaluation"
+        assert config.sources["truth"].evaluation_only is True
+
+        raw_estimate = self._synthetic_evaluation_config()
+        raw_estimate["sources"]["estimate"].pop("artifact_manifest")
+        raw_estimate["sources"]["estimate"].pop("artifact_role")
+        raw_estimate["sources"]["estimate"].pop("artifact_analysis")
+        with pytest.raises(ValueError, match="finalized manifest-validated artifact"):
+            validate_schema(MonetConfig, raw_estimate)
+
+        unmarked_truth = self._synthetic_evaluation_config()
+        unmarked_truth["sources"]["truth"].pop("evaluation_only")
+        with pytest.raises(ValueError, match="evaluation-only truth source"):
+            validate_schema(MonetConfig, unmarked_truth)
+
+        oracle_estimate = self._synthetic_evaluation_config()
+        oracle_estimate["sources"]["estimate"]["files"] = "/run/oracle/truth.nc"
+        with pytest.raises(ValueError, match="estimate must reference a finalized fit artifact"):
+            validate_schema(MonetConfig, oracle_estimate)
+
+    def test_known_truth_is_rejected_outside_synthetic_evaluation(self) -> None:
+        config = self._synthetic_evaluation_config()
+        config["analysis"]["workflow"] = "standard"
+        with pytest.raises(ValueError, match="known_truth requires"):
+            validate_schema(MonetConfig, config)
+
+    def test_synthetic_fit_rejects_oracle_sources(self) -> None:
+        with pytest.raises(ValueError, match="cannot load oracle truth"):
+            validate_schema(
+                MonetConfig,
+                {
+                    "analysis": {"workflow": "synthetic_fit"},
+                    "sources": {
+                        "model": {"type": "generic", "files": "/run/inputs/model.nc"},
+                        "truth": {
+                            "type": "generic",
+                            "files": "/run/oracle/truth.nc",
+                            "variables": {"delta_filter_target_true": {}},
+                        },
+                    },
+                    "analyses": {
+                        "basis": {
+                            "type": "eof",
+                            "source": "model",
+                            "variable": "aod",
+                        }
+                    },
+                },
+            )
+
+    def test_synthetic_saved_fits_require_finalized_manifest_descriptors(self) -> None:
+        config: dict[str, Any] = {
+            "analysis": {"workflow": "synthetic_fit"},
+            "sources": {
+                "basis": {"type": "generic", "files": "/run/basis.nc"},
+                "projection_fit": {"type": "generic", "files": "/run/projection.nc"},
+                "model": {"type": "generic", "files": "/run/model.nc"},
+                "obs": {"type": "generic", "files": "/run/obs.nc"},
+            },
+            "analyses": {
+                "projection": {
+                    "type": "eof_projection",
+                    "basis": "basis",
+                    "model": "model",
+                    "model_variable": "log_aod",
+                    "obs": [
+                        {
+                            "source": "obs",
+                            "variable": "log_aod",
+                            "error_variable": "sigma",
+                        }
+                    ],
+                    "bias_fit_artifact": "projection_fit",
+                }
+            },
+        }
+
+        with pytest.raises(ValueError, match="saved fit source 'basis'.*basis_fit"):
+            validate_schema(MonetConfig, config)
+
+        manifest = "/run/manifest.json"
+        config["sources"]["basis"].update(
+            artifact_manifest=manifest,
+            artifact_role="basis_fit",
+            artifact_analysis="aod_basis",
+        )
+        with pytest.raises(ValueError, match="saved fit source 'projection_fit'.*projection_fit"):
+            validate_schema(MonetConfig, config)
+
+        config["sources"]["projection_fit"].update(
+            artifact_manifest=manifest,
+            artifact_role="projection_fit",
+            artifact_analysis="obs_pcs",
+        )
+        parsed = validate_schema(MonetConfig, config)
+        assert parsed.sources["basis"].artifact_role == "basis_fit"
+
+    def test_wavelet_resolution_threshold_matches_projection_source(self) -> None:
+        config: dict[str, Any] = {
+            "sources": {
+                "basis": {"type": "generic"},
+                "model": {"type": "generic"},
+                "obs": {"type": "generic"},
+            },
+            "analyses": {
+                "projection": {
+                    "type": "eof_projection",
+                    "basis": "basis",
+                    "model": "model",
+                    "model_variable": "log_aod",
+                    "obs": [
+                        {
+                            "source": "obs",
+                            "variable": "log_aod",
+                            "error_variable": "sigma",
+                        }
+                    ],
+                    "bias_fit_window": {"start": "2001-01-01", "end": "2001-12-31"},
+                    "min_resolution": 0.4,
+                },
+                "filtered": {
+                    "type": "wavelet_filter",
+                    "source": "projection",
+                    "min_resolution": 0.3,
+                    "band": {"min": 4.0, "max": 32.0},
+                    "min_segment_days": 64.0,
+                },
+            },
+        }
+
+        with pytest.raises(ValueError, match="min_resolution must match"):
+            validate_schema(MonetConfig, config)
+
+        config["analyses"]["filtered"]["min_resolution"] = 0.4
+        parsed = validate_schema(MonetConfig, config)
+        assert parsed.analyses["filtered"].min_resolution == 0.4
+
+    def test_projection_rejects_incompatible_derived_eof_basis(self) -> None:
+        def config_with_basis(*, standardize: bool, rotation: str) -> dict[str, Any]:
+            return {
+                "sources": {
+                    "model": {"type": "generic"},
+                    "obs": {"type": "generic"},
+                },
+                "analyses": {
+                    "basis": {
+                        "type": "eof",
+                        "source": "model",
+                        "variable": "log_aod",
+                        "standardize": standardize,
+                        "rotation": rotation,
+                    },
+                    "projection": {
+                        "type": "eof_projection",
+                        "basis": "basis",
+                        "model": "model",
+                        "model_variable": "log_aod",
+                        "obs": [
+                            {
+                                "source": "obs",
+                                "variable": "log_aod",
+                                "error_variable": "sigma",
+                            }
+                        ],
+                        "bias_fit_window": {
+                            "start": "2001-01-01",
+                            "end": "2001-12-31",
+                        },
+                    },
+                },
+            }
+
+        with pytest.raises(ValueError, match="standardize=false"):
+            validate_schema(
+                MonetConfig,
+                config_with_basis(standardize=True, rotation="none"),
+            )
+        with pytest.raises(ValueError, match="rotation=none"):
+            validate_schema(
+                MonetConfig,
+                config_with_basis(standardize=False, rotation="varimax"),
+            )
+
+    def test_plot_rejects_artifact_analysis_source(self) -> None:
+        with pytest.raises(ValueError, match="ARTIFACT analysis output"):
+            validate_schema(
+                MonetConfig,
+                {
+                    "sources": {"scaling": {"type": "generic"}},
+                    "analyses": {
+                        "corrected": {
+                            "type": "mmr_writer",
+                            "scaling": "scaling",
+                            "files": "/run/mmr/*.nc4",
+                            "output_dir": "/run/corrected",
+                        }
+                    },
+                    "plots": {
+                        "invalid": {
+                            "type": "histogram",
+                            "source": "corrected",
+                            "variable": "outside_coverage_identity_count",
+                        }
+                    },
+                },
+            )
+
+    def test_synthetic_evaluation_cannot_refit(self) -> None:
+        config = self._synthetic_evaluation_config()
+        config["analyses"]["refit"] = {
+            "type": "eof",
+            "source": "estimate",
+            "variable": "aod_target",
+        }
+        with pytest.raises(ValueError, match="only known_truth"):
+            validate_schema(MonetConfig, config)
+
+    def test_normal_configs_do_not_apply_synthetic_oracle_path_rules(self) -> None:
+        config = validate_schema(
+            MonetConfig,
+            {
+                "sources": {
+                    "reference": {
+                        "type": "generic",
+                        "files": "/ordinary/oracle/reference.nc",
+                        "variables": {"temperature_true": {}},
+                    }
+                },
+                "analyses": {
+                    "reference_eof": {
+                        "type": "eof",
+                        "source": "reference",
+                        "variable": "temperature_true",
+                    }
+                },
+            },
+        )
+        assert "reference" in config.sources
+        assert "reference_eof" in config.analyses
 
     def test_full_config(self) -> None:
         """Test full configuration using the unified sources/pairs schema."""

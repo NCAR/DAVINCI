@@ -1,0 +1,13 @@
+# Generated synthetic inputs and evaluation truth
+/synthetic/
+/inputs/
+/oracle/
+/corrected/
+/scenario.json
+
+# Pipeline products
+/output/
+/evaluation/
+/plots/
+/logs/
+/evaluation-logs/

@@ -1,10 +1,30 @@
 # FABLE_PLAN — Aerosol Mode-Space Tuning: MERRA-2/GEOS-IT AOD → MODIS/VIIRS
 
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
-> Status: **pre-flight revised, awaiting approval**. Original design written 2026-07-07;
-> synthetic-first pre-flight revision completed 2026-07-10.
+> Status: **P0-P8 implementation complete; `SYNTHETIC_READY` acceptance pending**. Original design
+> written 2026-07-07; synthetic-first pre-flight revision and implementation completed 2026-07-10.
 > Authors: Claude Fable 5 (original planning session with D. Fillmore); Codex (pre-flight review).
-> No FABLE implementation code has been written.
+
+## Implementation checkpoint (2026-07-10)
+
+- The P0-P8 software path is implemented without adding real-data readers or accessing MERRA-2,
+  GEOS-IT, MODIS, or VIIRS data. P9 remains blocked by the gate in §8.5.
+- The frozen synthetic calibration policy is stored in
+  `analyses/aerosol-tuning/configs/fable-synthetic-calibration.json`; acceptance validates its
+  canonical SHA-256 (`ec4da72d4380046034486dd47eb0c3f1bab703c6dacae5a901dfe9a90637d6db`),
+  current code/template identity (`f9c2725fe568662f4da425dead8252f724ce6d7921ef0deed7de606400f8f022`),
+  and rejects fitting-template policy drift. The selected `fable-v1-all-band` policy retains all
+  coefficients inside the band while reporting 95% pointwise significance diagnostically; its
+  calibration NRMSE is 0.1442 and null retained-energy/significant fractions are 0.0273/0.0453.
+- A post-freeze, development-only seed (`20260712`) passed every recovery threshold: correlation
+  0.9945, origin slope 0.9937, NRMSE 0.1303, filter-target AOD RMSE ratio 0.1311, full-target
+  AOD RMSE ratio 0.2660, and holdout AOD RMSE ratio 0.4952. This is not an acceptance seed.
+- T1-T6 passed in 36.78 seconds with 1,169,396 KiB peak RSS, within the 60-second/2-GiB limits.
+  The full repository reported 1,987 passed and 10 skipped in 157.70 seconds; mypy, Black, and
+  isort are clean.
+- `SYNTHETIC_READY` is **not approved**: the required three distinct user-supplied
+  `synthetic_osse` seeds have not been supplied or run, and the user has not reviewed their
+  aggregate/per-seed report. No acceptance seeds were invented during development.
 
 ---
 
@@ -33,7 +53,8 @@ gate in §8.5 is approved. Generated NetCDF/Zarr and plots are untracked run art
 6. Daily MODIS support is not catalog-only: timestamp cadence, canonical variable naming, and QA
    behavior require reader work. That work is explicitly deferred until after `SYNTHETIC_READY`.
 
-**Repository baseline (not caused by this document change):** on `develop` at `2b62d7f`, in the
+**Historical repository baseline at pre-flight (not caused by this document change):** on
+`develop` at `2b62d7f`, in the
 active `davinci` environment, pytest reported 1,749 passed, 10 skipped, and 5 failed because
 `pycwt` is not installed; mypy reported 2 errors; Black flagged 1 file; isort passed. Restore or
 explicitly disposition those baseline gates before implementation. The required environment name
@@ -196,7 +217,8 @@ Properties that answer the seasonal-mask question:
 3. For each accepted segment fit/remove `mu + beta*(t-t_bar)`, estimate AR(1), and compute the CWT
    on the common scale grid. Mean/trend are re-added only inside that segment and intentionally
    bypass the configured wavelet band.
-4. Zero coefficients failing the pointwise AR(1) significance test (`keep_significant: true`).
+4. If `keep_significant: true`, zero coefficients failing the pointwise AR(1) significance test.
+   The calibrated v1 all-band policy sets this false but still records significance diagnostics.
 5. Zero coefficients outside the configured period band `[T_min, T_max]` (`band:`); COI is kept
    for reconstruction but is excluded from acceptance scoring; the retained COI fraction is stored.
 6. Inverse CWT (`pycwt.icwt`, Torrence & Compo 1998 eq. 11), restore segment mean/trend, then apply
@@ -383,7 +405,7 @@ analyses:
     type: wavelet_filter
     source: obs_pcs
     variable: pc
-    keep_significant: true
+    keep_significant: false
     significance_level: 0.95
     band: { min: 4, max: 180, units: days }
     max_bridge_days: 7
@@ -438,8 +460,9 @@ are fixed at their boundary and covered by reader integration tests.
 
 ## 4. New components (file by file)
 
-All new modules stay < 500 lines (project goal); pure math lives in plain functions for unit
-testability, analysis classes are thin adapters — mirroring `eof.py`'s structure.
+All new implementation modules stay < 500 lines (project goal); pure math lives in plain functions
+for unit testability, analysis classes are thin adapters — mirroring `eof.py`'s structure. Test
+modules follow the repository's existing organization and may group broader scenario contracts.
 
 ### 4.1 Named-input execution and result contract
 
@@ -631,8 +654,9 @@ grids, units, or missing factors. The generator serializes both factors and real
 New production modules: `aod_preprocess.py`, `projection.py`, `wavelet_filter.py`, `scaling.py`,
 `mmr_writer.py`, `cwt_core.py`, `known_truth.py`, `util/regrid.py`, `util/local_time.py`, and
 `util/logspace.py`.
-Synthetic modules/files are specified in §7.1. Each module remains cohesive and under the project
-500-line target; split orchestration from pure math when needed rather than compressing behavior.
+Synthetic modules/files are specified in §7.1. Each implementation module remains cohesive and
+under the project 500-line target; split orchestration from pure math when needed rather than
+compressing behavior.
 
 ---
 
@@ -669,10 +693,19 @@ Synthetic modules/files are specified in §7.1. Each module remains cohesive and
 
 Add these tracked, text-only components:
 
-- `davinci_monet/tests/synthetic/aerosol_tuning.py`: coupled, pure generator and serialization API.
-- `davinci_monet/tests/unit/synthetic/test_aerosol_tuning.py`: generator/oracle identities.
-- `davinci_monet/tests/integration/test_aerosol_tuning_pipeline.py`: full pipeline tests.
-- `analyses/aerosol-tuning/scripts/generate_synthetic.py`: thin CLI over the same generator.
+- `davinci_monet/tests/synthetic/aerosol_tuning.py` and private `_aerosol_*` helpers: coupled pure
+  generator, independent oracles, serializers, policy rendering, and acceptance orchestration.
+- `davinci_monet/tests/synthetic/aerosol_calibration.py`, `fable_calibration_identity.py`, and
+  `fable_calibration_runner.py`: immutable calibration schema, current-code/design validator, and
+  production-pipeline evidence runner.
+- `davinci_monet/tests/synthetic/fable_acceptance_gate.py`, `fable_acceptance_record.py`, and
+  `fable_artifact_validation.py`: resource/recovery/evidence gates, exclusive seed lock, immutable
+  acceptance record, and production manifest/artifact validation bridge.
+- Unit tests under `davinci_monet/tests/unit/synthetic/` cover generator/oracle identities,
+  prefix isolation, calibration selection/provenance, and acceptance contracts. Integration tests
+  in `test_aerosol_tuning_pipeline.py` and `test_aerosol_tuning_projection_pipeline.py` run T1-T6.
+- `analyses/aerosol-tuning/scripts/generate_synthetic.py`, `calibrate_synthetic.py`, and
+  `run_acceptance.py`: thin CLIs for development generation, calibration, and user-seeded runs.
 - `analyses/aerosol-tuning/configs/fable-synthetic.example.yaml`: portable config matching §3.1.
 - `analyses/aerosol-tuning/configs/fable-synthetic-eval.example.yaml`: post-fit-only artifact vs
   oracle pairs/stats plus `known_truth`; it is never a fitting input.
@@ -790,12 +823,17 @@ so a skipped QA filter is detectable; valid data use `QA=3`.
 | `multi_sensor_ci` | QA/precision/covariance | complementary footprints, controlled overlap, distinct known errors |
 | `writer_ci` | file and optical closure | reuse `masked_chain_ci` analysis inputs; write two selected MMR days with full species/gas/static/fill cases |
 | `null_ci` | false-positive/gap control | zero true bias and anomaly, noise, short and long gaps |
+| `calibration_null` | frozen-policy null calibration | six years and the exact 4-180-day band/360-day segment policy; zero true bias, anomaly, and off-basis correction |
 | `low_aod_ci` | shifted-log closure | zero/near-zero model AOD, both ratio clips, support-zero cells |
 | `synthetic_osse` | opt-in acceptance | 8 years, 36x72 native/18x36 analysis grids, off-basis truth, drift/correlated errors/MNAR stress |
 
 Canonical recovery cases use independent Gaussian log errors with known diagonal `C_obs`. Stress cases
 add common/correlated error, heteroscedasticity, sensor bias, missing-not-at-random cloud masks,
 and basis drift. Stress cases diagnose assumption failure; they are not mislabeled exact recovery.
+The six-year `masked_chain_ci`/`writer_ci` recovery tones are 20, 60, and 120 days, safely inside
+the 4-180-day passband. A separate pure-sinusoid transfer test locks rejection, cutoff-transition,
+and interior-band response; a tone centered exactly on a Morlet cutoff is not used as an amplitude
+recovery oracle.
 
 ### 7.6 Leakage controls and comparison oracles
 
@@ -804,6 +842,21 @@ and basis drift. Stress cases diagnose assumption failure; they are not mislabel
   2006 is a repeatable development test. After config/thresholds freeze, the user or gate runner
   supplies three acceptance seeds not used or hard-coded during development; they are recorded and
   run once for `SYNTHETIC_READY`.
+- Calibration uses fixed non-acceptance seeds `20260710` (`writer_ci`) and `20260711`
+  (`calibration_null`) and the immutable `calibration` split. The predeclared candidates are
+  `fable-v1-diagonal`, `fable-v1-significant`, and `fable-v1-all-band`; each candidate runs both
+  recovery and the exact frozen-policy null, rather than accepting hand-entered scalar metrics.
+  Reproduce the record in a new work directory with
+  `python analyses/aerosol-tuning/scripts/calibrate_synthetic.py WORK_ROOT RECORD_PATH`.
+- Candidate selection hard-rejects recovery or null failures, then ranks eligible policies by
+  NRMSE, AOD RMSE ratio, distance of slope from one, and a deterministic simplicity tie-break. The
+  canonical calibration record is written atomically, refuses overwrite, carries a self-verifying
+  SHA-256, and is revalidated against the fitting template before acceptance rendering.
+- The record binds each candidate to scenario, rendered config, normalized run-manifest,
+  scientific recovery/null report, production code, generator/oracle/calibration code, both
+  fitting/evaluation YAML templates, `environment.yml`, and `pyproject.toml` SHA-256 identities.
+  Generator masks/errors/noise are prefix-invariant: values in calibration and earlier splits
+  cannot depend on held-out suffix values or suffix RNG draws.
 - Daily test observations may enter projection because this is retrospective assimilation; their
   latent truth and scores never enter fitting/tuning. Score against `aod_target_applied_true` and
   an unused independent observation replicate, not the noisy observations assimilated.
@@ -819,7 +872,7 @@ and basis drift. Stress cases diagnose assumption failure; they are not mislabel
 
 ---
 
-## 8. Validation & testing design (approval required before implementation)
+## 8. Validation & testing design
 
 ### 8.1 Synthetic OSSE (centerpiece; opt-in, no real data)
 
@@ -837,10 +890,11 @@ against the full `aod_target_applied_true` must also improve over the uncorrecte
 Report full-domain and support/resolution/season/latitude strata, excluded fraction, coefficient
 metrics, and distance from `delta_best_representable_true`; raw AOD correlation is diagnostic only.
 
-For `null_ci`, define false-positive energy as
+For `calibration_null`, define false-positive energy as
 `sum(w*delta_log_applied^2) / sum(w*innovation_noise_true^2)` over the same non-COI test domain; it
 must be <= 0.10. The fraction of significant coefficients among valid, non-COI coefficients inside
-the configured band must also be <= 0.10.
+the configured band must also be <= 0.10. `null_ci` retains the shorter 4-16-day CI gap/identity
+oracle, but it is not evidence for the frozen 4-180-day production policy.
 Exact policy/IO cases use numerical closure tolerances rather than statistical targets.
 
 ### 8.2 Pipeline integration tests (CI; all enter through `PipelineRunner.run_from_config()`)
@@ -900,6 +954,12 @@ null and off-basis floors
 are honestly reported; peak memory/runtime benchmarks satisfy documented limits; artifacts/manifests
 reproduce from hashes; and the user reviews the recovery report. No real-data phase begins earlier.
 
+Acceptance gives each seed equal aggregate weight, reports 95% Student-t intervals, and requires
+every per-seed gate plus the aggregate mean gate. Each seed is limited to 30 minutes and 8 GiB peak
+RSS; primary exclusion must be <= 0.80. The record retains full strata/decomposition/holdout
+diagnostics and validates fitting/evaluation manifests plus every recovery-artifact checksum before
+completion. Seeds are locked with exclusive creation before generation and are never inferred.
+
 ---
 
 ## 9. Implementation phases
@@ -923,6 +983,10 @@ P0-P8 remain strictly synthetic. Each phase is TDD, but repository rules require
 phase's concrete test entry points/data flow and receiving approval before writing tests. No commits
 or pushes occur without explicit user approval.
 
+Implementation approval was received on 2026-07-10. P0-P8 code and non-acceptance validation are
+complete; the P8 gate remains open solely for the three locked user-supplied OSSE seeds and report
+review. This checkpoint does not authorize P9.
+
 ---
 
 ## 10. Risks & open questions
@@ -936,7 +1000,9 @@ or pushes occur without explicit user approval.
    quantify the irreducible floor; real claims must not imply EOF span completeness.
 4. **Wavelet significance after shrinkage/gap fill** is heuristic until the null ensemble passes.
    FDR/Monte Carlo calibration is mandatory if the frozen false-positive gate fails.
-5. **icwt fidelity** (~few % for Morlet) is measured per mode and included in recovery error.
+5. **icwt fidelity** (~few % for Morlet) is measured per mode with a full-scale round trip and
+   included in recovery error; the intentionally truncated filtering grid is not mislabeled as a
+   full-CWT reconstruction diagnostic.
 6. **Support gating trades covariance extrapolation for conservative identity.** The default honors
    the stated no-evidence/no-correction policy; an ungated research sensitivity is reported, not
    silently substituted.
