@@ -22,12 +22,14 @@ def validate_recovery_artifact(value: Mapping[str, Any], manifest_path: str) -> 
         paths = [Path(str(value["artifact_path"]))]
     else:
         raise ValueError("unsupported recovery artifact kind")
-    validate_finalized_artifact_manifest(
+    manifest_entry = validate_finalized_artifact_manifest(
         manifest_path,
         paths,
         role=str(value["role"]),
         analysis=str(value["analysis"]),
     )
+    if dict(value) != manifest_entry:
+        raise ValueError("recorded recovery artifact does not match its pipeline manifest entry")
 
 
 __all__ = ["validate_recovery_artifact"]

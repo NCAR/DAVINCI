@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
+from math import prod
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,8 @@ from davinci_monet.tests.synthetic._aerosol_contracts import (
     SyntheticTuningSpec,
     canonical_json,
 )
+
+NETCDF_CHUNK_TARGET_BYTES = 4 * 1024**2
 
 
 def scientific_dataset_hash(dataset: xr.Dataset) -> str:
@@ -67,13 +70,52 @@ def _json_attrs(attrs: Mapping[Any, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _bounded_netcdf_chunks(
+    dimensions: tuple[Hashable, ...],
+    shape: tuple[int, ...],
+    itemsize: int,
+    *,
+    target_bytes: int = NETCDF_CHUNK_TARGET_BYTES,
+) -> tuple[int, ...]:
+    """Choose bounded chunks, preserving complete non-time planes when practical."""
+    if len(dimensions) != len(shape):
+        raise ValueError("chunk dimensions and shape must have equal lengths")
+    if itemsize <= 0 or target_bytes <= 0:
+        raise ValueError("chunk item size and byte target must be positive")
+
+    chunks = [max(1, int(size)) for size in shape]
+    temporal = [
+        index
+        for index, dimension in enumerate(dimensions)
+        if dimension == "time" or (isinstance(dimension, str) and dimension.endswith("_time"))
+    ]
+    remaining = sorted(
+        (index for index in range(len(chunks)) if index not in temporal),
+        key=lambda index: chunks[index],
+        reverse=True,
+    )
+    for index in (*temporal, *remaining):
+        if itemsize * prod(chunks) <= target_bytes:
+            break
+        other_elements = prod(chunks[:index] + chunks[index + 1 :])
+        chunks[index] = min(
+            chunks[index],
+            max(1, target_bytes // (itemsize * other_elements)),
+        )
+    return tuple(chunks)
+
+
 def _write_dataset(path: Path, dataset: xr.Dataset) -> dict[str, str]:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoding: dict[str, dict[str, Any]] = {}
     for raw_name, variable in dataset.data_vars.items():
         if variable.ndim and variable.dtype.kind in "fiu":
             settings: dict[str, Any] = {"zlib": True, "complevel": 1, "shuffle": True}
-            settings["chunksizes"] = tuple(max(1, min(int(size), 8)) for size in variable.shape)
+            settings["chunksizes"] = _bounded_netcdf_chunks(
+                variable.dims,
+                variable.shape,
+                variable.dtype.itemsize,
+            )
             if "_FillValue" in variable.encoding:
                 settings["_FillValue"] = variable.encoding["_FillValue"]
             encoding[str(raw_name)] = settings

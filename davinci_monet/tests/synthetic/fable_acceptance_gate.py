@@ -323,19 +323,20 @@ def aggregate_recovery(runs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for run in runs:
         evaluation = run.get("evaluation")
         gate = evaluation.get("recovery_gate") if isinstance(evaluation, Mapping) else None
-        complete = (
+        complete_report = (
             isinstance(gate, Mapping)
-            and gate.get("passed")
             and isinstance(gate.get("metrics"), Mapping)
             and all(name in gate["metrics"] for name in RECOVERY_METRICS)
             and isinstance(gate.get("diagnostics"), Mapping)
             and all(name in gate["diagnostics"] for name in aggregate_diagnostics)
         )
-        if not complete:
-            failures.append(f"seed {run['seed']} did not pass its recovery gate")
-        else:
+        if complete_report:
             assert isinstance(gate, Mapping)
             gates.append(gate)
+            if not gate.get("passed"):
+                failures.append(f"seed {run['seed']} did not pass its recovery gate")
+        else:
+            failures.append(f"seed {run['seed']} did not produce a complete recovery report")
         if run.get("status") != "completed":
             failures.append(f"seed {run['seed']} did not complete all acceptance gates")
     if len(gates) != ACCEPTANCE_SEED_COUNT:

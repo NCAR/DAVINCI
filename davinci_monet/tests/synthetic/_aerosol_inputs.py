@@ -224,13 +224,13 @@ def _make_osse_model_values(
         )
         month = selected_time.month.to_numpy()
         seasonal = 0.025 * np.cos(2.0 * np.pi * (month - 1) / 12.0)[:, None, None]
-        seasonal *= np.cos(lat2d)[None, ...]
+        seasonal = seasonal * np.cos(lat2d)[None, ...]
         local_hour = np.mod(
             selected_time.hour.to_numpy()[:, None, None] + native_lon[None, None, :] / 15.0,
             24.0,
         )
         diurnal = 0.035 * np.sin(2.0 * np.pi * (local_hour - 13.5) / 24.0)
-        diurnal *= 0.65 + 0.35 * np.cos(lat2d)[None, ...]
+        diurnal = diurnal * (0.65 + 0.35 * np.cos(lat2d)[None, ...])
         residual = random.normal(
             0.0,
             0.0015,

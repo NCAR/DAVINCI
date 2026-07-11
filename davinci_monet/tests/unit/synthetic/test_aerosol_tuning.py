@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import subprocess
 import sys
 from dataclasses import FrozenInstanceError, replace
@@ -19,6 +20,7 @@ import yaml
 
 import davinci_monet.tests.synthetic as synthetic_module
 import davinci_monet.tests.synthetic._aerosol_acceptance as acceptance_impl
+import davinci_monet.tests.synthetic._aerosol_io as aerosol_io_impl
 import davinci_monet.tests.synthetic.aerosol_tuning as tuning_module
 from davinci_monet.tests.synthetic.aerosol_tuning import (
     DEFAULT_AEROSOL_SPECIES,
@@ -157,6 +159,28 @@ def test_synthetic_osse_factory_locks_opt_in_stress_contract() -> None:
         "mnar_cloud_strength",
     ):
         assert normalized[control]
+
+
+def test_full_osse_model_uses_bounded_dimension_aware_netcdf_chunks() -> None:
+    """Chunk planning stays practical without allocating the eight-year model array."""
+    spec = SyntheticTuningSpec.synthetic_osse(20260712)
+    day_count = (pd.Timestamp(spec.time_config.end) - pd.Timestamp(spec.time_config.start)).days + 1
+    shape = (
+        (day_count + 2) * 24,
+        spec.native_domain.n_lat,
+        spec.native_domain.n_lon,
+    )
+
+    chunks = aerosol_io_impl._bounded_netcdf_chunks(
+        ("time", "lat", "lon"), shape, np.dtype(np.float32).itemsize
+    )
+    chunk_bytes = math.prod(chunks) * np.dtype(np.float32).itemsize
+    chunk_count = math.prod(math.ceil(size / chunk) for size, chunk in zip(shape, chunks))
+
+    assert shape == (70176, 36, 72)
+    assert chunks == (404, 36, 72)
+    assert 3 * 1024**2 < chunk_bytes <= aerosol_io_impl.NETCDF_CHUNK_TARGET_BYTES
+    assert chunk_count == 174
 
 
 def test_analytic_temporal_oracle_applies_known_band_gaps_taper_and_observability() -> None:
@@ -315,6 +339,36 @@ def test_acceptance_resource_limits_are_hard_per_seed_gates() -> None:
     assert acceptance_impl._resource_gate(1.0, 8 * 1024**3)["passed"] is False
 
 
+def test_failed_recovery_gates_still_report_aggregate_statistics() -> None:
+    seeds = [101, 202, 303]
+    nrmse_values = [0.48, 0.50, 0.52]
+    runs = []
+    for seed, nrmse in zip(seeds, nrmse_values, strict=True):
+        report = _passing_recovery_report()
+        report["field_nrmse"][:] = nrmse
+        runs.append(
+            {
+                "seed": seed,
+                "status": "failed",
+                "evaluation": {"recovery_gate": evaluate_synthetic_recovery_gate(report)},
+            }
+        )
+
+    aggregate = acceptance_impl._aggregate_recovery(runs)
+
+    assert aggregate["passed"] is False
+    assert aggregate["metrics"]["field_nrmse"]["mean"] == pytest.approx(0.50)
+    assert aggregate["metrics"]["field_nrmse"]["per_seed"] == [
+        {"seed": seed, "value": pytest.approx(value)}
+        for seed, value in zip(seeds, nrmse_values, strict=True)
+    ]
+    assert len(aggregate["metrics"]["field_nrmse"]["confidence_interval_95"]) == 2
+    assert aggregate["failures"].count("equal-seed aggregate: field_nrmse exceeds 0.35") == 1
+    assert (
+        sum("did not pass its recovery gate" in failure for failure in aggregate["failures"]) == 3
+    )
+
+
 def test_full_acceptance_records_equal_seed_report_and_complete_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -412,6 +466,14 @@ def test_full_acceptance_records_equal_seed_report_and_complete_evidence(
     assert list(tmp_path.glob(".*.tmp")) == []
 
     first = record["runs"][0]
+    mismatched_evaluation = dict(first["evaluation"])
+    mismatched_artifact = json.loads(json.dumps(first["evaluation"]["recovery_artifact"]))
+    mismatched_artifact["identity"]["source_hashes"]["truth"] = "d" * 64
+    mismatched_evaluation["recovery_artifact"] = mismatched_artifact
+    mismatched = acceptance_impl._evidence_gate(first["fitting"], mismatched_evaluation)
+    assert mismatched["passed"] is False
+    assert "recovery-artifact identity" in mismatched["failures"][0]
+
     artifact_path = Path(first["evaluation"]["recovery_artifact"]["artifact_dir"])
     artifact_path = artifact_path / "chunk-00000.nc"
     artifact_path.write_bytes(b"tampered recovery artifact")
@@ -866,6 +928,15 @@ def test_serialization_records_reproducible_science_and_byte_hashes(tmp_path: Pa
             assert hashes["role"] == "evaluation_only:oracle"
 
     mmr_paths = sorted((tmp_path / "inputs/mmr").glob("*.nc4"))
+    model_path = tmp_path / "inputs/model/MERRA2_SYNTH.tavg1_2d_aer_Nx.nc4"
+    with xr.open_dataset(model_path) as reopened:
+        model_encoding = reopened["TOTEXTTAU"].encoding
+        assert model_encoding["zlib"] is True
+        assert model_encoding["chunksizes"] == aerosol_io_impl._bounded_netcdf_chunks(
+            reopened["TOTEXTTAU"].dims,
+            reopened["TOTEXTTAU"].shape,
+            reopened["TOTEXTTAU"].dtype.itemsize,
+        )
     with xr.open_dataset(mmr_paths[0]) as reopened:
         assert reopened["DU001"].encoding["zlib"] is True
         assert reopened["DU001"].encoding["_FillValue"] == np.float32(-9.999e15)

@@ -1,30 +1,65 @@
 # FABLE_PLAN — Aerosol Mode-Space Tuning: MERRA-2/GEOS-IT AOD → MODIS/VIIRS
 
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
-> Status: **P0-P8 implementation complete; `SYNTHETIC_READY` acceptance pending**. Original design
-> written 2026-07-07; synthetic-first pre-flight revision and implementation completed 2026-07-10.
+> Status: **P0-P8 software complete; `SYNTHETIC_READY` acceptance failed; P9 blocked**. Original
+> design written 2026-07-07; synthetic-first pre-flight revision and implementation completed
+> 2026-07-10; frozen synthetic acceptance executed 2026-07-10.
 > Authors: Claude Fable 5 (original planning session with D. Fillmore); Codex (pre-flight review).
 
-## Implementation checkpoint (2026-07-10)
+## Synthetic acceptance checkpoint (2026-07-10)
 
 - The P0-P8 software path is implemented without adding real-data readers or accessing MERRA-2,
   GEOS-IT, MODIS, or VIIRS data. P9 remains blocked by the gate in §8.5.
 - The frozen synthetic calibration policy is stored in
   `analyses/aerosol-tuning/configs/fable-synthetic-calibration.json`; acceptance validates its
-  canonical SHA-256 (`ec4da72d4380046034486dd47eb0c3f1bab703c6dacae5a901dfe9a90637d6db`),
-  current code/template identity (`f9c2725fe568662f4da425dead8252f724ce6d7921ef0deed7de606400f8f022`),
-  and rejects fitting-template policy drift. The selected `fable-v1-all-band` policy retains all
-  coefficients inside the band while reporting 95% pointwise significance diagnostically; its
-  calibration NRMSE is 0.1442 and null retained-energy/significant fractions are 0.0273/0.0453.
+  canonical SHA-256 (`de4b0074259ea4bca3819495ae8b2c6a0b1a994d2f0c6e5ebeef9d62b358fc09`),
+  file SHA-256 (`45803af3babda5c51eebb49ef50e30db409a23db7500fab4b0f5f906e578dce0`),
+  and current code/template identity
+  (`15f05d85e4125144ccd60f4190cc944ab02d11ae32525e79c3d42d3938a0be1b`). The selected
+  `fable-v1-all-band` policy and all calibration metrics were unchanged after the OSSE pre-flight
+  fixes: calibration NRMSE is 0.1442 and null retained-energy/significant fractions are
+  0.0273/0.0453.
 - A post-freeze, development-only seed (`20260712`) passed every recovery threshold: correlation
   0.9945, origin slope 0.9937, NRMSE 0.1303, filter-target AOD RMSE ratio 0.1311, full-target
   AOD RMSE ratio 0.2660, and holdout AOD RMSE ratio 0.4952. This is not an acceptance seed.
-- T1-T6 passed in 36.78 seconds with 1,169,396 KiB peak RSS, within the 60-second/2-GiB limits.
-  The full repository reported 1,987 passed and 10 skipped in 157.70 seconds; mypy, Black, and
-  isort are clean.
-- `SYNTHETIC_READY` is **not approved**: the required three distinct user-supplied
-  `synthetic_osse` seeds have not been supplied or run, and the user has not reviewed their
-  aggregate/per-seed report. No acceptance seeds were invented during development.
+- The first immutable execution root, `acceptance-1179-2358-11`, locked user-supplied seeds
+  `1179`, `2358`, and `11` in that order (lock SHA-256
+  `ede2a6bed778028e3c793550018a0901ee362ca2bda6cb945c590faff1380f2b`). A NumPy in-place
+  broadcast defect stopped every seed before generation in 0.027-0.031 seconds, so this attempt
+  exposed no scientific result. The failed root and record are preserved. The generator fix was
+  regression-tested at the full 8-year/36x72 OSSE dimensions with development seed `20260712` in
+  47.95 seconds and 3,251,428 KiB peak RSS before the calibration provenance was refreshed.
+- The same seed order was locked under `acceptance-1179-2358-11-attempt-2` (lock SHA-256
+  `11f1651d6d83ec2fcb93f0caec13ecbb4b3eb77e8e6ca5c2b7205af5306612a8`). This was the sole
+  evaluative execution. Its original acceptance record SHA-256 is
+  `b085fba4b341cbe1f38ba22a4b239e6d5a7d23969608a02bc3919d41b9b220a8`.
+
+| Seed | Corr. | Slope | NRMSE | AOD ratio | Full-target ratio | Elapsed | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1179 | 0.9217 | 0.9228 | **0.4988 fail** | 0.5363 | 0.5860 | 83.28 s | 3.104 GiB |
+| 2358 | 0.9108 | 0.8847 | **0.5154 fail** | 0.5575 | 0.6038 | 85.28 s | 3.694 GiB |
+| 11 | 0.9160 | 0.9088 | **0.5060 fail** | 0.5459 | 0.5948 | 83.25 s | 3.721 GiB |
+
+- Every fitting/evaluation pipeline, evidence checksum, resource limit, and exclusion diagnostic
+  passed. Every seed failed only the frozen `field_nrmse <= 0.35` recovery requirement. Process
+  peak RSS is the conservative lifetime `ru_maxrss`, not an isolated per-seed increment.
+- Equal-seed means and 95% Student-t intervals are: correlation 0.9162 [0.9026, 0.9298], slope
+  0.9054 [0.8575, 0.9534], NRMSE **0.5067 [0.4860, 0.5275]**, filter-target AOD RMSE ratio
+  0.5466 [0.5202, 0.5730], and full-target AOD RMSE ratio 0.5949 [0.5728, 0.6169]. Mean excluded
+  fraction is 0.6062, off-basis floor NRMSE is 0.2693, best-representable NRMSE is 0.5078,
+  holdout AOD RMSE ratio is 0.8246, and clip fraction is zero.
+- The original failed aggregate correctly rejected acceptance but omitted descriptive statistics.
+  A reporting-only code correction now summarizes structurally complete failed gates; no seed or
+  scientific pipeline was rerun. The original record remains byte-unchanged, and a read-only
+  aggregate supplement beside the attempt root binds that record and has SHA-256
+  `c6eecf6741c6858c7d68917b9b52219317831bef28bb44b2d5f40e62837f68da`.
+- An independent final audit passed 110/110 identity, manifest, artifact, gate, and record checks;
+  all 18 generated NetCDF inputs matched both byte and decoded scientific hashes. The evidence
+  validator now also requires the acceptance artifact entry to equal its pipeline-manifest entry.
+- Final repository validation reported 1,990 passed and 10 skipped in 146.33 seconds with
+  1,816,400 KiB peak RSS; mypy passed 414 source files, and Black and isort are clean.
+- `SYNTHETIC_READY` is **rejected for the frozen v1 policy**. These held-out results are not tuning
+  inputs, and P9 real-data enablement remains unauthorized.
 
 ---
 
@@ -841,7 +876,10 @@ recovery oracle.
   covariance simplification, band, ridge, resolution, gap length) tune only on 2005 calibration;
   2006 is a repeatable development test. After config/thresholds freeze, the user or gate runner
   supplies three acceptance seeds not used or hard-coded during development; they are recorded and
-  run once for `SYNTHETIC_READY`.
+  run once for `SYNTHETIC_READY`. For the 2026-07-10 acceptance, the first immutable execution
+  stopped before generation, and the same locked seed order was retried in a new root only after a
+  full-size development-seed pre-flight; the retry was the only evaluative execution. No v1
+  parameter, policy, or threshold may be changed from these now-exposed results.
 - Calibration uses fixed non-acceptance seeds `20260710` (`writer_ci`) and `20260711`
   (`calibration_null`) and the immutable `calibration` split. The predeclared candidates are
   `fable-v1-diagonal`, `fable-v1-significant`, and `fable-v1-all-band`; each candidate runs both
@@ -960,6 +998,16 @@ RSS; primary exclusion must be <= 0.80. The record retains full strata/decomposi
 diagnostics and validates fitting/evaluation manifests plus every recovery-artifact checksum before
 completion. Seeds are locked with exclusive creation before generation and are never inferred.
 
+**Acceptance disposition (2026-07-10): rejected.** The three user-supplied seeds completed the
+synthetic OSSE fitting and evaluation pipelines under the frozen `fable-v1-all-band` policy. All
+evidence, resource, exclusion, correlation, slope, and AOD-improvement gates passed, but each seed
+and the equal-seed aggregate failed `field_nrmse <= 0.35`; the aggregate was 0.5067 with 95%
+Student-t interval [0.4860, 0.5275]. The original record, immutable seed locks, and reporting
+supplement identified in the checkpoint above are retained as the audit trail. `SYNTHETIC_READY`
+cannot be approved for v1, and no P9 real-data work is authorized. Any future method revision must
+start a new versioned development/calibration cycle and use new held-out acceptance seeds rather
+than tuning to or reevaluating on these seeds.
+
 ---
 
 ## 9. Implementation phases
@@ -983,9 +1031,9 @@ P0-P8 remain strictly synthetic. Each phase is TDD, but repository rules require
 phase's concrete test entry points/data flow and receiving approval before writing tests. No commits
 or pushes occur without explicit user approval.
 
-Implementation approval was received on 2026-07-10. P0-P8 code and non-acceptance validation are
-complete; the P8 gate remains open solely for the three locked user-supplied OSSE seeds and report
-review. This checkpoint does not authorize P9.
+Implementation approval was received on 2026-07-10. P0-P8 software and synthetic validation are
+complete, and the required P8 acceptance execution has concluded. The frozen recovery gate failed,
+so the P8 `SYNTHETIC_READY` gate is closed as rejected. This checkpoint explicitly blocks P9.
 
 ---
 
@@ -997,7 +1045,10 @@ review. This checkpoint does not authorize P9.
 2. **Basis stationarity over decades** — major eruptions (Pinatubo) distort covariance. Option:
    `exclude_periods:` on the EOF training window; decide after inspecting the scree/patterns.
 3. **Correction-subspace mismatch** is structural. Synthetic `delta_perp` and basis-drift cases
-   quantify the irreducible floor; real claims must not imply EOF span completeness.
+   quantify the irreducible floor; real claims must not imply EOF span completeness. Held-out v1
+   acceptance found mean best-representable NRMSE 0.5078 and achieved NRMSE 0.5067, confirming that
+   the frozen recovery miss is dominated by the declared representability target rather than an
+   artifact, evidence, or resource failure. These held-out seeds cannot be used to tune a revision.
 4. **Wavelet significance after shrinkage/gap fill** is heuristic until the null ensemble passes.
    FDR/Monte Carlo calibration is mandatory if the frozen false-positive gate fails.
 5. **icwt fidelity** (~few % for Morlet) is measured per mode with a full-scale round trip and

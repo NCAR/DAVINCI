@@ -56,7 +56,7 @@ from davinci_monet.tests.synthetic.fable_thresholds import RECOVERY_THRESHOLDS
 
 ACCEPTANCE_SCHEMA = "fable-synthetic-acceptance-v2"
 FROZEN_CALIBRATION_FILENAME = "fable-synthetic-calibration.json"
-FROZEN_CALIBRATION_SHA256 = "ec4da72d4380046034486dd47eb0c3f1bab703c6dacae5a901dfe9a90637d6db"
+FROZEN_CALIBRATION_SHA256 = "de4b0074259ea4bca3819495ae8b2c6a0b1a994d2f0c6e5ebeef9d62b358fc09"
 PipelineExecutor = Callable[[Path], Mapping[str, Any]]
 
 

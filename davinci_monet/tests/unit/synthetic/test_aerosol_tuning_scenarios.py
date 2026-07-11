@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -21,6 +22,29 @@ from davinci_monet.tests.synthetic.aerosol_tuning import (
     SyntheticTuningSpec,
     generate_aerosol_tuning_bundle,
 )
+from davinci_monet.tests.synthetic.generators import Domain, TimeConfig
+
+
+def test_reduced_osse_generator_broadcasts_spatial_model_terms() -> None:
+    spec = replace(
+        SyntheticTuningSpec.synthetic_osse(20260712),
+        native_domain=Domain(-180.0, 180.0, -90.0, 90.0, 12, 6),
+        mode_domain=Domain(-180.0, 180.0, -90.0, 90.0, 6, 3),
+        time_config=TimeConfig("2001-01-01", "2001-01-12", "1h"),
+        split_windows=(
+            ("basis_train", "2001-01-01", "2001-01-03"),
+            ("bias_fit", "2001-01-04", "2001-01-06"),
+            ("calibration", "2001-01-07", "2001-01-09"),
+            ("development_test", "2001-01-10", "2001-01-12"),
+        ),
+    )
+
+    bundle = generate_aerosol_tuning_bundle(spec)
+
+    assert bundle.model["TOTEXTTAU"].dims == ("time", "lat", "lon")
+    assert bundle.model["TOTEXTTAU"].shape == (336, 6, 12)
+    assert bundle.truth.sizes["time"] == 12
+    assert set(bundle.observations) == {"sensor_a", "sensor_b"}
 
 
 def test_masked_chain_ci_has_locked_six_year_schedule_and_resource_shape() -> None:
