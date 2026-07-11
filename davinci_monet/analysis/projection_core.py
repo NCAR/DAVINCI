@@ -24,6 +24,16 @@ class MonthlyBiasFit:
     support_day_total: NDArray[np.int64]
     sensor_count: NDArray[np.int64]
     standard_error: FloatArray
+    perpendicular_bias: FloatArray | None = None
+    mode_coefficient: FloatArray | None = None
+    sensor_offset: FloatArray | None = None
+    sensor_offset_standard_error: FloatArray | None = None
+    sensor_overlap_count: NDArray[np.int64] | None = None
+    pooled_observable_rank: NDArray[np.int64] | None = None
+    pooled_observable_eigenvalue: FloatArray | None = None
+    objective_history: FloatArray | None = None
+    converged: bool | None = None
+    iterations: int | None = None
 
 
 @dataclass(frozen=True)

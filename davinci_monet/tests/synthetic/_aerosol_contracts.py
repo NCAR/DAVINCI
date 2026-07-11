@@ -60,6 +60,7 @@ SCENARIOS = {
     "calibration_null",
     "low_aod_ci",
     "synthetic_osse",
+    "synthetic_osse_null",
 }
 GRAVITY = 9.80665
 
@@ -254,35 +255,12 @@ class SyntheticTuningSpec:
     @classmethod
     def synthetic_osse(cls, master_seed: int) -> SyntheticTuningSpec:
         """Return the opt-in eight-year stress case for a user-supplied seed."""
-        return cls(
-            scenario="synthetic_osse",
-            master_seed=master_seed,
-            native_domain=Domain(-180.0, 180.0, -90.0, 90.0, 72, 36),
-            mode_domain=Domain(-180.0, 180.0, -90.0, 90.0, 36, 18),
-            time_config=TimeConfig("2001-01-01", "2008-12-31", "1h"),
-            split_windows=(
-                ("basis_train", "2001-01-01", "2003-12-31"),
-                ("bias_fit", "2004-01-01", "2005-12-31"),
-                ("calibration", "2006-01-01", "2006-12-31"),
-                ("development_test", "2007-01-01", "2008-12-31"),
-            ),
-            model_periods_days=(12.0, 45.0, 120.0),
-            correction_periods_days=(20.0, 60.0, 150.0),
-            sensor_error_sigma=(0.035, 0.055),
-            common_error_sigma=0.025,
-            sensor_bias_log=(0.015, -0.02),
-            heteroscedastic_strength=0.7,
-            error_temporal_correlation=0.55,
-            error_spatial_correlation=0.6,
-            cloud_fraction=0.35,
-            mnar_cloud_strength=0.8,
-            qa_failure_fraction=0.12,
-            basis_drift_amplitude=0.15,
-            off_basis_amplitude=0.03,
-            out_of_band_amplitude=0.012,
-            out_of_band_period_days=2.0,
-            correction_trend_per_year=0.003,
-        )
+        return cls(**_synthetic_osse_profile("synthetic_osse", master_seed))
+
+    @classmethod
+    def synthetic_osse_null(cls, master_seed: int) -> SyntheticTuningSpec:
+        """Return the full-size OSSE stress profile with zero physical correction."""
+        return cls(**_synthetic_osse_profile("synthetic_osse_null", master_seed))
 
     def normalized(self) -> dict[str, Any]:
         """Return a stable JSON-safe representation for provenance hashing."""
@@ -328,6 +306,38 @@ class SyntheticTuningSpec:
             "mmr_days": self.mmr_days,
             "species": list(self.species),
         }
+
+
+def _synthetic_osse_profile(scenario: str, master_seed: int) -> dict[str, Any]:
+    return {
+        "scenario": scenario,
+        "master_seed": master_seed,
+        "native_domain": Domain(-180.0, 180.0, -90.0, 90.0, 72, 36),
+        "mode_domain": Domain(-180.0, 180.0, -90.0, 90.0, 36, 18),
+        "time_config": TimeConfig("2001-01-01", "2008-12-31", "1h"),
+        "split_windows": (
+            ("basis_train", "2001-01-01", "2003-12-31"),
+            ("bias_fit", "2004-01-01", "2005-12-31"),
+            ("calibration", "2006-01-01", "2006-12-31"),
+            ("development_test", "2007-01-01", "2008-12-31"),
+        ),
+        "model_periods_days": (12.0, 45.0, 120.0),
+        "correction_periods_days": (20.0, 60.0, 150.0),
+        "sensor_error_sigma": (0.035, 0.055),
+        "common_error_sigma": 0.025,
+        "sensor_bias_log": (0.015, -0.02),
+        "heteroscedastic_strength": 0.7,
+        "error_temporal_correlation": 0.55,
+        "error_spatial_correlation": 0.6,
+        "cloud_fraction": 0.35,
+        "mnar_cloud_strength": 0.8,
+        "qa_failure_fraction": 0.12,
+        "basis_drift_amplitude": 0.15,
+        "off_basis_amplitude": 0.03,
+        "out_of_band_amplitude": 0.012,
+        "out_of_band_period_days": 2.0,
+        "correction_trend_per_year": 0.003,
+    }
 
 
 @dataclass(frozen=True)

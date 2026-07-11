@@ -102,7 +102,7 @@ def make_model(
         spec.n_modes,
         isolate_last=spec.scenario != "exact_micro",
     )
-    if spec.scenario == "synthetic_osse":
+    if spec.scenario in {"synthetic_osse", "synthetic_osse_null"}:
         aod = _make_osse_model_values(
             spec, hourly_time, daily_time, native_lat, native_lon, patterns
         )

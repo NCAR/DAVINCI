@@ -161,6 +161,16 @@ def test_synthetic_osse_factory_locks_opt_in_stress_contract() -> None:
         assert normalized[control]
 
 
+def test_full_size_null_changes_only_scenario_and_zero_truth_role() -> None:
+    """The v2 null keeps every full-stress generation control unchanged."""
+    recovery = SyntheticTuningSpec.synthetic_osse(314159).normalized()
+    null = SyntheticTuningSpec.synthetic_osse_null(314159).normalized()
+
+    assert recovery.pop("scenario") == "synthetic_osse"
+    assert null.pop("scenario") == "synthetic_osse_null"
+    assert null == recovery
+
+
 def test_full_osse_model_uses_bounded_dimension_aware_netcdf_chunks() -> None:
     """Chunk planning stays practical without allocating the eight-year model array."""
     spec = SyntheticTuningSpec.synthetic_osse(20260712)

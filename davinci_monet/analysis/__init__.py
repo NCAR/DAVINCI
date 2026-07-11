@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from davinci_monet.analysis import aod_preprocess as _aod_preprocess  # noqa: F401
 from davinci_monet.analysis import eof as _eof  # noqa: F401  (registers "eof")
+from davinci_monet.analysis import (  # noqa: F401
+    fable_v2_diagnostic_analysis as _fable_v2_diagnostics,
+)
 from davinci_monet.analysis import gridded as _gridded  # noqa: F401
 from davinci_monet.analysis import known_truth as _known_truth  # noqa: F401
 from davinci_monet.analysis import mmr_writer as _mmr_writer  # noqa: F401

@@ -215,6 +215,7 @@ def _innovation_diagnostics_chunk(
     fit: MonthlyBiasFit,
     months: NDArray[np.int64],
     apply_bias: bool,
+    sensor_offsets: NDArray[np.float64],
     start: int,
     stop: int,
 ) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
@@ -228,9 +229,13 @@ def _innovation_diagnostics_chunk(
         support = fit.support[month]
         precision_sum = np.zeros(shape[1:], dtype=np.float64)
         weighted = np.zeros(shape[1:], dtype=np.float64)
-        for chunk in chunks:
+        for sensor, chunk in enumerate(chunks):
             usable = chunk.valid[local_day] & np.isfinite(model_values[local_day]) & (support > 0.0)
-            daily = innovation(chunk.values[local_day], model_values[local_day], bias)
+            daily = innovation(
+                chunk.values[local_day],
+                model_values[local_day],
+                bias + sensor_offsets[sensor],
+            )
             precision = np.zeros(shape[1:], dtype=np.float64)
             np.divide(
                 1.0,
@@ -256,6 +261,7 @@ def _lazy_innovation_diagnostics(
     fit: MonthlyBiasFit,
     months: NDArray[np.int64],
     apply_bias: bool,
+    sensor_offsets: NDArray[np.float64],
     time_chunk_size: int,
 ) -> tuple[da.Array, da.Array]:
     mean_chunks: list[da.Array] = []
@@ -270,6 +276,7 @@ def _lazy_innovation_diagnostics(
             fit,
             months,
             apply_bias,
+            sensor_offsets,
             start,
             stop,
         )
@@ -289,6 +296,7 @@ def solve_projection_batched(
     apply_bias: bool,
     ridge: float,
     time_chunk_size: int,
+    sensor_offsets: NDArray[np.float64] | None = None,
 ) -> ProjectionArrays:
     """Solve the complete daily axis while holding one time batch of grids."""
     time_count = model.sizes["time"]
@@ -303,6 +311,13 @@ def solve_projection_batched(
     condition_number = np.zeros(time_count, dtype=np.float64)
     effective_rank = np.zeros(time_count, dtype=np.int64)
     n_obs = np.zeros((time_count, len(observations)), dtype=np.int64)
+    offsets = (
+        np.zeros(len(observations), dtype=np.float64)
+        if sensor_offsets is None
+        else np.asarray(sensor_offsets, dtype=np.float64)
+    )
+    if offsets.shape != (len(observations),) or np.any(~np.isfinite(offsets)):
+        raise ValueError("projection sensor offsets must be one finite value per sensor")
     latitude_rows = np.broadcast_to(
         np.asarray(model["lat"].values)[:, None], (lat_count, lon_count)
     ).reshape(-1)
@@ -330,7 +345,11 @@ def solve_projection_batched(
                 n_obs[day, sensor] = flat.size
                 if flat.size == 0:
                     continue
-                daily = innovation(chunk.values[local_day], model_values[local_day], bias)
+                daily = innovation(
+                    chunk.values[local_day],
+                    model_values[local_day],
+                    bias + offsets[sensor],
+                )
                 row_design.append(flat_patterns[:, flat].T)
                 row_innovation.append(daily.reshape(-1)[flat])
                 row_error.append(chunk.errors[local_day].reshape(-1)[flat])
@@ -373,6 +392,7 @@ def solve_projection_batched(
         fit,
         months,
         apply_bias,
+        offsets,
         time_chunk_size,
     )
     return ProjectionArrays(

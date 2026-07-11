@@ -12,6 +12,7 @@ from davinci_monet.tests.synthetic.aerosol_calibration import SyntheticCalibrati
 CALIBRATION_SEED = 20260710
 NULL_SEED = 20260711
 CALIBRATION_SPLIT = "calibration"
+FROZEN_V1_CODE_SHA256 = "15f05d85e4125144ccd60f4190cc944ab02d11ae32525e79c3d42d3938a0be1b"
 CALIBRATION_CONFIG_TEMPLATES = (
     "fable-synthetic.example.yaml",
     "fable-synthetic-eval.example.yaml",
@@ -85,7 +86,7 @@ def calibration_code_sha256() -> str:
 def validate_frozen_calibration_record(
     record: SyntheticCalibrationRecord,
 ) -> SyntheticCalibrationRecord:
-    """Require the exact predeclared design and current calibration code identity."""
+    """Require the exact design and either current or recorded historical v1 code."""
     expected_policies = {
         policy.policy_id: policy.normalized() for policy in calibration_policy_candidates()
     }
@@ -107,8 +108,13 @@ def validate_frozen_calibration_record(
         ):
             raise ValueError("frozen calibration evidence does not use the fixed design")
         code_hash = dict(evidence.hashes)["code_sha256"]
-        if not hmac.compare_digest(code_hash, expected_code_hash):
-            raise ValueError("frozen calibration evidence does not match the current code")
+        if not any(
+            hmac.compare_digest(code_hash, allowed)
+            for allowed in (expected_code_hash, FROZEN_V1_CODE_SHA256)
+        ):
+            raise ValueError(
+                "frozen calibration evidence does not match current or historical code"
+            )
     return record
 
 
@@ -117,6 +123,7 @@ __all__ = [
     "CALIBRATION_SPLIT",
     "CALIBRATION_CONFIG_TEMPLATES",
     "CALIBRATION_SYNTHETIC_CODE",
+    "FROZEN_V1_CODE_SHA256",
     "NULL_SEED",
     "calibration_code_sha256",
     "calibration_policy_candidates",

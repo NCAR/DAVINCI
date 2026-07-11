@@ -9,6 +9,7 @@ from davinci_monet.config.schema import (
     AODScalingSpec,
     EOFProjectionSpec,
     EOFSpec,
+    FableV2DiagnosticsSpec,
     GriddedAnalysisSpec,
     KnownTruthSpec,
     MMRWriterSpec,
@@ -152,6 +153,92 @@ def test_eof_projection_spec_exposes_all_named_inputs() -> None:
         "obs[1]": "sensor_b",
         "bias_fit_artifact": "saved_bias",
     }
+
+
+def test_fable_v2_diagnostics_spec_exposes_finalized_inputs() -> None:
+    spec = build_analysis_spec(
+        {
+            "type": "fable_v2_diagnostics",
+            "estimate": "scaling",
+            "projection": "projection",
+            "truth": "oracle",
+            "projection_to_truth_sensor": {
+                "sensor_a_daily": "sensor_a",
+                "sensor_b_daily": "sensor_b",
+            },
+            "reported_common_factor_amplitude": 0.025,
+            "evaluation_splits": ["development_test"],
+        }
+    )
+
+    assert isinstance(spec, FableV2DiagnosticsSpec)
+    assert spec.input_refs() == {
+        "estimate": "scaling",
+        "projection": "projection",
+        "truth": "oracle",
+    }
+    assert spec.projection_to_truth_sensor == {
+        "sensor_a_daily": "sensor_a",
+        "sensor_b_daily": "sensor_b",
+    }
+    assert spec.reported_common_factor_amplitude == 0.025
+
+
+def test_fable_v2_diagnostics_rejects_nonbijective_sensor_mapping() -> None:
+    with pytest.raises(ValueError, match="must be bijective"):
+        build_analysis_spec(
+            {
+                "type": "fable_v2_diagnostics",
+                "estimate": "scaling",
+                "projection": "projection",
+                "truth": "oracle",
+                "projection_to_truth_sensor": {
+                    "sensor_a_daily": "sensor_a",
+                    "sensor_b_daily": "sensor_a",
+                },
+                "reported_common_factor_amplitude": 0.025,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"": "sensor_a"},
+        {" sensor_a_daily": "sensor_a"},
+        {"sensor_a_daily": "sensor_a "},
+    ],
+)
+def test_fable_v2_diagnostics_rejects_empty_or_untrimmed_sensor_names(
+    mapping: dict[str, str],
+) -> None:
+    with pytest.raises(ValueError, match="nonempty and whitespace-trimmed"):
+        build_analysis_spec(
+            {
+                "type": "fable_v2_diagnostics",
+                "estimate": "scaling",
+                "projection": "projection",
+                "truth": "oracle",
+                "projection_to_truth_sensor": mapping,
+                "reported_common_factor_amplitude": 0.025,
+            }
+        )
+
+
+@pytest.mark.parametrize("amplitude", [-1.0, float("inf")])
+def test_fable_v2_diagnostics_rejects_invalid_common_factor_amplitude(
+    amplitude: float,
+) -> None:
+    with pytest.raises(ValueError, match="reported_common_factor_amplitude"):
+        build_analysis_spec(
+            {
+                "type": "fable_v2_diagnostics",
+                "estimate": "scaling",
+                "projection": "projection",
+                "truth": "oracle",
+                "reported_common_factor_amplitude": amplitude,
+            }
+        )
 
 
 def test_eof_projection_rejects_invalid_fit_and_support_contracts() -> None:

@@ -1,9 +1,11 @@
 # FABLE_PLAN — Aerosol Mode-Space Tuning: MERRA-2/GEOS-IT AOD → MODIS/VIIRS
 
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
-> Status: **P0-P8 software complete; `SYNTHETIC_READY` acceptance failed; P9 blocked**. Original
+> Status: **P0-P8 software complete; v1 `SYNTHETIC_READY` rejected; v2
+> `passed_pending_user_review`; `SYNTHETIC_READY` remains unset; P9 blocked**. Original
 > design written 2026-07-07; synthetic-first pre-flight revision and implementation completed
-> 2026-07-10; frozen synthetic acceptance executed 2026-07-10.
+> 2026-07-10; frozen v1 acceptance executed 2026-07-10; frozen v2 recovery cycle completed
+> 2026-07-11.
 > Authors: Claude Fable 5 (original planning session with D. Fillmore); Codex (pre-flight review).
 
 ## Synthetic acceptance checkpoint (2026-07-10)
@@ -48,6 +50,13 @@
   0.5466 [0.5202, 0.5730], and full-target AOD RMSE ratio 0.5949 [0.5728, 0.6169]. Mean excluded
   fraction is 0.6062, off-basis floor NRMSE is 0.2693, best-representable NRMSE is 0.5078,
   holdout AOD RMSE ratio is 0.8246, and clip fraction is zero.
+- **Metric-semantics correction:** the historical field named `best_representable_nrmse` is the
+  estimate-to-`delta_best_representable_true` error. That truth variable is the supported,
+  policy-limited but **unfiltered** in-span correction, while the primary gate compares with the
+  filtered observable-mode `delta_filter_target_true`. Therefore 0.5078 is not a best-achievable
+  floor and its numerical proximity to 0.5067 does not establish a spatial-basis ceiling. The v1
+  rejection is unchanged because the primary target and `field_nrmse` gate were correct; only the
+  causal attribution is withdrawn. V2 retains the legacy name solely to read frozen v1 evidence.
 - The original failed aggregate correctly rejected acceptance but omitted descriptive statistics.
   A reporting-only code correction now summarizes structurally complete failed gates; no seed or
   scientific pipeline was rerun. The original record remains byte-unchanged, and a read-only
@@ -60,6 +69,420 @@
   1,816,400 KiB peak RSS; mypy passed 414 source files, and Black and isort are clean.
 - `SYNTHETIC_READY` is **rejected for the frozen v1 policy**. These held-out results are not tuning
   inputs, and P9 real-data enablement remains unauthorized.
+
+---
+
+## V2 synthetic recovery checkpoint (2026-07-11)
+
+**Disposition.** The versioned `fable-recovery-v2` implementation, development campaign,
+preregistration, calibration, preflight, and one-time acceptance are complete using synthetic data
+only. The immutable acceptance record has the literal status `passed_pending_user_review`.
+`SYNTHETIC_READY` remains unset, no real data were read, no real-data products were generated, and
+P9 remains blocked pending explicit user review of the passing evidence.
+
+### Development and freeze
+
+- V2-D0 and V2-D1 implemented the versioned seed protocol, joint seasonal bias/anomaly fit,
+  overlap-constrained zero-sum sensor offsets, saved-fit validation, stagewise diagnostics, null
+  policy, calibration/preflight/acceptance lifecycle, locks, attempt ledger, and focused unit and
+  pipeline tests. All fitting and evaluation chains entered through
+  `PipelineRunner.run_from_config()`.
+- V2-D2 used only development seeds `8958027244578499926`, `7058240817492126009`, and
+  `6541432702848222996`. The frozen sequential control failed NRMSE on all three seeds, while both
+  joint candidates passed every unchanged per-seed and equal-seed gate:
+
+| Development policy | Corr. | Slope | NRMSE | AOD ratio | Full-target ratio | Excluded | Outcome |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `v2-sequential-control` | 0.9156 | 0.9133 | **0.5254 fail** | 0.5671 | 0.6122 | 0.6057 | Diagnostic only |
+| `v2-joint-seasonal` | 0.9612 | 0.9730 | 0.2794 | 0.2811 | 0.3859 | 0.6057 | Eligible |
+| `v2-joint-seasonal-offset` | 0.9803 | 0.9661 | 0.2187 | 0.2267 | 0.3516 | 0.6057 | Eligible |
+
+- The verified development report is
+  `analyses/aerosol-tuning/synthetic/fable-v2-development-verified/development.json` (file SHA-256
+  `72ef9ffac17468b676d2608a1004fffa3c4b2635939c4f183fc06ef214e52cb0`) and its generation lock
+  SHA-256 is `8c4cc508073bd34c7220ba8469db15327573bceb9f500d497190c11548526021`.
+  The read-only approval named exactly the two eligible policies; its file/record SHA-256 values are
+  `9b3d902a345416211b20e14dd410d370289ad41e6f3d2fc76c72ef44c590c4fa` and
+  `928ccd2f54b3d580fe107adc7d5156682c333e00390aa5d59b738f97aa9b5638`.
+- Two development-only roots were abandoned before the verified report. `fable-v2-development`
+  exposed repeated lazy graph evaluation and was stopped; `fable-v2-development-final` completed
+  but was excluded after deep validation found a persisted boolean-attribute representation
+  mismatch. Neither root entered approval, preregistration, calibration, preflight, or acceptance;
+  `fable-v2-development-verified` is the sole development evidence bound by the freeze.
+- The preregistration is read-only at
+  `analyses/aerosol-tuning/synthetic/fable-v2-cycle/preregistration.json`. Its file/record SHA-256
+  values are `28ce962ea6e342c8e2a1f5fc210a2414026f02590109c46320f2da169ef089c7` and
+  `1af0653ef0edc3ac14adff6102287f1b856bdf9f7850958eec23aa68d9bed751`. It binds code
+  `dc3174934649c32d858f80a680944a9ffe59f48f07e9c05529a9540d19bba99d`, environment
+  `867f428df9e83ff38e7ee72b4134fc0458d88a90af5497e652b22b4fdd6529c7`, protocol
+  `905894e197752618ee0564df5cff441cdd31232928e447abb74261ce34c4d3b2`, generator spec
+  `8331f69b16bab24f8db36a236601f2310c14ddf4e8f1c39ab381cf511bc399a1`, and thresholds
+  `343dbfe35fcb53dcae6b3b402bf93bae5e0431e81d451326e6b36f0c3ee5db1`. Its frozen test evidence
+  records 2,105 passed and 10 skipped, mypy clean on 465 files, and Black, isort, and
+  `git diff --check` passing.
+
+### Calibration and preflight
+
+V2-C ran both approved candidates on the three declared recovery seeds and the three declared
+full-size null seeds. Every per-seed and mean gate, evidence check, and resource check passed. The
+equal-seed calibration aggregates were:
+
+| Candidate | Corr. | Slope | NRMSE | AOD ratio | Full-target ratio | Excluded | Null energy | Null significant | Outcome |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `v2-joint-seasonal` | 0.9600 | 0.9559 | 0.2827 | 0.2849 | 0.3935 | 0.4137 | 0.0525 | 0.0596 | Eligible |
+| `v2-joint-seasonal-offset` | 0.9799 | 0.9539 | **0.2273** | **0.2360** | **0.3633** | 0.4137 | **0.0256** | 0.0557 | Selected |
+
+The selected policy uses the joint seasonal fit plus overlap-connected, zero-sum relative sensor
+offsets; all other frozen v1 policy settings and thresholds remain unchanged. Its recovery and null
+seed results were:
+
+| Calibration recovery seed | Corr. | Slope | NRMSE | AOD ratio | Full-target ratio | Excluded | Elapsed | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4720161833425845668 | 0.9786 | 0.9359 | 0.2356 | 0.2451 | 0.3698 | 0.4193 | 95.66 s | 3.361 GiB |
+| 7615923448626770708 | 0.9826 | 0.9730 | 0.1997 | 0.2070 | 0.3453 | 0.4098 | 95.95 s | 3.361 GiB |
+| 7027338798249911494 | 0.9785 | 0.9527 | 0.2467 | 0.2559 | 0.3748 | 0.4120 | 98.49 s | 3.361 GiB |
+
+| Calibration null seed | Retained energy | Significant fraction | Elapsed | Peak RSS |
+|---:|---:|---:|---:|---:|
+| 6922119454902611484 | 0.0263 | 0.0441 | 85.34 s | 3.361 GiB |
+| 8687442551985640685 | 0.0246 | 0.0775 | 85.99 s | 3.361 GiB |
+| 1663300583890477700 | 0.0260 | 0.0454 | 86.53 s | 3.361 GiB |
+
+The immutable calibration file/record SHA-256 values are
+`178b08e07c6537baebf98c6647a7dcd5cefaac38a3ef792bfb119aadfccce598` and
+`47dfcb4fb5d477b1359848cfe6cf63e352c15b816631a538213f9bd12b638a6b`. Recovery and null
+generation-lock SHA-256 values are
+`82e6dce296456f45b0c112d8a63ce6e6d0314bf1b9de3bded027da03f089b819` and
+`8ebed237e0be561665be20022dd779953840020c9312627dd36658f9ed0b7e68`; the pre-generation attempt
+claim SHA-256 is `71493275f6dc8b396837d51588e9226a5fcfd282c73c287e6110f6c811c4194c`.
+
+V2-P then ran only `v2-joint-seasonal-offset` on preflight seed `736479105464814019` and passed:
+correlation 0.9792, slope 0.9859, NRMSE 0.2177, AOD ratio 0.2244, full-target ratio 0.3501,
+excluded fraction 0.6058, and learned-basis oracle NRMSE 0.0329. It completed in 100.26 seconds at
+3.773 GiB peak RSS. The preflight file/record SHA-256 values are
+`5adc95565a2f8f1dda54fd6ac35aaab6fea7609ba9d97ab8cda2fb3076ba099b` and
+`8880e380393afeb80f6a6bb0ea3c12bb9f1290276588941d64c335b3b89de253`; its generation-lock and
+attempt-claim SHA-256 values are
+`0f87446b724c90eb085834088d8f03b33faa05e8a572f25785f20c85e4df35b2` and
+`1127f441832b8b53956ab27127dcf77296f26fc1522a6f1da16c3ff5ff43c8e1`.
+
+### Acceptance
+
+Only after the frozen preflight passed did V2-A create the acceptance root and lock the exact
+ordered tuple `(1969, 2010, 2013)`. This was the single acceptance attempt; every scientific,
+evidence, exclusion, and resource gate passed:
+
+| Seed | Corr. | Slope | NRMSE | AOD ratio | Full-target ratio | Excluded | Basis oracle | Elapsed | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1969 | 0.9799 | 0.9488 | 0.2202 | 0.2275 | 0.3501 | 0.6084 | 0.0334 | 100.06 s | 3.791 GiB |
+| 2010 | 0.9807 | 0.9666 | 0.2151 | 0.2229 | 0.3493 | 0.6055 | 0.0337 | 101.65 s | 4.010 GiB |
+| 2013 | 0.9777 | 0.9637 | 0.2183 | 0.2237 | 0.3486 | 0.6034 | 0.0329 | 100.01 s | 4.010 GiB |
+
+Equal-seed means and 95% Student-t intervals are:
+
+| Metric | Mean | 95% CI |
+|---|---:|---:|
+| Field correlation | 0.9794 | [0.9756, 0.9832] |
+| Field origin slope | 0.9597 | [0.9360, 0.9834] |
+| Field NRMSE | 0.2178 | [0.2114, 0.2243] |
+| Filter-target AOD RMSE ratio | 0.2247 | [0.2186, 0.2308] |
+| Full-target AOD RMSE ratio | 0.3493 | [0.3474, 0.3512] |
+| Excluded fraction | 0.6058 | [0.5995, 0.6120] |
+
+The acceptance file/record SHA-256 values are
+`cdf1e49193e0d66d3d437a9040aaea58ac62155a4017054bcf1aad6ca09c4b3e` and
+`97b01386c2f9beedb58b906878bd1634a74eda5dad030cba574ef6a805c88c26`. Its generation lock
+SHA-256 is `ce62113c9b04b0ba113838917b3fd17932673687c342421d091c1edd97b69069`, and the attempt-claim
+SHA-256 is `220b99ce14b9ad3644f2d1b7f5ec332ea50e50b9c07e1cc45c2ce050b80a2547`. Calibration,
+preflight, and acceptance records and their development/preregistration inputs are read-only; each
+record links backward by file and scientific-record hashes.
+
+Acceptance evidence/diagnostic SHA-256 pairs, in seed order, are: seed `1969`,
+`c428b09ca18d2c67c788e0ce72aa7caf2901f21bc8d4db055979577dabdd9267` /
+`557a12a445d552d15737e7c4bb8c429176ea67df4d9fae67cb6f578aa33bd582`; seed `2010`,
+`518bf19a89d2ad52dc4de1b1418710e894afda6421c4e1c0e436b3b068875612` /
+`88df748e1dd678ebb6aba675b66630d67c7b08140724f76726f0eb633bc9556b`; and seed `2013`,
+`d1d59933f2591c9062680238705e6ca29f04a534b40f0381c9cecda0f00b606e` /
+`f1c5506290528f5f10049cd08f785a1ff32695ce5faffb63812bb093336c0f16`. The three phase claims
+are stored under
+`analyses/aerosol-tuning/synthetic/.fable-recovery-v2-attempts/1af0653ef0edc3ac14adff6102287f1b856bdf9f7850958eec23aa68d9bed751/`
+as `calibration.json`, `preflight.json`, and `acceptance.json`.
+
+**Post-freeze provenance audit.** Final review found that the frozen generic phase validators
+verify the generation locks and all referenced evidence bytes, but do not themselves compare each
+scenario/config/manifest path with that phase's locked root. This is an integrity-proof gap in the
+reusable validator contract, not evidence that the completed run used a wrong root. Because those
+modules are part of the frozen scientific code identity, they were not changed and the consumed
+acceptance seeds were not rerun. A read-only post-hoc audit instead checked all 16 recorded runs
+(12 calibration, one preflight, three acceptance): every identity path matched its canonical locked
+bundle/run path, every fitting/evaluation YAML document exactly matched the expected synthetic-only
+policy rendering, every run input/oracle link resolved into its locked bundle, and every manifest
+artifact remained confined to the canonical run output. The audit record is
+`analyses/aerosol-tuning/synthetic/fable-v2-posthoc-audit/root-binding-audit.json` (file SHA-256
+`dda7139dcb9de650050b9add2b910e478e89a17099df2630672a82e044e55f55`, disposition `passed`). It
+contains the exact audit source and binds the preregistration, calibration, preflight, acceptance,
+and v2 code identities. This supplement closes root provenance for this completed cycle only; a
+future cycle must add the root/config checks to the preregistered validators before exposing new
+holdouts. A companion read-only integrity supplement independently recomputes the scaling, writer
+config, writer code, scenario, and embedded-file provenance for all 32 corrected MMR files and
+binds all five frozen test logs to exact paths and hashes. It passed in a separate fresh process at
+`analyses/aerosol-tuning/synthetic/fable-v2-posthoc-audit/integrity-supplement.json` (file SHA-256
+`e989dc2d4dc526a64688f8a234d356a9f2dcfd67dab4bd229de2b39423eaed21`). A final canonical
+validation also runs in a new process so the reusable validator's same-process cache cannot conceal
+an earlier transitive mutation.
+
+### Review-only plots
+
+Spatial recovery snapshots and temporal RMS maps, EOF comparisons, reconstructed PC time series,
+and wavelet reconstructions/scalograms for modes 1-2 were rendered for all three acceptance seeds.
+The 28 PNG/PDF outputs are listed with checksums in
+`analyses/aerosol-tuning/plots/fable-v2-acceptance/diagnostic-record.json` (file SHA-256
+`fdeedc64115bd8c0961c2c41df7dbbdceb73cab5d5179add0814952a733a9e82`); its combined diagnostic
+NetCDF SHA-256 is `22a3dc86c3b374755bee38a69688eae87af2ae1560a7c8ce74d04c82a6503bd5`.
+The 14 PDFs are also available under
+`~/Library/Mobile Documents/com~apple~CloudDocs/Claude/FABLE_fable-v2-acceptance_diagnostics/`.
+
+These plots are **review-only and non-preregistered**; they are not acceptance evidence. The
+canonical frozen plot adapter rejected the valid three-file `basis_fit` NetCDF collection because
+it required a single artifact file; its frozen module SHA-256 is
+`18c5e7f15a1c2d213d9184beb441f6250dd8ed7ead4baf74d6f4f37543c245ef`. No immutable input or
+source was changed. Plotting instead used the provenance-recorded runtime collection adapter at
+`analyses/aerosol-tuning/plots/fable-v2-acceptance/runtime-adapter-record.json` (`input_mutation` is
+false; file SHA-256 `dfdee8d599e3dcbb5902613f4dd8935cd95ec417329648f849bae99f007ea6ca`, adapter-source SHA-256
+`f6f88188fc0ea4c5c6fe0b8271f93f4a77a998bb37da07082d9debfd49f025d6`). It only opens the
+canonical chunk collections recorded by the manifests; the immutable acceptance record remains
+byte-unchanged.
+
+---
+
+## V2 synthetic recovery frozen protocol (2026-07-10)
+
+**State and scope.** This section records the reviewed development protocol that was subsequently
+implemented and frozen for cycle `fable-recovery-v2`; outcomes are in the 2026-07-11 checkpoint
+above. Frozen v1 configs, schemas, identities, records, execution roots, plots, and evidence remain
+byte-for-byte historical inputs. V2 added versioned files without rewriting v1. P9 remains blocked,
+and every completed v2 activity through acceptance was synthetic-only.
+
+The acceptance challenge is unchanged: `SyntheticTuningSpec.synthetic_osse` keeps its eight-year
+axis, grids, split dates, signal amplitudes, basis drift, off-basis term, errors, sensor offsets,
+masks/MNAR behavior, support policy, truth variables, primary mask, resource limits, and all §8.1
+and §8.5 thresholds. V2 changes the recovery method, not the test distribution or
+`delta_filter_target_true`. Development ablations are additive diagnostics and cannot replace or
+weaken the full-stress acceptance case.
+
+### V2.1 Diagnosis and bounded method hypothesis
+
+The corrected v1 audit is explanatory evidence only; no v2 parameter is selected from the three v1
+acceptance realizations. It found:
+
+| Diagnostic counterfactual | Frozen-v1 NRMSE range | Interpretation |
+|---|---:|---|
+| Full-grid least-squares target in the learned EOF span, with true bias | 0.0333-0.0334 | Learned spatial span is adequate for the primary target. |
+| Oracle daily coefficients reconstructed with the current fitted bias | 0.4098-0.4163 | Sequential monthly bias fitting alone places the result above the gate. |
+| Current projected/filtered coefficients reconstructed with true bias | 0.4335-0.4789 | Coefficient recovery is also impaired; errors interact. |
+| Frozen v1 production result | 0.4988-0.5154 | Primary-gate result; still rejected. |
+
+The current fitter averages raw `obs-model` innovations into a monthly field before removing the
+20/60/150-day EOF anomaly. Finite-window and mask-dependent aliasing therefore contaminates the
+bias estimate. A post-hoc source decomposition found that this in-span contamination was larger
+than the relative sensor-offset contribution. Observable-mode resolution of 0.951-0.976 also shows
+that changing `ridge=1` cannot by itself explain the much larger coefficient attenuation.
+
+V2 therefore tests one production extension: a joint, identifiable seasonal-bias/anomaly fit with
+an optional relative sensor-offset term. More EOFs, an innovation-derived basis, adaptive bases,
+ridge grids, and threshold changes are not selectable v2 methods. They may appear only in
+development diagnostics; changing that boundary requires a reviewed plan revision before any
+calibration seed is generated.
+
+For bias-fit observations only, define
+
+```
+d_s(t) = P_t B_perp[m(t)] + G_t (Z[m(t)] theta + a(t)) + X_s eta + e_s(t)
+Z[m]   = [1, sin(2*pi*(m-0.5)/12), cos(2*pi*(m-0.5)/12)]
+```
+
+Here `P_t` selects observed cells, `G_t` is the frozen learned EOF design, `B_perp` is the part of
+the 12-month spatial bias orthogonal to the pooled observable EOF span, `theta` is the constant and
+annual bias inside that span, `a(t)` is the daily anomaly, and `eta` is an optional constant
+relative sensor offset. Fit only the immutable `bias_fit` window by minimizing covariance-weighted
+residual energy plus the existing `lambda_a=1` coefficient ridge and a support-aware spatial
+Laplacian penalty. The Laplacian uses cyclic longitude, clipped latitude, edge weights normalized by
+the median supported-cell fit precision, and fixed dimensionless strength `tau_b=1`. The sensor
+offset solve is unregularized after applying its gauge.
+
+The decomposition is identifiable by construction:
+
+- `B_perp[m]` is area/precision-orthogonal to every pooled observable EOF direction for each month.
+- `a(t)` is weighted-orthogonal to the three columns of `Z` for each mode over `bias_fit`.
+- `sum_s eta_s = 0`; one sensor gives `eta=0`. Offset fitting requires a connected pairwise-overlap
+  graph over the fit window and fails otherwise rather than inventing an absolute reference.
+- Support is computed from masks/counts and frozen before any innovation value is fitted. A common
+  absolute sensor offset remains scientifically unidentifiable and is reported as such.
+
+Use deterministic block-coordinate GLS updates: daily `a`, global `theta`, 12 support-masked
+Laplacian fields followed by exact EOF-orthogonal projection, then optional sensor offsets. The
+objective must not increase; stop at relative decrease `< 1e-6` or 20 iterations, and treat
+non-convergence as fatal. Emit the existing combined monthly `clim_bias`/support interface so
+projection, wavelet filtering, scaling, and MMR writing do not change. Add
+`clim_bias_perpendicular`, `clim_bias_mode_coefficient`, `sensor_offset` and uncertainty/overlap
+counts, pooled observable rank/eigenvalues, objective history, convergence state, and complete
+basis/grid/window/policy hashes to the saved projection-fit artifact.
+
+The development menu is fixed to:
+
+| ID | Bias/anomaly fit | Relative offsets | Eligibility |
+|---|---|---|---|
+| `v2-sequential-control` | Frozen v1 sequential monthly mean | none | Diagnostic only; v1 already rejected. |
+| `v2-joint-seasonal` | Joint model above | none | Eligible for v2 calibration if all development gates pass. |
+| `v2-joint-seasonal-offset` | Joint model above | overlap, zero-sum | Eligible for v2 calibration if all development gates pass. |
+
+All three retain the selected v1 common-covariance, all-band wavelet, support, scaling, mode count,
+and `ridge=1` policy. Development may report ridge-zero analytic and ridge 0.1/0.3 sensitivity, but
+those results cannot enter candidate selection. If neither eligible joint candidate passes every
+unchanged recovery gate on every development seed and its equal-seed mean, v2 stops before
+calibration and this plan must be revised.
+
+### V2.2 Seed roles and leakage boundary
+
+Non-acceptance seeds are fixed without sampling results. For role string `r` and zero-based index
+`i`, derive a seed as the low 63 bits of the little-endian integer represented by the first eight
+bytes of `SHA-256("fable-v2\0" + r + "\0" + str(i))`. The exact values are:
+
+| Role | Seeds | Permitted use |
+|---|---|---|
+| `development` | `8958027244578499926`, `7058240817492126009`, `6541432702848222996` | Repeatable ablations, implementation diagnosis, and scoring of all synthetic splits. |
+| `calibration_recovery` | `4720161833425845668`, `7615923448626770708`, `7027338798249911494` | Frozen candidates; `calibration` split only. |
+| `calibration_null` | `6922119454902611484`, `8687442551985640685`, `1663300583890477700` | Frozen candidates; exact full-size null policy only. |
+| `preflight` | `736479105464814019` | Selected policy once; `development_test` split; no retuning after result. |
+| `acceptance` | **`1969`, `2010`, `2013` in this order** | Final selected policy once, and only after every freeze check passes. |
+
+The user supplied the ordered acceptance tuple before implementation. It is bound into the v2
+protocol identity immediately and is an absolute denylist for generation, ablation, development,
+calibration, null, and preflight entry points. No arrays, files, plots, or metrics may be generated
+from those seeds before the candidate, code, configs, environment, calibration record, and
+preflight result are frozen and hash-valid. The acceptance CLI has no seed override and rejects a
+reordered or substituted tuple.
+
+Every role is mutually exclusive and also rejects exposed v1 seeds `1179`, `2358`, `11`,
+`20260710`, `20260711`, and `20260712`. Runners exclusively create the seed lock and output root
+before generation and refuse an existing root. Once any scientific bytes or metric are produced,
+that role/seed cannot be retried. A mechanical pre-generation failure can be retried only in a new
+root after immutable proof that zero scientific content was generated and explicit user approval.
+
+Development can inspect only development outputs. Before calibration, write a canonical,
+write-once v2 preregistration that binds cycle ID, unchanged generator spec/schema and thresholds,
+the exact candidate menu, all seed roles, ranking, configs and CLI entry points, code/environment
+hashes, and test status. Any post-freeze scientific/code/config change invalidates the cycle; it
+does not reopen calibration. If no candidate passes calibration or preflight, close v2 as rejected
+and begin a separately reviewed v3.
+
+### V2.3 Stagewise diagnostic flow
+
+All fitting and diagnostic entry points use `PipelineRunner.run_from_config()`:
+
+```
+synthetic inputs (no oracle paths)
+  -> basis_train -> joint bias/projection fit -> projection -> wavelet -> scaling
+  -> immutable production artifacts and manifests
+  -> separate evaluation pipeline loads scaling + read-only oracle
+  -> diagnostic-only stage decomposition and report
+```
+
+The evaluation pipeline computes these matched-mask, matched-policy stages without writing or
+replacing any fit artifact:
+
+1. filtered analytic target projected by full-grid weighted least squares into the learned EOFs
+   (`learned_basis_oracle_nrmse`);
+2. oracle bias plus noiseless masked production projection (mask/inverse/ridge loss);
+3. oracle bias plus noisy masked projection (observation-error loss);
+4. fitted bias plus oracle daily EOF coefficients (bias-fit loss);
+5. fitted bias plus unfiltered production coefficients (projection loss);
+6. post-wavelet coefficients (temporal-filter loss);
+7. post-support/scaling `delta_log_applied` (final policy loss).
+
+It also reports true/fitted common bias, identifiable relative sensor offsets, coefficient
+correlation/slope/NRMSE before and after filtering, support and COI strata, and non-additive stage
+increments. The v2 name for the legacy comparison is
+`estimate_vs_unfiltered_in_span_nrmse`; `best_representable_nrmse` remains a read-only v1 alias and
+is never a v2 gate. Oracle paths and outputs carry `diagnostic_only=true` and
+`eligible_for_calibration=false`; fit configs remain `inputs/`-only and reject `/oracle/`, truth
+variables, evaluation artifacts, or windows outside `basis_train`/`bias_fit`.
+
+### V2.4 Calibration, preflight, and acceptance
+
+After the development report and explicit user approval, freeze the eligible menu and run every
+candidate on all three full-size `synthetic_osse` calibration-recovery seeds. Score only the
+immutable `calibration` split. Add a versioned `synthetic_osse_null` control that copies the exact
+OSSE geometry, schedule, masks, reported errors, correlations, outages, and resource profile while
+setting physical bias/anomaly/off-basis truth to zero; it does not alter the recovery or acceptance
+generator. Run every candidate on all three null seeds.
+
+A candidate is ineligible if any recovery seed or its equal-seed mean fails correlation `>=0.90`,
+slope `0.8-1.2`, NRMSE `<=0.35`, filter-target AOD ratio `<=0.70`, full-target AOD ratio `<1`,
+exclusion `<=0.80`, resources, or evidence completeness. It is also ineligible if any null seed or
+its equal-seed mean exceeds retained-energy or significant-fraction `0.10`. Rank eligible candidates
+by equal-seed mean NRMSE, AOD ratio, `abs(slope-1)`, declared simplicity, then ID. Stagewise/oracle
+metrics explain results but never weaken a threshold or enter ranking.
+
+Write the selected record atomically, freeze all identities, then run the selected policy once on
+the full-size preflight seed and score `development_test`. A failed preflight rejects v2 without
+retuning. Only a passing frozen preflight unlocks the exact ordered acceptance tuple
+`(1969, 2010, 2013)`. Acceptance retains the existing per-seed plus equal-mean gates, Student-t
+intervals, `<1800 s` and `<8 GiB` per-seed limits, complete artifacts/manifests/checksums, and one
+immutable execution. A passing program status is `passed_pending_user_review`; only explicit user
+review may set `SYNTHETIC_READY` and authorize P9.
+
+### V2.5 Concrete test and entry-point approval
+
+User approval of this entry-point/data-flow design was received before implementation. The listed
+v2 tests and entry points are implemented; existing T1-T6 remain unchanged regression tests.
+
+**Pure/unit tests:**
+
+- `test_fable_v2_protocol.py`: canonical/write-once protocol, exact deterministic seed derivation,
+  role disjointness, v1/acceptance denylists, mutation detection, and freeze identity.
+- `test_joint_projection_bias.py`: exact synthetic decomposition, all three gauges, objective
+  monotonicity/convergence, sensor-order invariance, one-sensor identity, disconnected-overlap
+  failure, support independence from values, and saved-artifact round trip.
+- `test_fable_v2_diagnostics.py`: exact-zero learned-span and stage oracles, matched masks/weights,
+  legacy metric rename, non-additive increments, and oracle-ineligible provenance.
+- `test_fable_v2_calibration.py`: 3x recovery/null aggregation, any-seed hard rejection,
+  deterministic ranking/no-eligible outcome, and atomic immutable record.
+- `test_fable_v2_acceptance.py`: exact ordered seed lock, early-generation/reuse/reorder/substitution
+  rejection, failed/missing preflight rejection, hash binding, and permanent failed disposition.
+
+**Pipeline integration tests** in `test_aerosol_tuning_v2_pipeline.py`, each entering through
+`PipelineRunner.run_from_config()`:
+
+- `test_fable_v2_joint_fit_chain`: compact two-sensor synthetic inputs flow through EOF, joint fit,
+  projection, wavelet, and scaling; assert fit outputs, improvement, and no oracle source in fitting.
+- `test_fable_v2_stage_diagnostic_chain`: an `exact_micro` production run feeds a separate
+  evaluation pipeline; assert exact stage closures and that diagnostic artifacts cannot become fits.
+- `test_fable_v2_saved_fit_fresh_runner`: persist the joint fit, start a fresh runner, prove no
+  refit, reproduce application output, and reject basis/grid/window/policy/hash mismatch.
+- `test_fable_v2_null_policy_pipeline`: compact full-policy null data flow through the complete
+  chain and exercise the unchanged false-positive metrics.
+
+Full-size OSSEs remain opt-in developer runs, not routine pytest. Versioned CLIs are
+`run_v2_diagnostics.py`, `calibrate_v2_synthetic.py`, `run_v2_preflight.py`, and
+`run_v2_acceptance.py`; scripts only render/validate configs and invoke the pipeline. Calibration,
+preflight, and acceptance CLIs expose no seed override. The versioned implementation surfaces are a
+focused joint-bias core/adapter, schema fields for the fit/offset policy, v2 diagnostics and
+protocol/calibration/acceptance modules, v2 YAML templates, and v2 records. New versioned modules
+stay below the project's 500-line goal; the shared `_aerosol_contracts.py` is 505 lines after its
+v2 additions and is a recorded follow-up split rather than a post-freeze refactor. V1
+files/identities remain readable and unmodified.
+
+### V2.6 Phase gates
+
+| Phase | Deliverable | Stop/go gate |
+|---|---|---|
+| **V2-D0** | Correct metric semantics; add seed protocol and stagewise diagnostic pipeline. | Unit/integration design above approved; compact exact closures green. |
+| **V2-D1** | Implement joint seasonal bias/anomaly fit and immutable saved artifact. | Pure solver, pipeline chain, leakage, and fresh-runner tests green. |
+| **V2-D2** | Run only the three development seeds; publish stagewise/control/candidate report. | Every unchanged gate passes for at least one eligible method; user approves freeze. |
+| **V2-C** | Freeze preregistration; run three recovery plus three null calibration seeds; select atomically. | At least one candidate passes every per-seed/mean gate; otherwise reject v2. |
+| **V2-P** | Run the selected policy once on the preflight seed. | All gates/hashes/resources pass; otherwise reject v2 without retuning. |
+| **V2-A** | Lock and run acceptance seeds `1969`, `2010`, `2013` once. | User reviews a passing report before `SYNTHETIC_READY`; P9 remains blocked otherwise. |
 
 ---
 
@@ -312,7 +735,7 @@ shape are preserved; configured gas-phase tracers and fill values are not scaled
   improve field error against the latent nature state, not noisy observations. Report coefficient
   correlation **and** slope/bias/NRMSE after weighted mode matching, plus field metrics by season,
   latitude, observation support, and resolution bin. Include multiple seeds/confidence intervals,
-  clipping rate, null false-positive rate, and the representable-subspace error ceiling.
+  clipping rate, null false-positive rate, and the matched filtered-target learned-span oracle.
 - Cells with `S = 0` have `r = 1` exactly. With the support gate disabled in an explicit research
   scenario, global EOF extrapolation is allowed and no geographic no-correction claim is made.
 - **Real data (deferred):** corrected AOD vs assimilated Aqua is an assimilation diagnostic;
@@ -819,7 +1242,7 @@ longitude dependent but maps to that labeled calendar day.
 | `clim_bias_raw_true`, `spatial_support_true` | `(month, mode_lat, mode_lon)` | pre-taper bias and frozen support policy |
 | `delta_in_span_true`, `delta_perp_true`, `delta_requested_true` | `(time, mode_lat, mode_lon)` | recoverable, irreducible, and requested correction |
 | `delta_supported_true`, `delta_applied_true` | `(time, mode_lat, mode_lon)` | post-support and post-floor/bounds corrections |
-| `delta_best_representable_true` | `(time, mode_lat, mode_lon)` | independent policy-adjusted retained-subspace ceiling |
+| `delta_best_representable_true` | `(time, mode_lat, mode_lon)` | legacy supported/policy-limited **unfiltered** in-span comparator; not an optimal ceiling |
 | `delta_filter_target_true` | `(time, mode_lat, mode_lon)` | independent spatial+temporal passband/segment/policy target |
 | `model_aod_overpass_true` | `(time, mode_lat, mode_lon)` | independent local-time/regrid oracle |
 | `r_requested_true`, `r_applied_true`, `clip_mask_true` | `(time, mode_lat, mode_lon)` | pre-policy ratio, applied ratio, clip reason |
@@ -901,8 +1324,9 @@ recovery oracle.
 - Compare learned bases using weighted subspace angles/projector error. For separated modes, use
   weighted Hungarian sign/permutation matching before coefficient scores; never assume EOF labels.
 - Primary reconstruction comparison uses `delta_filter_target_true`; also report full-policy
-  `delta_applied_true`, pre-policy `delta_in_span_true`, `delta_perp`, and distance from
-  `delta_best_representable_true` so spatial versus temporal/policy error is not conflated. The
+  `delta_applied_true`, pre-policy `delta_in_span_true`, `delta_perp`, and the legacy distance from
+  `delta_best_representable_true`. That last quantity compares against an unfiltered target and may
+  not be interpreted as a representability floor. The
   independent temporal oracle is assembled analytically from known in-band/out-of-band components,
   configured mean/trend, segment taper, support, floor, and clipping; it does not call pycwt or
   production filters. Exclude CWT COI/segment edges from primary scores but report excluded fraction
@@ -926,7 +1350,9 @@ normalized `cos(lat)` weights. Required: weighted correlation >= 0.90, origin-co
 weighted AOD RMSE against `aod_filter_target_true` must be <= 70% of uncorrected model RMSE; RMSE
 against the full `aod_target_applied_true` must also improve over the uncorrected model.
 Report full-domain and support/resolution/season/latitude strata, excluded fraction, coefficient
-metrics, and distance from `delta_best_representable_true`; raw AOD correlation is diagnostic only.
+metrics, and the explicitly labeled estimate-to-unfiltered-in-span diagnostic; raw AOD correlation
+is diagnostic only. A true learned-span oracle must solve the matched filtered target by full-grid
+weighted least squares as specified in V2.3.
 
 For `calibration_null`, define false-positive energy as
 `sum(w*delta_log_applied^2) / sum(w*innovation_noise_true^2)` over the same non-COI test domain; it
@@ -998,15 +1424,24 @@ RSS; primary exclusion must be <= 0.80. The record retains full strata/decomposi
 diagnostics and validates fitting/evaluation manifests plus every recovery-artifact checksum before
 completion. Seeds are locked with exclusive creation before generation and are never inferred.
 
-**Acceptance disposition (2026-07-10): rejected.** The three user-supplied seeds completed the
-synthetic OSSE fitting and evaluation pipelines under the frozen `fable-v1-all-band` policy. All
-evidence, resource, exclusion, correlation, slope, and AOD-improvement gates passed, but each seed
+**Historical v1 acceptance disposition (2026-07-10): rejected.** The three user-supplied seeds
+completed the synthetic OSSE fitting and evaluation pipelines under the frozen `fable-v1-all-band`
+policy. All evidence, resource, exclusion, correlation, slope, and AOD-improvement gates passed,
+but each seed
 and the equal-seed aggregate failed `field_nrmse <= 0.35`; the aggregate was 0.5067 with 95%
 Student-t interval [0.4860, 0.5275]. The original record, immutable seed locks, and reporting
 supplement identified in the checkpoint above are retained as the audit trail. `SYNTHETIC_READY`
 cannot be approved for v1, and no P9 real-data work is authorized. Any future method revision must
 start a new versioned development/calibration cycle and use new held-out acceptance seeds rather
 than tuning to or reevaluating on these seeds.
+
+**V2 acceptance disposition (2026-07-11): `passed_pending_user_review`.** The frozen
+`v2-joint-seasonal-offset` policy passed every per-seed and equal-seed scientific, evidence,
+exclusion, and resource gate on the one-time ordered acceptance tuple `(1969, 2010, 2013)`. The
+aggregate NRMSE was 0.2178 with 95% Student-t interval [0.2114, 0.2243]; full metrics, identities,
+locks, and review-only plot provenance are recorded in the v2 checkpoint above. This passing
+program result does not itself set `SYNTHETIC_READY`: explicit user review remains required, so
+`SYNTHETIC_READY` remains unset and P9 remains blocked.
 
 ---
 
@@ -1032,8 +1467,10 @@ phase's concrete test entry points/data flow and receiving approval before writi
 or pushes occur without explicit user approval.
 
 Implementation approval was received on 2026-07-10. P0-P8 software and synthetic validation are
-complete, and the required P8 acceptance execution has concluded. The frozen recovery gate failed,
-so the P8 `SYNTHETIC_READY` gate is closed as rejected. This checkpoint explicitly blocks P9.
+complete, and the required P8 acceptance execution has concluded. The frozen v1 recovery gate
+failed, so v1 `SYNTHETIC_READY` remains rejected. The separately versioned v2 recovery cycle passed
+with status `passed_pending_user_review`; `SYNTHETIC_READY` remains unset until explicit user review.
+This checkpoint explicitly blocks P9.
 
 ---
 
@@ -1044,13 +1481,16 @@ so the P8 `SYNTHETIC_READY` gate is closed as rejected. This checkpoint explicit
    AERONET cross-check of `b_hat` maps before trusting them.
 2. **Basis stationarity over decades** — major eruptions (Pinatubo) distort covariance. Option:
    `exclude_periods:` on the EOF training window; decide after inspecting the scree/patterns.
-3. **Correction-subspace mismatch** is structural. Synthetic `delta_perp` and basis-drift cases
-   quantify the irreducible floor; real claims must not imply EOF span completeness. Held-out v1
-   acceptance found mean best-representable NRMSE 0.5078 and achieved NRMSE 0.5067, confirming that
-   the frozen recovery miss is dominated by the declared representability target rather than an
-   artifact, evidence, or resource failure. These held-out seeds cannot be used to tune a revision.
-4. **Wavelet significance after shrinkage/gap fill** is heuristic until the null ensemble passes.
-   FDR/Monte Carlo calibration is mandatory if the frozen false-positive gate fails.
+3. **Correction-subspace mismatch** remains a structural risk. Synthetic `delta_perp` and
+   basis-drift cases quantify it, and real claims must not imply EOF-span completeness. The v1
+   `best_representable_nrmse=0.5078` value was mislabeled estimate-to-unfiltered-in-span error, not
+   an optimum or irreducible floor; it cannot explain the 0.5067 primary result. The v2 stagewise
+   learned-span oracle measures this risk against the matched filtered target. Frozen v1 evidence
+   remains historical diagnostic context and cannot select v2 parameters.
+4. **Wavelet significance after shrinkage/gap fill** remains heuristic, but the v2 full-size null
+   ensemble passed every frozen per-seed and equal-seed false-positive gate. Retain the observed
+   null rates as the current bound; FDR/Monte Carlo calibration is mandatory if a future frozen
+   null gate fails.
 5. **icwt fidelity** (~few % for Morlet) is measured per mode with a full-scale round trip and
    included in recovery error; the intentionally truncated filtering grid is not mislabeled as a
    full-CWT reconstruction diagnostic.
@@ -1069,7 +1509,15 @@ so the P8 `SYNTHETIC_READY` gate is closed as rejected. This checkpoint explicit
    LST; consistent between training and innovation, so it cancels to first order.
 12. **Exact real product details remain deliberately unverified until P9:** D3 SDS/QA/cadence,
    C6.1 choice, MMR tracer list/encoding, and GEOS-IT grids/collections.
-13. **Renderer compatibility** is an explicit data/artist contract in P6 rather than a late PNG
+13. **Frozen v2 reusable integrity validators need hardening.** They do not generically enforce
+    locked-root path equality, corrected-MMR validation checks three provenance identities only for
+    presence, prerequisite deep validation is process-cached, and preregistration stores test-log
+    hashes without paths. The completed cycle's two post-hoc audits passed all 16 root/config/link/
+    artifact checks, all 32 recomputed MMR provenance checks, and all five exact test-log bindings,
+    so its recorded evidence is intact. Before any future synthetic recovery cycle, correct these
+    generic validators and add adversarial cross-root, cross-policy, external-config, MMR-identity,
+    cache-mutation, and test-log substitution tests; do not reuse the consumed v2 holdouts.
+14. **Renderer compatibility** is an explicit data/artist contract in P6 rather than a late PNG
    smoke-test discovery.
 
 ---

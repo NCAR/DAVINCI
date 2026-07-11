@@ -47,6 +47,34 @@ def test_reduced_osse_generator_broadcasts_spatial_model_terms() -> None:
     assert set(bundle.observations) == {"sensor_a", "sensor_b"}
 
 
+def test_reduced_full_size_null_preserves_stress_and_zeroes_physical_truth() -> None:
+    base = SyntheticTuningSpec.synthetic_osse_null(20260811)
+    spec = replace(
+        base,
+        native_domain=Domain(-180.0, 180.0, -90.0, 90.0, 12, 6),
+        mode_domain=Domain(-180.0, 180.0, -90.0, 90.0, 6, 3),
+        time_config=TimeConfig("2001-01-01", "2001-01-12", "1h"),
+        split_windows=(
+            ("basis_train", "2001-01-01", "2001-01-03"),
+            ("bias_fit", "2001-01-04", "2001-01-06"),
+            ("calibration", "2001-01-07", "2001-01-09"),
+            ("development_test", "2001-01-10", "2001-01-12"),
+        ),
+    )
+
+    bundle = generate_aerosol_tuning_bundle(spec)
+
+    assert spec.sensor_bias_log == (0.015, -0.02)
+    assert spec.error_temporal_correlation == 0.55
+    assert spec.error_spatial_correlation == 0.6
+    assert spec.mnar_cloud_strength == 0.8
+    assert np.all(bundle.truth["clim_bias_raw_true"] == 0.0)
+    assert np.all(bundle.truth["correction_pc_true"] == 0.0)
+    assert np.all(bundle.truth["delta_requested_true"] == 0.0)
+    assert np.all(bundle.truth["delta_filter_target_true"] == 0.0)
+    assert np.any(bundle.truth["obs_error_log"] != 0.0)
+
+
 def test_masked_chain_ci_has_locked_six_year_schedule_and_resource_shape() -> None:
     spec = SyntheticTuningSpec.masked_chain_ci(master_seed=8)
 

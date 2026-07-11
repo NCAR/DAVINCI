@@ -225,8 +225,12 @@ def _pipeline_inputs() -> dict[str, SourceData]:
                 np.ones((2, 2), dtype=bool),
             ),
             "coi": (("time", "mode"), np.full((2, 2), 180.0)),
+            "power_significance": (
+                ("time", "mode", "period"),
+                np.arange(8, dtype=np.float64).reshape(2, 2, 2),
+            ),
         },
-        coords={"time": coefficient_time, "mode": mode},
+        coords={"time": coefficient_time, "mode": mode, "period": [20.0, 60.0]},
         attrs={
             "projection_basis_signature": basis_signature,
             "projection_log_epsilon": 0.01,
@@ -288,7 +292,20 @@ def test_pipeline_resolves_four_named_inputs_and_keeps_daily_chunks(tmp_path: Pa
     assert scaling.data.attrs["artifact_policy"] == "time_chunked_lazy"
     assert scaling.data.attrs["spec_hash"] == "scenario-a"
     assert scaling.data.attrs["band_max"] == 180.0
-    assert {"eofs", "pc", "resolution", "valid_segment", "coi"} <= set(scaling.data.data_vars)
+    assert {
+        "eofs",
+        "pc",
+        "resolution",
+        "valid_segment",
+        "coi",
+        "power_significance",
+    } <= set(scaling.data.data_vars)
+    xr.testing.assert_equal(
+        scaling.data["power_significance"]
+        .dropna("time", how="all")
+        .reset_coords("month", drop=True),
+        context.sources["filtered_src"].data["power_significance"],
+    )
     assert scaling.config["artifact_glob"].endswith("artifacts/scaling/chunk-*.nc")
     artifact_entry = context.metadata["analysis_artifacts"][0]
     assert artifact_entry["role"] == "scaling"

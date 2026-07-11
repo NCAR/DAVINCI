@@ -21,6 +21,7 @@ if __package__ in {None, ""}:
 
 from davinci_monet.pipeline.runner import run_analysis  # noqa: E402
 from davinci_monet.tests.synthetic.fable_acceptance_diagnostics import (  # noqa: E402
+    AcceptanceDiagnosticSource,
     acceptance_collection_config,
     build_acceptance_diagnostic_source,
     verify_wavelet_replay,
@@ -29,6 +30,14 @@ from davinci_monet.tests.synthetic.fable_acceptance_diagnostics import (  # noqa
 from davinci_monet.tests.synthetic.fable_acceptance_plots import (  # noqa: E402
     registered_acceptance_plotters,
 )
+from davinci_monet.tests.synthetic.fable_v2_acceptance_diagnostics import (  # noqa: E402
+    V2AcceptanceDiagnosticSource,
+    build_v2_acceptance_diagnostic_source,
+    is_v2_acceptance_record,
+    v2_acceptance_collection_config,
+    verify_v2_wavelet_replay,
+    write_v2_acceptance_diagnostic_source,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 DEFAULT_ACCEPTANCE_ROOT = (
@@ -36,11 +45,19 @@ DEFAULT_ACCEPTANCE_ROOT = (
 )
 DEFAULT_ICLOUD_ROOT = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/Claude"
 DIAGNOSTIC_SCHEMA = "fable-acceptance-diagnostics-v1"
+V2_DIAGNOSTIC_SCHEMA = "fable-v2-acceptance-diagnostics-v1"
 OUTPUT_MARKER = ".fable-acceptance-diagnostics.json"
+DiagnosticSource = AcceptanceDiagnosticSource | V2AcceptanceDiagnosticSource
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _load_diagnostic_source(acceptance_root: Path) -> tuple[DiagnosticSource, str]:
+    if is_v2_acceptance_record(acceptance_root):
+        return build_v2_acceptance_diagnostic_source(acceptance_root), V2_DIAGNOSTIC_SCHEMA
+    return build_acceptance_diagnostic_source(acceptance_root), DIAGNOSTIC_SCHEMA
 
 
 def _json_value(value: Any) -> Any:
@@ -57,9 +74,11 @@ def _paths_overlap(left: Path, right: Path) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
-def _output_marker_document(acceptance_root: Path) -> dict[str, str]:
+def _output_marker_document(
+    acceptance_root: Path, schema_version: str = DIAGNOSTIC_SCHEMA
+) -> dict[str, str]:
     return {
-        "schema_version": DIAGNOSTIC_SCHEMA,
+        "schema_version": schema_version,
         "acceptance_root": str(acceptance_root),
     }
 
@@ -69,6 +88,7 @@ def _prepare_output_root(
     output_root: Path,
     *,
     overwrite: bool,
+    schema_version: str = DIAGNOSTIC_SCHEMA,
 ) -> None:
     if _paths_overlap(acceptance_root, output_root):
         raise ValueError("diagnostic output must not overlap immutable acceptance inputs")
@@ -84,12 +104,12 @@ def _prepare_output_root(
             raise ValueError(
                 f"refusing to overwrite unowned diagnostic output: {output_root}"
             ) from exc
-        if actual_marker != _output_marker_document(acceptance_root):
+        if actual_marker != _output_marker_document(acceptance_root, schema_version):
             raise ValueError(f"diagnostic output ownership does not match: {output_root}")
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True)
     marker.write_text(
-        json.dumps(_output_marker_document(acceptance_root), sort_keys=True) + "\n",
+        json.dumps(_output_marker_document(acceptance_root, schema_version), sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -155,11 +175,11 @@ def _wavelet_spec(source: str) -> dict[str, Any]:
 
 
 def _build_config(
-    acceptance_root: Path,
+    source: DiagnosticSource,
     diagnostic_source: Path,
     run_root: Path,
-    seeds: Sequence[int],
 ) -> dict[str, Any]:
+    seeds = source.seeds
     sources: dict[str, Any] = {
         "acceptance_diagnostics": {
             "type": "generic",
@@ -194,14 +214,10 @@ def _build_config(
     for seed in seeds:
         source_name = f"projection_{seed}"
         analysis_name = f"wavelet_replay_{seed}"
-        sources[source_name] = acceptance_collection_config(
-            acceptance_root,
+        sources[source_name] = _collection_config(
+            source,
             seed,
-            "projection",
-            {
-                "pc": {"units": "1"},
-                "resolution": {"units": "1"},
-            },
+            {"pc": {"units": "1"}, "resolution": {"units": "1"}},
         )
         analyses[analysis_name] = _wavelet_spec(source_name)
         for mode in (1, 2):
@@ -258,20 +274,32 @@ def _generated_plots(result: Any, seeds: Sequence[int]) -> list[Path]:
     return paths
 
 
-def _verify_replays(result: Any, acceptance_root: Path, seeds: Sequence[int]) -> dict[str, Any]:
+def _collection_config(
+    source: DiagnosticSource, seed: int, variables: dict[str, dict[str, str]]
+) -> dict[str, Any]:
+    if isinstance(source, V2AcceptanceDiagnosticSource):
+        return v2_acceptance_collection_config(source, seed, "projection", variables)
+    return acceptance_collection_config(source.acceptance_root, seed, "projection", variables)
+
+
+def _verify_replays(result: Any, source: DiagnosticSource) -> dict[str, Any]:
     if result.context is None:
         raise RuntimeError("diagnostic pipeline has no result context")
     report: dict[str, Any] = {}
-    for seed in seeds:
+    for seed in source.seeds:
         name = f"wavelet_replay_{seed}"
-        source = result.context.sources.get(name)
-        if source is None:
+        replay = result.context.sources.get(name)
+        if replay is None:
             raise RuntimeError(f"diagnostic pipeline is missing {name}")
-        report[str(seed)] = verify_wavelet_replay(source.data, acceptance_root, seed)
+        if isinstance(source, V2AcceptanceDiagnosticSource):
+            values = verify_v2_wavelet_replay(replay.data, source, seed)
+        else:
+            values = verify_wavelet_replay(replay.data, source.acceptance_root, seed)
+        report[str(seed)] = values
     return report
 
 
-def _gallery_html(title: str, images: Sequence[tuple[str, str]]) -> str:
+def _gallery_html(title: str, images: Sequence[tuple[str, str]], disposition: str) -> str:
     figures = "\n".join(
         f'<figure><a href="{href}"><img src="{href}" alt="{label}"></a>'
         f"<figcaption>{label}</figcaption></figure>"
@@ -296,21 +324,22 @@ figcaption {{ margin-top: 8px; font-weight: 600; }}
 </style>
 </head>
 <body>
-<header><h1>{title}</h1><p>Diagnostic only. Frozen v1 acceptance remains rejected.</p></header>
+<header><h1>{title}</h1><p>{disposition}</p></header>
 <main>{figures}</main>
 </body>
 </html>
 """
 
 
-def _write_local_gallery(output_root: Path, plots: Sequence[Path]) -> Path:
+def _write_local_gallery(output_root: Path, plots: Sequence[Path], disposition: str) -> Path:
     pngs = [path for path in plots if path.suffix.lower() == ".png"]
     images = [
         (path.stem.replace("_", " ").title(), os.path.relpath(path, output_root)) for path in pngs
     ]
     index = output_root / "index.html"
     index.write_text(
-        _gallery_html("FABLE Synthetic Acceptance Diagnostics", images), encoding="utf-8"
+        _gallery_html("FABLE Synthetic Acceptance Diagnostics", images, disposition),
+        encoding="utf-8",
     )
     return index
 
@@ -357,12 +386,19 @@ def run(
     *,
     overwrite: bool,
 ) -> tuple[Path, Path, Path]:
-    _prepare_output_root(acceptance_root, output_root, overwrite=overwrite)
+    source, schema_version = _load_diagnostic_source(acceptance_root)
+    acceptance_root = source.acceptance_root
+    _prepare_output_root(
+        acceptance_root, output_root, overwrite=overwrite, schema_version=schema_version
+    )
 
-    source = build_acceptance_diagnostic_source(acceptance_root)
-    data_path = write_acceptance_diagnostic_source(source, output_root / "data/diagnostics.nc")
+    destination = output_root / "data/diagnostics.nc"
+    if isinstance(source, V2AcceptanceDiagnosticSource):
+        data_path = write_v2_acceptance_diagnostic_source(source, destination)
+    else:
+        data_path = write_acceptance_diagnostic_source(source, destination)
     run_root = output_root / "run"
-    config = _build_config(acceptance_root, data_path, run_root, source.seeds)
+    config = _build_config(source, data_path, run_root)
     config_path = output_root / "diagnostics.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -375,9 +411,10 @@ def run(
         )
         raise RuntimeError(f"diagnostic pipeline failed: {failures}")
     plots = _generated_plots(result, source.seeds)
-    replay = _verify_replays(result, acceptance_root, source.seeds)
+    replay = _verify_replays(result, source)
+    disposition = str(source.dataset.attrs["diagnostic_disposition"])
     record = {
-        "schema_version": DIAGNOSTIC_SCHEMA,
+        "schema_version": schema_version,
         "acceptance_root": str(acceptance_root),
         "acceptance_record_sha256": source.dataset.attrs["acceptance_record_sha256"],
         "diagnostic_source": {"path": str(data_path), "sha256": _sha256(data_path)},
@@ -386,7 +423,7 @@ def run(
         "seeds": list(source.seeds),
         "wavelet_replay": replay,
         "plots": [{"path": str(path), "sha256": _sha256(path)} for path in sorted(plots)],
-        "disposition": "diagnostic only; frozen acceptance remains rejected",
+        "disposition": disposition,
     }
     record_path = output_root / "diagnostic-record.json"
     record_path.write_text(
@@ -399,7 +436,7 @@ def run(
         + "\n",
         encoding="utf-8",
     )
-    local_index = _write_local_gallery(output_root, plots)
+    local_index = _write_local_gallery(output_root, plots, disposition)
     delivery_path = _deliver(delivery_root, acceptance_root, plots)
     return local_index, delivery_path, record_path
 

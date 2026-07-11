@@ -95,7 +95,7 @@ def generate_bundle(spec: SyntheticTuningSpec) -> SyntheticTuningBundle:
     bias = 0.025 * np.sin(lat2d)[None, ...]
     bias = bias + 0.012 * np.cos(lon2d[None, ...] + 2.0 * np.pi * month_number / 12.0)
     bias = np.broadcast_to(bias, (12, mode_lat.size, mode_lon.size)).copy()
-    if spec.scenario in {"null_ci", "calibration_null"}:
+    if spec.scenario in {"null_ci", "calibration_null", "synthetic_osse_null"}:
         correction_pc_in_band.fill(0.0)
         correction_pc_out_of_band.fill(0.0)
         correction_pc_trend.fill(0.0)
@@ -384,7 +384,12 @@ def _perpendicular_correction(
     patterns: np.ndarray,
 ) -> np.ndarray:
     result = np.zeros((n_days, mode_lat.size, mode_lon.size), dtype=np.float64)
-    if spec.scenario in {"exact_micro", "null_ci", "calibration_null"}:
+    if spec.scenario in {
+        "exact_micro",
+        "null_ci",
+        "calibration_null",
+        "synthetic_osse_null",
+    }:
         return result
     lat2d, lon2d = np.meshgrid(np.deg2rad(mode_lat), np.deg2rad(mode_lon), indexing="ij")
     candidate = np.sin(3.0 * lon2d) * np.cos(2.0 * lat2d)

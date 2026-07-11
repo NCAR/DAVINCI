@@ -950,6 +950,11 @@ class EOFProjectionSpec(AnalysisSpecBase):
     ridge: float = Field(default=1.0, ge=0.0)
     bias_fit_window: BiasFitWindowSpec | None = None
     bias_fit_artifact: str | None = None
+    bias_fit_method: Literal["monthly_mean", "joint_seasonal"] = "monthly_mean"
+    sensor_offset_method: Literal["none", "overlap_zero_sum"] = "none"
+    joint_bias_laplacian_strength: float = Field(default=1.0, ge=0.0)
+    joint_bias_tolerance: float = Field(default=1.0e-6, gt=0.0)
+    joint_bias_max_iterations: int = Field(default=20, ge=1)
     clim_bias: bool = True
     spatial_support: Literal["monthly_taper"] = "monthly_taper"
     support_min_fraction: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -966,11 +971,15 @@ class EOFProjectionSpec(AnalysisSpecBase):
             refs["bias_fit_artifact"] = self.bias_fit_artifact
         return refs
 
-    @field_validator("ridge")
+    @field_validator(
+        "ridge",
+        "joint_bias_laplacian_strength",
+        "joint_bias_tolerance",
+    )
     @classmethod
-    def _validate_ridge(cls, value: float) -> float:
+    def _validate_projection_float(cls, value: float) -> float:
         if not math.isfinite(value):
-            raise ValueError("ridge must be finite")
+            raise ValueError("projection numeric controls must be finite")
         return value
 
     @field_validator("delta_bounds")
@@ -988,6 +997,11 @@ class EOFProjectionSpec(AnalysisSpecBase):
             raise ValueError("eof_projection requires bias_fit_window or bias_fit_artifact")
         if self.support_min_fraction >= self.support_full_fraction:
             raise ValueError("support_min_fraction must be below support_full_fraction")
+        if self.bias_fit_method == "monthly_mean" and self.sensor_offset_method != "none":
+            raise ValueError(
+                "sensor_offset_method='overlap_zero_sum' requires "
+                "bias_fit_method='joint_seasonal'"
+            )
         return self
 
 
@@ -1163,6 +1177,61 @@ class KnownTruthSpec(AnalysisSpecBase):
         return self
 
 
+class FableV2DiagnosticsSpec(AnalysisSpecBase):
+    """Evaluation-only stage decomposition for the FABLE v2 synthetic cycle."""
+
+    type: Literal["fable_v2_diagnostics"]
+    estimate: str
+    projection: str
+    truth: str
+    projection_to_truth_sensor: dict[str, str] = Field(default_factory=dict)
+    reported_common_factor_amplitude: float = Field(ge=0.0)
+    evaluation_splits: list[str] = Field(default_factory=lambda: ["development_test"])
+    required: bool = True
+
+    def input_refs(self) -> dict[str, str]:
+        return {
+            "estimate": self.estimate,
+            "projection": self.projection,
+            "truth": self.truth,
+        }
+
+    @field_validator("evaluation_splits")
+    @classmethod
+    def _validate_evaluation_splits(cls, value: list[str]) -> list[str]:
+        if not value or any(not split.strip() for split in value):
+            raise ValueError("evaluation_splits must contain at least one nonempty name")
+        if len(value) != len(set(value)):
+            raise ValueError("evaluation_splits must be unique")
+        return value
+
+    @field_validator("projection_to_truth_sensor", mode="before")
+    @classmethod
+    def _validate_sensor_mapping(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or any(
+            not isinstance(source, str) or not isinstance(target, str)
+            for source, target in value.items()
+        ):
+            return value
+        if any(
+            not source or not target or source != source.strip() or target != target.strip()
+            for source, target in value.items()
+        ):
+            raise ValueError(
+                "projection_to_truth_sensor names must be nonempty and whitespace-trimmed"
+            )
+        if len(value.values()) != len(set(value.values())):
+            raise ValueError("projection_to_truth_sensor must be bijective")
+        return value
+
+    @field_validator("reported_common_factor_amplitude")
+    @classmethod
+    def _validate_common_factor_amplitude(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("reported_common_factor_amplitude must be finite")
+        return value
+
+
 class FormulaFieldSpec(StrictSchema):
     """One named field produced by a gridded analysis formula."""
 
@@ -1215,6 +1284,7 @@ AnalysisSpec = (
     | AODScalingSpec
     | MMRWriterSpec
     | KnownTruthSpec
+    | FableV2DiagnosticsSpec
     | GriddedAnalysisSpec
 )
 
@@ -1232,6 +1302,7 @@ def build_analysis_spec(cfg: Any) -> AnalysisSpec:
             AODScalingSpec,
             MMRWriterSpec,
             KnownTruthSpec,
+            FableV2DiagnosticsSpec,
             GriddedAnalysisSpec,
         ),
     ):
@@ -1255,13 +1326,15 @@ def build_analysis_spec(cfg: Any) -> AnalysisSpec:
         return MMRWriterSpec(**cfg)
     if analysis_type == "known_truth":
         return KnownTruthSpec(**cfg)
+    if analysis_type == "fable_v2_diagnostics":
+        return FableV2DiagnosticsSpec(**cfg)
     if analysis_type == "gridded_analysis":
         return GriddedAnalysisSpec(**cfg)
     raise ValueError(
         "Unknown analysis type "
         f"{analysis_type!r}. Available analysis types: eof, wavelet, "
         "aod_preprocess, eof_projection, wavelet_filter, aod_scaling, "
-        "mmr_writer, known_truth, gridded_analysis"
+        "mmr_writer, known_truth, fable_v2_diagnostics, gridded_analysis"
     )
 
 
@@ -1409,7 +1482,7 @@ class MonetConfig(StrictSchema):
         artifact_analysis_names = {
             name
             for name, spec in self.analyses.items()
-            if isinstance(spec, (MMRWriterSpec, KnownTruthSpec))
+            if isinstance(spec, (MMRWriterSpec, KnownTruthSpec, FableV2DiagnosticsSpec))
         }
         errors: list[str] = []
 
@@ -1430,25 +1503,35 @@ class MonetConfig(StrictSchema):
         known_truth = {
             name: spec for name, spec in self.analyses.items() if isinstance(spec, KnownTruthSpec)
         }
+        v2_diagnostics = {
+            name: spec
+            for name, spec in self.analyses.items()
+            if isinstance(spec, FableV2DiagnosticsSpec)
+        }
+        evaluation_analyses = {**known_truth, **v2_diagnostics}
 
         if known_truth and self.analysis.workflow != "synthetic_evaluation":
             errors.append("known_truth requires analysis.workflow: synthetic_evaluation")
+        if v2_diagnostics and self.analysis.workflow != "synthetic_evaluation":
+            errors.append("fable_v2_diagnostics requires analysis.workflow: synthetic_evaluation")
         if self.analysis.workflow == "synthetic_fit" and fit_analyses and truth_sources:
             names = ", ".join(sorted(truth_sources))
             errors.append(f"synthetic fitting analyses cannot load oracle truth sources: {names}")
         if self.analysis.workflow == "synthetic_fit":
-            if known_truth:
-                errors.append("synthetic_fit cannot contain known_truth analyses")
+            if evaluation_analyses:
+                errors.append("synthetic_fit cannot contain truth-evaluation analyses")
             if truth_sources:
                 errors.append("synthetic_fit sources may reference only fitting inputs")
         if self.analysis.workflow == "synthetic_evaluation":
             disallowed = sorted(
-                name for name, spec in self.analyses.items() if not isinstance(spec, KnownTruthSpec)
+                name
+                for name, spec in self.analyses.items()
+                if not isinstance(spec, (KnownTruthSpec, FableV2DiagnosticsSpec))
             )
             if disallowed:
                 errors.append(
-                    "synthetic_evaluation may contain only known_truth analyses: "
-                    + ", ".join(disallowed)
+                    "synthetic_evaluation may contain only known_truth or "
+                    "fable_v2_diagnostics analyses: " + ", ".join(disallowed)
                 )
             if not known_truth:
                 errors.append("synthetic_evaluation requires at least one known_truth analysis")
@@ -1472,6 +1555,23 @@ class MonetConfig(StrictSchema):
                         f"analyses.{name}.estimate must reference a finalized fit artifact"
                     )
                 if truth is not None and not truth.evaluation_only:
+                    errors.append(
+                        f"analyses.{name}.truth must reference an evaluation-only truth source"
+                    )
+            for name, diagnostic_spec in v2_diagnostics.items():
+                for role in ("estimate", "projection"):
+                    source_name = str(getattr(diagnostic_spec, role))
+                    diagnostic_source = self.sources.get(source_name)
+                    if diagnostic_source is not None and (
+                        source_name in truth_sources
+                        or diagnostic_source.artifact_manifest is None
+                        or diagnostic_source.artifact_role is None
+                    ):
+                        errors.append(
+                            f"analyses.{name}.{role} must reference a finalized fit artifact"
+                        )
+                diagnostic_truth = self.sources.get(diagnostic_spec.truth)
+                if diagnostic_truth is not None and not diagnostic_truth.evaluation_only:
                     errors.append(
                         f"analyses.{name}.truth must reference an evaluation-only truth source"
                     )

@@ -83,3 +83,54 @@ def test_delivery_must_not_overlap_acceptance_inputs(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must not overlap"):
         SCRIPT._deliver(acceptance, acceptance, [pdf])
+
+
+def test_source_loader_dispatches_canonical_v2_without_v1_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acceptance = tmp_path / "acceptance"
+    sentinel = object()
+    monkeypatch.setattr(SCRIPT, "is_v2_acceptance_record", lambda root: True)
+    monkeypatch.setattr(SCRIPT, "build_v2_acceptance_diagnostic_source", lambda root: sentinel)
+
+    source, schema = SCRIPT._load_diagnostic_source(acceptance)
+
+    assert source is sentinel
+    assert schema == SCRIPT.V2_DIAGNOSTIC_SCHEMA
+
+
+def test_source_loader_preserves_v1_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acceptance = tmp_path / "acceptance"
+    sentinel = object()
+    monkeypatch.setattr(SCRIPT, "is_v2_acceptance_record", lambda root: False)
+    monkeypatch.setattr(SCRIPT, "build_acceptance_diagnostic_source", lambda root: sentinel)
+
+    source, schema = SCRIPT._load_diagnostic_source(acceptance)
+
+    assert source is sentinel
+    assert schema == SCRIPT.DIAGNOSTIC_SCHEMA
+
+
+def test_gallery_and_record_disposition_can_report_v2_failure(tmp_path: Path) -> None:
+    disposition = "diagnostic only; acceptance failed"
+    html = SCRIPT._gallery_html("FABLE", [], disposition)
+
+    assert disposition in html
+    assert "Frozen v1 acceptance remains rejected" not in html
+
+
+def test_v2_marker_does_not_authorize_v1_output_replacement(tmp_path: Path) -> None:
+    acceptance = tmp_path / "acceptance"
+    acceptance.mkdir()
+    output = tmp_path / "output"
+    SCRIPT._prepare_output_root(
+        acceptance,
+        output,
+        overwrite=False,
+        schema_version=SCRIPT.V2_DIAGNOSTIC_SCHEMA,
+    )
+
+    with pytest.raises(ValueError, match="ownership does not match"):
+        SCRIPT._prepare_output_root(acceptance, output, overwrite=True)

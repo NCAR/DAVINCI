@@ -100,7 +100,10 @@ def _column_title(ax: matplotlib.axes.Axes, title: str) -> None:
 
 def _disposition(dataset: Any) -> str:
     policy = dataset.attrs.get("selected_policy_id", "fable-v1-all-band")
-    return f"{policy} | diagnostic only; frozen acceptance remains rejected"
+    disposition = dataset.attrs.get(
+        "diagnostic_disposition", "diagnostic only; frozen acceptance remains rejected"
+    )
+    return f"{policy} | {disposition}"
 
 
 class FableSpatialRecoveryPlotter(BaseSpatialPlotter):

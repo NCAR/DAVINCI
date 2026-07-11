@@ -235,7 +235,7 @@ def build_aod_scaling(
     for variable in ("resolution",):
         if variable in projection:
             converted[variable] = projection[variable]
-    for variable in ("valid_segment", "coi"):
+    for variable in ("valid_segment", "coi", "power_significance"):
         if variable in coefficients:
             converted[variable] = coefficients[variable]
     converted.attrs.update(
