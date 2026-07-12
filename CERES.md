@@ -176,7 +176,7 @@ The subset scripts preserve each source-relative path below this root:
 
 ```text
 /CERES/sarb/dfillmor/DAVINCI/
-├── GMAO/GEOSIT/<YYYY>/<MM>/GEOSIT_AOD550_daily.<YYYYMMDD>.nc
+├── GMAO/GEOSIT/<YYYY>/<MM>/GEOSIT_TOTEXTTAU550_daily.<YYYYMMDD>.nc
 └── MODIS/
     ├── Aqua/C61/<YYYY>/<DDD>/MYD08_D3.*.nc
     ├── Terra/C61/<YYYY>/<DDD>/MOD08_D3.*.nc
@@ -184,10 +184,26 @@ The subset scripts preserve each source-relative path below this root:
 ```
 
 The scripts run with `conda activate nco` and use NCO operators for the
-subsets. For C6.1 MODIS HDF4 reads, the MODIS script defaults to
-`/usr/local/bin/ncks` (`NCKS_HDF4_BIN` can override it), which handles the
-older D3 files; it writes only the final NetCDF4 subset to the mirrored output
-tree.
+subsets. The GEOS-IT product contains only total 550-nm aerosol extinction
+optical thickness (`TOTEXTTAU`). For C6.1 MODIS HDF4 reads, the MODIS script
+defaults to `/usr/local/bin/ncks` (`NCKS_HDF4_BIN` can override it), which
+writes only the final NetCDF4 subset to the mirrored output tree.
+
+Known unreadable MODIS HDF4 files are listed in
+`/CERES/sarb/dfillmor/DAVINCI/MODIS_SKIPPED_HDF_FILES.txt`. The MODIS script
+loads that list by default and treats listed files as missing data before
+opening them. When a day has multiple unlisted production files, it selects
+the lexicographically latest filename, which is the latest production
+timestamp in the C6.1 naming convention.
+
+For the production archive run, use a complete-through-yesterday date range:
+
+```bash
+scripts/subset_geosit_aod_daily.sh \
+  --start 2000-01-01 --end "$(date -I -d 'yesterday')" --allow-missing-day
+scripts/subset_modis_d3_aod_daily.sh \
+  --start 2000-01-01 --end "$(date -I -d 'yesterday')"
+```
 
 ## DAVINCI Reader Notes
 

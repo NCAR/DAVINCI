@@ -32,6 +32,8 @@ Optional:
   --col-end INDEX       Last XDim:mod08 column. Requires all four index bounds.
   --source-root PATH    Default: /ASDC_archive/MODIS
   --output-root PATH    Default: /CERES/sarb/dfillmor/DAVINCI
+  --skip-list PATH      Source HDF4 files to treat as missing. Default:
+                        <output-root>/MODIS_SKIPPED_HDF_FILES.txt when present.
   --ncks-hdf4 PATH      HDF4-capable ncks reader. Defaults to /usr/local/bin/ncks
                         when available, otherwise the activated nco ncks.
   --overwrite           Replace an existing output file.
@@ -60,6 +62,7 @@ is_number() {
 
 source_root="$DEFAULT_SOURCE_ROOT"
 output_root="$DEFAULT_OUTPUT_ROOT"
+skip_list=""
 conda_sh="${CONDA_SH:-$HOME/miniforge3/etc/profile.d/conda.sh}"
 ncks_hdf4="${NCKS_HDF4_BIN:-}"
 start=""
@@ -78,7 +81,7 @@ overwrite=false
 
 while (($# > 0)); do
     case "$1" in
-        --start|--end|--platform|--collection|--lat-min|--lat-max|--lon-min|--lon-max|--row-start|--row-end|--col-start|--col-end|--source-root|--output-root|--ncks-hdf4|--conda-sh)
+        --start|--end|--platform|--collection|--lat-min|--lat-max|--lon-min|--lon-max|--row-start|--row-end|--col-start|--col-end|--source-root|--output-root|--skip-list|--ncks-hdf4|--conda-sh)
             (($# >= 2)) || die "Missing value for $1"
             case "$1" in
                 --start) start="$2" ;;
@@ -95,6 +98,7 @@ while (($# > 0)); do
                 --col-end) col_end="$2" ;;
                 --source-root) source_root="$2" ;;
                 --output-root) output_root="$2" ;;
+                --skip-list) skip_list="$2" ;;
                 --ncks-hdf4) ncks_hdf4="$2" ;;
                 --conda-sh) conda_sh="$2" ;;
             esac
@@ -120,6 +124,12 @@ end="$(date -I -d "$end")" || die "Invalid --end date."
 [[ "$start" > "$end" ]] && die "--start must not be after --end."
 [[ -d "$source_root" ]] || die "Source root does not exist: $source_root"
 [[ -r "$conda_sh" ]] || die "conda.sh is not readable: $conda_sh"
+if [[ -z "$skip_list" ]]; then
+    skip_list="$output_root/MODIS_SKIPPED_HDF_FILES.txt"
+fi
+if [[ -e "$skip_list" && ! -r "$skip_list" ]]; then
+    die "MODIS skip list is not readable: $skip_list"
+fi
 
 case "$platform" in
     terra) platforms=("Terra") ;;
@@ -190,6 +200,18 @@ if [[ -z "$ncks_hdf4" ]]; then
 fi
 [[ -x "$ncks_hdf4" ]] || die "HDF4 ncks reader is not executable: $ncks_hdf4"
 printf 'Using HDF4 NCO reader: %s\n' "$ncks_hdf4"
+declare -A skipped_paths=()
+if [[ -r "$skip_list" ]]; then
+    printf 'Using MODIS skip list: %s\n' "$skip_list"
+    while IFS= read -r skip_path || [[ -n "$skip_path" ]]; do
+        [[ -z "$skip_path" || "$skip_path" == \#* ]] && continue
+        skipped_paths["$skip_path"]=1
+    done < "$skip_list"
+fi
+
+is_listed_skip() {
+    [[ -n "${skipped_paths[$1]:-}" ]]
+}
 
 tmp_dir=""
 cleanup() {
@@ -198,6 +220,7 @@ cleanup() {
 trap cleanup EXIT
 
 processed=0
+skipped_listed=0
 day="$start"
 while ! [[ "$day" > "$end" ]]; do
     year="${day:0:4}"
@@ -216,15 +239,30 @@ while ! [[ "$day" > "$end" ]]; do
                 -print 2>/dev/null | sort
         )
 
+        retained_inputs=()
+        for candidate in "${inputs[@]}"; do
+            if is_listed_skip "$candidate"; then
+                printf 'Skipping listed %s source file for %s: %s\n' \
+                    "$current_platform" "$day" "$candidate" >&2
+                ((skipped_listed += 1))
+                continue
+            fi
+            retained_inputs+=("$candidate")
+        done
+        inputs=("${retained_inputs[@]}")
+
         if ((${#inputs[@]} == 0)); then
-            printf 'No %s source file for %s; skipping.\n' "$current_platform" "$day" >&2
+            printf 'No usable %s source file for %s; skipping.\n' "$current_platform" "$day" >&2
             continue
         fi
         if ((${#inputs[@]} > 1)); then
-            die "Multiple ${prefix} files found for $day; resolve the source directory before subsetting."
+            input_file="${inputs[${#inputs[@]} - 1]}"
+            printf 'Multiple %s files found for %s; using latest production filename: %s\n' \
+                "$prefix" "$day" "$input_file" >&2
+        else
+            input_file="${inputs[0]}"
         fi
 
-        input_file="${inputs[0]}"
         relative_dir="${input_file#"$source_root"/}"
         relative_dir="${relative_dir%/*}"
         output_dir="$output_root/MODIS/$relative_dir"
@@ -256,3 +294,6 @@ while ! [[ "$day" > "$end" ]]; do
 done
 
 ((processed > 0)) || die "No MOD08_D3 or MYD08_D3 files were found for the requested range."
+if ((skipped_listed > 0)); then
+    printf 'Skipped %d source file(s) listed as missing.\n' "$skipped_listed" >&2
+fi

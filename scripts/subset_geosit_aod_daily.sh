@@ -6,7 +6,7 @@ set -euo pipefail
 readonly DEFAULT_SOURCE_ROOT="/ASDC_archive/GMAO/GEOSIT"
 readonly DEFAULT_OUTPUT_ROOT="/CERES/sarb/dfillmor/DAVINCI"
 readonly EXPECTED_DAILY_INPUTS=8
-readonly AOD_VARIABLES="time,lat,lon,TOTEXTTAU,BCEXTTAU,DUEXTTAU,NIEXTTAU,OCEXTTAU,SSEXTTAU,SUEXTTAU"
+readonly AOD_VARIABLES="time,lat,lon,TOTEXTTAU"
 
 usage() {
     cat <<'EOF'
@@ -25,14 +25,15 @@ Optional:
   --output-root PATH    Default: /CERES/sarb/dfillmor/DAVINCI
   --allow-incomplete-day
                         Average a day with fewer than eight 3-hourly inputs.
+  --allow-missing-day
+                        Skip dates with no GEOS-IT AOD inputs.
   --overwrite           Replace an existing output file.
   --conda-sh PATH       Default: $HOME/miniforge3/etc/profile.d/conda.sh
   -h, --help            Show this help text.
 
 Longitude limits must use the native GEOS-IT convention and cannot cross the
-dateline in one invocation. Outputs include total and type-resolved 550-nm
-extinction AOD: TOTEXTTAU, BCEXTTAU, DUEXTTAU, NIEXTTAU, OCEXTTAU, SSEXTTAU,
-and SUEXTTAU.
+dateline in one invocation. Outputs contain only total 550-nm aerosol
+extinction optical thickness (TOTEXTTAU).
 EOF
 }
 
@@ -55,6 +56,7 @@ lat_max=""
 lon_min=""
 lon_max=""
 allow_incomplete_day=false
+allow_missing_day=false
 overwrite=false
 
 while (($# > 0)); do
@@ -76,6 +78,10 @@ while (($# > 0)); do
             ;;
         --allow-incomplete-day)
             allow_incomplete_day=true
+            shift
+            ;;
+        --allow-missing-day)
+            allow_missing_day=true
             shift
             ;;
         --overwrite)
@@ -126,6 +132,7 @@ trap cleanup EXIT
 
 processed=0
 missing_or_incomplete=0
+missing_days=0
 day="$start"
 while ! [[ "$day" > "$end" ]]; do
     year="${day:0:4}"
@@ -133,7 +140,7 @@ while ! [[ "$day" > "$end" ]]; do
     compact_day="${day//-/}"
     source_dir="$source_root/$year/$month"
     output_dir="$output_root/GMAO/GEOSIT/$year/$month"
-    output_file="$output_dir/GEOSIT_AOD550_daily.${compact_day}.nc"
+    output_file="$output_dir/GEOSIT_TOTEXTTAU550_daily.${compact_day}.nc"
 
     mapfile -t inputs < <(
         find "$source_dir" -maxdepth 1 -type f \
@@ -143,7 +150,10 @@ while ! [[ "$day" > "$end" ]]; do
 
     if ((${#inputs[@]} == 0)); then
         printf 'No GEOS-IT AOD inputs for %s\n' "$day" >&2
-        ((missing_or_incomplete += 1))
+        ((missing_days += 1))
+        if [[ "$allow_missing_day" != true ]]; then
+            ((missing_or_incomplete += 1))
+        fi
         day="$(date -I -d "$day + 1 day")"
         continue
     fi
@@ -170,7 +180,7 @@ while ! [[ "$day" > "$end" ]]; do
 
     ncra -O -4 -L 1 "${tmp_files[@]}" "$tmp_output"
     ncatted -O \
-        -a title,global,o,c,"GEOS-IT daily mean 550 nm aerosol extinction optical thickness" \
+        -a title,global,o,c,"GEOS-IT daily mean total 550 nm aerosol extinction optical thickness" \
         -a time_coverage_start,global,o,c,"${day}T00:00:00Z" \
         -a time_coverage_end,global,o,c,"${day}T23:59:59Z" \
         -a source_file_count,global,o,c,"${#inputs[@]}" \
@@ -186,4 +196,7 @@ while ! [[ "$day" > "$end" ]]; do
 done
 
 ((processed > 0)) || die "No daily GEOS-IT outputs were written."
+if ((missing_days > 0)); then
+    printf 'Skipped %d date(s) with no GEOS-IT AOD inputs.\n' "$missing_days" >&2
+fi
 ((missing_or_incomplete == 0)) || die "$missing_or_incomplete day(s) were not written."
