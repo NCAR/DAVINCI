@@ -131,6 +131,17 @@ The read-only ASDC archive roots are:
 Both are backed by `/CERES_prd` (`GMAO` and `MODIS` are symbolic links under
 `/ASDC_archive`). The source files must remain unmodified.
 
+The resolved production paths are:
+
+```text
+/ASDC_archive/GMAO/GEOSIT -> /CERES_prd/GMAO/GEOSIT
+/ASDC_archive/GMAO/MERRA2 -> /CERES_prd/GMAO/MERRA2
+/ASDC_archive/MODIS        -> /CERES_prd/MODIS
+```
+
+`/CERES_prd` is the target of the ASDC aliases, not an alternate warm copy.
+Changing only the path prefix does not bypass cold archive storage.
+
 ### Observed Source Hierarchy
 
 ```text
@@ -201,8 +212,10 @@ the C6.1 naming convention.
 
 Do not process cold ASDC archive files. A July 2008 full-field test completed
 promptly for GEOS-IT, Terra, and Aqua, while sampled 2000 and 2009 GEOS-IT
-files entered uninterruptible filesystem I/O. This behavior is file-specific;
-there is no assumed warm-date cutoff.
+files entered uninterruptible filesystem I/O. A sampled MERRA-2
+`tavg1_2d_aer_Nx` file from 1980 behaved the same way. This behavior is
+file-specific; there is no assumed warm-date cutoff or separate warm
+`/CERES_prd` path.
 
 Before starting a production year, perform a temporary full-field NCO preflight
 for one GEOS-IT `TOTEXTTAU` file and one Terra/Aqua D3 file when available. A
