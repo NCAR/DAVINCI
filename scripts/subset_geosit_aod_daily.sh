@@ -23,6 +23,8 @@ Optional:
   --lon-max VALUE       Eastern longitude bound. Requires all four bounds.
   --source-root PATH    Default: /ASDC_archive/GMAO/GEOSIT
   --output-root PATH    Default: /CERES/sarb/dfillmor/DAVINCI
+  --skip-list PATH      Source files to treat as missing. Default:
+                        <output-root>/GEOSIT_SKIPPED_SOURCE_FILES.txt when present.
   --allow-incomplete-day
                         Average a day with fewer than eight 3-hourly inputs.
   --allow-missing-day
@@ -48,6 +50,7 @@ is_number() {
 
 source_root="$DEFAULT_SOURCE_ROOT"
 output_root="$DEFAULT_OUTPUT_ROOT"
+skip_list=""
 conda_sh="${CONDA_SH:-$HOME/miniforge3/etc/profile.d/conda.sh}"
 start=""
 end=""
@@ -61,7 +64,7 @@ overwrite=false
 
 while (($# > 0)); do
     case "$1" in
-        --start|--end|--lat-min|--lat-max|--lon-min|--lon-max|--source-root|--output-root|--conda-sh)
+        --start|--end|--lat-min|--lat-max|--lon-min|--lon-max|--source-root|--output-root|--skip-list|--conda-sh)
             (($# >= 2)) || die "Missing value for $1"
             case "$1" in
                 --start) start="$2" ;;
@@ -72,6 +75,7 @@ while (($# > 0)); do
                 --lon-max) lon_max="$2" ;;
                 --source-root) source_root="$2" ;;
                 --output-root) output_root="$2" ;;
+                --skip-list) skip_list="$2" ;;
                 --conda-sh) conda_sh="$2" ;;
             esac
             shift 2
@@ -104,6 +108,12 @@ end="$(date -I -d "$end")" || die "Invalid --end date."
 [[ "$start" > "$end" ]] && die "--start must not be after --end."
 [[ -d "$source_root" ]] || die "Source root does not exist: $source_root"
 [[ -r "$conda_sh" ]] || die "conda.sh is not readable: $conda_sh"
+if [[ -z "$skip_list" ]]; then
+    skip_list="$output_root/GEOSIT_SKIPPED_SOURCE_FILES.txt"
+fi
+if [[ -e "$skip_list" && ! -r "$skip_list" ]]; then
+    die "GEOS-IT skip list is not readable: $skip_list"
+fi
 
 bounds=()
 if [[ -n "$lat_min$lat_max$lon_min$lon_max" ]]; then
@@ -123,6 +133,18 @@ conda activate nco
 command -v ncks >/dev/null || die "ncks is unavailable after activating nco."
 command -v ncra >/dev/null || die "ncra is unavailable after activating nco."
 command -v ncatted >/dev/null || die "ncatted is unavailable after activating nco."
+declare -A skipped_paths=()
+if [[ -r "$skip_list" ]]; then
+    printf 'Using GEOS-IT skip list: %s\n' "$skip_list"
+    while IFS= read -r skip_path || [[ -n "$skip_path" ]]; do
+        [[ -z "$skip_path" || "$skip_path" == \#* ]] && continue
+        skipped_paths["$skip_path"]=1
+    done < "$skip_list"
+fi
+
+is_listed_skip() {
+    [[ -n "${skipped_paths[$1]:-}" ]]
+}
 
 tmp_dir=""
 cleanup() {
@@ -133,6 +155,7 @@ trap cleanup EXIT
 processed=0
 missing_or_incomplete=0
 missing_days=0
+skipped_listed=0
 day="$start"
 while ! [[ "$day" > "$end" ]]; do
     year="${day:0:4}"
@@ -147,6 +170,24 @@ while ! [[ "$day" > "$end" ]]; do
             -name "GEOS.it.asm.aer_tavg_3hr_glo_L576x361_slv.*.${day}T*.nc4" \
             -print 2>/dev/null | sort
     )
+
+    skip_day=false
+    for input_file in "${inputs[@]}"; do
+        if is_listed_skip "$input_file"; then
+            printf 'Skipping listed GEOS-IT source file for %s: %s\n' \
+                "$day" "$input_file" >&2
+            skip_day=true
+            ((skipped_listed += 1))
+        fi
+    done
+    if [[ "$skip_day" == true ]]; then
+        ((missing_days += 1))
+        if [[ "$allow_missing_day" != true ]]; then
+            ((missing_or_incomplete += 1))
+        fi
+        day="$(date -I -d "$day + 1 day")"
+        continue
+    fi
 
     if ((${#inputs[@]} == 0)); then
         printf 'No GEOS-IT AOD inputs for %s\n' "$day" >&2
@@ -198,5 +239,8 @@ done
 ((processed > 0)) || die "No daily GEOS-IT outputs were written."
 if ((missing_days > 0)); then
     printf 'Skipped %d date(s) with no GEOS-IT AOD inputs.\n' "$missing_days" >&2
+fi
+if ((skipped_listed > 0)); then
+    printf 'Skipped %d source file(s) listed as missing.\n' "$skipped_listed" >&2
 fi
 ((missing_or_incomplete == 0)) || die "$missing_or_incomplete day(s) were not written."

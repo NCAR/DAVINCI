@@ -189,20 +189,36 @@ optical thickness (`TOTEXTTAU`). For C6.1 MODIS HDF4 reads, the MODIS script
 defaults to `/usr/local/bin/ncks` (`NCKS_HDF4_BIN` can override it), which
 writes only the final NetCDF4 subset to the mirrored output tree.
 
-Known unreadable MODIS HDF4 files are listed in
-`/CERES/sarb/dfillmor/DAVINCI/MODIS_SKIPPED_HDF_FILES.txt`. The MODIS script
-loads that list by default and treats listed files as missing data before
-opening them. When a day has multiple unlisted production files, it selects
-the lexicographically latest filename, which is the latest production
-timestamp in the C6.1 naming convention.
+Known unreadable source files are treated as missing data before an NCO reader
+opens them. The default lists are
+`/CERES/sarb/dfillmor/DAVINCI/GEOSIT_SKIPPED_SOURCE_FILES.txt` and
+`/CERES/sarb/dfillmor/DAVINCI/MODIS_SKIPPED_HDF_FILES.txt`. When a day has
+multiple unlisted MODIS production files, the script selects the
+lexicographically latest filename, which is the latest production timestamp in
+the C6.1 naming convention.
 
-For the production archive run, use a complete-through-yesterday date range:
+### Archive Access Policy
+
+Do not process cold ASDC archive files. A July 2008 full-field test completed
+promptly for GEOS-IT, Terra, and Aqua, while sampled 2000 and 2009 GEOS-IT
+files entered uninterruptible filesystem I/O. This behavior is file-specific;
+there is no assumed warm-date cutoff.
+
+Before starting a production year, perform a temporary full-field NCO preflight
+for one GEOS-IT `TOTEXTTAU` file and one Terra/Aqua D3 file when available. A
+source that does not complete within the preflight limit (currently 60 seconds)
+is unavailable for the run. Do not attempt to stage, download, or repeatedly
+retry cold sources. Add the exact path to the appropriate skip list and treat
+that data as missing.
+
+Run only preflight-approved years, one calendar year per batch. Do not launch a
+single multi-year archive command:
 
 ```bash
 scripts/subset_geosit_aod_daily.sh \
-  --start 2000-01-01 --end "$(date -I -d 'yesterday')" --allow-missing-day
+  --start <YYYY>-01-01 --end <YYYY>-12-31 --allow-missing-day
 scripts/subset_modis_d3_aod_daily.sh \
-  --start 2000-01-01 --end "$(date -I -d 'yesterday')"
+  --start <YYYY>-01-01 --end <YYYY>-12-31
 ```
 
 ## DAVINCI Reader Notes
