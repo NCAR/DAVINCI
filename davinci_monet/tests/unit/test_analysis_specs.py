@@ -49,6 +49,31 @@ def test_wavelet_default_reduce_is_area_mean() -> None:
     assert spec.input_refs() == {"source": "cam"}
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mode", 0),
+        ("omega0", -3.0),
+        ("omega0", float("inf")),
+        ("significance_level", 7.0),
+        ("dj", -1.0),
+        ("dj", float("nan")),
+        ("s0", 0.0),
+        ("j", -1),
+    ],
+)
+def test_wavelet_rejects_invalid_numeric_controls(field: str, value: object) -> None:
+    with pytest.raises(ValueError):
+        build_analysis_spec(
+            {
+                "type": "wavelet",
+                "source": "cam",
+                "variable": "O3",
+                field: value,
+            }
+        )
+
+
 def test_gridded_spec_exposes_legacy_source_as_named_input() -> None:
     spec = build_analysis_spec(
         {

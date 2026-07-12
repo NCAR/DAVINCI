@@ -464,21 +464,6 @@ class SpatialPlotter(BaseSpatialPlotter):
     ) -> tuple[np.ndarray, np.ndarray, xr.DataArray, str, str]:
         """Resolve lat/lon arrays, shifting 0..360 lon to -180..180 for cartopy."""
         resolved_lat, resolved_lon, lats, lons = resolve_spatial_coords(ds, lat_var, lon_var)
-
-        # A 1-D lon axis that the 0..360 -> -180..180 shift left non-monotonic
-        # must be re-sorted, reordering the field along the lon dim to match so
-        # pcolormesh receives ascending coords. Only do this when lon is a field
-        # dim (grid axis) so coords and data stay paired.
-        if (
-            lons.ndim == 1
-            and lons.size > 1
-            and resolved_lon in field.dims
-            and np.any(np.diff(lons) < 0)
-        ):
-            sort_idx = np.argsort(lons)
-            lons = lons[sort_idx]
-            field = field.isel({resolved_lon: sort_idx})
-
         return lats, lons, field, resolved_lat, resolved_lon
 
     @staticmethod

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -99,7 +100,7 @@ def test_stage_registers_derived_sources_in_order(_fake_eof_registered) -> None:
     assert ctx.sources["pc1_wav"].geometry is DataGeometry.SPECTRUM
 
 
-def test_stage_analysis_item_error_completes_with_warning() -> None:
+def test_stage_analysis_item_error_completes_with_warning(caplog) -> None:
     _prev = analysis_registry.get_or_none("eof")
 
     class _SometimesFailingEOF(DerivedAnalysis):
@@ -120,13 +121,21 @@ def test_stage_analysis_item_error_completes_with_warning() -> None:
             "good_eof": {"type": "eof", "source": "cam", "variable": "O3"},
         }
 
-        result = AnalysesStage().execute(ctx)
+        with caplog.at_level(logging.ERROR, logger="davinci_monet.pipeline.stages.analyses"):
+            result = AnalysesStage().execute(ctx)
 
         assert result.status is StageStatus.COMPLETED
         assert result.error is None
         assert "good_eof" in ctx.sources
         assert "bad_eof" not in ctx.sources
         assert ctx.metadata["analysis_errors"] == ["bad_eof: forced analysis failure"]
+        records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Analysis 'bad_eof' failed"
+        ]
+        assert len(records) == 1
+        assert records[0].exc_info is not None
     finally:
         if _prev is not None:
             analysis_registry.register("eof", _prev, replace=True)
@@ -283,7 +292,9 @@ def test_required_failure_is_fatal_and_descendant_is_dependency_blocked() -> Non
                 analysis_registry.unregister(name)
 
 
-def test_declared_artifact_failure_is_fatal_for_optional_analysis(tmp_path, monkeypatch) -> None:
+def test_declared_artifact_failure_is_fatal_for_optional_analysis(
+    tmp_path, monkeypatch, caplog
+) -> None:
     previous = analysis_registry.get_or_none("bad_artifact")
 
     class _BadArtifact(DerivedAnalysis):
@@ -311,13 +322,21 @@ def test_declared_artifact_failure_is_fatal_for_optional_analysis(tmp_path, monk
         specs = {"bad": _NamedSpec("bad_artifact", {"source": "source"})}
         monkeypatch.setattr(ctx, "analyses_config", lambda: specs)
 
-        result = AnalysesStage().execute(ctx)
+        with caplog.at_level(logging.ERROR, logger="davinci_monet.pipeline.stages.analyses"):
+            result = AnalysesStage().execute(ctx)
 
         assert result.status is StageStatus.FAILED
         assert result.error is not None
         assert "artifact write failed" in result.error
         assert "bad" not in ctx.sources
         assert ctx.metadata["analysis_status"] == {"bad": "failed"}
+        records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Artifact write failed for analysis 'bad'"
+        ]
+        assert len(records) == 1
+        assert records[0].exc_info is not None
     finally:
         if previous is not None:
             analysis_registry.register("bad_artifact", previous, replace=True)

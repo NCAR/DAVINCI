@@ -21,11 +21,18 @@ def fit_time_text(value: Any) -> str:
 def _fit_from_artifact(
     data: xr.DataArray, artifact: xr.Dataset, fit_split: str
 ) -> tuple[xr.DataArray, str]:
+    if "fit_mask" in artifact and "split" in artifact:
+        raise ValueError(
+            "EOF fit_artifact must contain exactly one selector; found both "
+            "'fit_mask' and 'split'"
+        )
     if "fit_mask" in artifact:
         selector = artifact["fit_mask"]
+        selector_kind = "fit_mask"
         selection = "fit_mask"
     elif "split" in artifact:
         selector = artifact["split"]
+        selector_kind = "split"
         selection = fit_split
     else:
         raise ValueError("EOF fit_artifact must contain a time-indexed 'fit_mask' or 'split'")
@@ -34,14 +41,14 @@ def _fit_from_artifact(
 
     aligned = selector.reindex(time=data["time"])
     values = np.asarray(aligned.values)
-    if "split" in artifact:
-        keep = values.astype(str) == fit_split
-    elif values.dtype.kind in "biu":
+    if selector_kind == "fit_mask" and values.dtype.kind in "biu":
         keep = values.astype(bool)
-    elif values.dtype.kind in "fc":
+    elif selector_kind == "fit_mask" and values.dtype.kind in "fc":
         keep = np.isfinite(values) & (values != 0)
-    else:
+    elif selector_kind == "fit_mask":
         keep = np.asarray([value is True for value in values], dtype=bool)
+    else:
+        keep = values.astype(str) == fit_split
     return data.isel(time=np.flatnonzero(keep)), selection
 
 

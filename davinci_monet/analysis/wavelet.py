@@ -36,7 +36,7 @@ class WaveletAnalysis(DerivedAnalysis):
 
     def analyze(self, data: xr.Dataset, spec: "WaveletSpec") -> xr.Dataset:
         series = select_series(data, spec)
-        regular, dt, unit, frac = regularize(series)
+        regular, dt, unit, frac = regularize(series, variable=spec.variable)
         if frac > 0.5:
             logger.warning(
                 "wavelet input for '%s' was %.0f%% synthesized by time-axis "

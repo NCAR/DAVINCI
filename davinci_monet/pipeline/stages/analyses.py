@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,6 +26,8 @@ from davinci_monet.pipeline.stages.base import (
     StageResult,
     StageStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,7 @@ class AnalysesStage(BaseStage):
                 out_ds.attrs["derived"] = True
                 out_ds.attrs.setdefault("source_label", key)
             except Exception as exc:  # noqa: BLE001 - optional analyses are soft failures
+                logger.exception("Analysis '%s' failed", key)
                 if isinstance(exc, AnalysisExecutionError) and exc.manifest_entries:
                     partial_entries = [
                         {**dict(entry), "analysis": key} for entry in exc.manifest_entries
@@ -222,6 +226,7 @@ class AnalysesStage(BaseStage):
                     )
                 materialized = artifact_service.materialize(key, out_ds, declarations)
             except Exception as exc:  # noqa: BLE001 - persistence failures are always fatal
+                logger.exception("Artifact write failed for analysis '%s'", key)
                 message = f"{key}: artifact write failed: {exc}"
                 states[key] = "failed"
                 record_error(message)

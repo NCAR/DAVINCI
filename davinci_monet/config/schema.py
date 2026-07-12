@@ -815,13 +815,13 @@ class WaveletSpec(AnalysisSpecBase):
     type: Literal["wavelet"]
     source: str
     variable: str
-    mode: int | None = None
+    mode: int | None = Field(default=None, ge=1)
     reduce: Literal["area_mean"] | PointReduce | None = "area_mean"
-    omega0: float = 6.0
-    significance_level: float = 0.95
-    dj: float = 0.25
-    s0: float | None = None
-    j: int | None = None
+    omega0: float = Field(default=6.0, gt=0.0)
+    significance_level: float = Field(default=0.95, gt=0.0, lt=1.0)
+    dj: float = Field(default=0.25, gt=0.0)
+    s0: float | None = Field(default=None, gt=0.0)
+    j: int | None = Field(default=None, ge=0)
 
     @field_validator("reduce", mode="before")
     @classmethod
@@ -829,6 +829,13 @@ class WaveletSpec(AnalysisSpecBase):
         if isinstance(v, dict):
             return PointReduce(**v)
         return v
+
+    @field_validator("omega0", "significance_level", "dj", "s0")
+    @classmethod
+    def _validate_finite_controls(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("wavelet numeric controls must be finite")
+        return value
 
 
 class AODPreprocessSpec(AnalysisSpecBase):

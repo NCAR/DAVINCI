@@ -419,13 +419,20 @@ The optional top-level `analyses:` block runs after `load_sources` and before `p
 | `remove_seasonal_cycle` | `false` | Subtract monthly climatology before decomposition |
 | `rotation` | `none` | `none` or `varimax` |
 | `level` | — | Restrict a 3-D field to one level index before decomposing |
+| `solver` | `full` | `full` for the exact solver; `randomized` for deterministic compressed SVD on larger/chunked fields |
+| `solver_seed` | `0` | Random seed used by the randomized solver |
+| `solver_oversampling` | `10` | Extra randomized-solver dimensions used to improve subspace accuracy |
+| `solver_iterations` | `2` | Power iterations used by the randomized solver |
+| `fit_window` | — | Inclusive `{start, end}` window used to fit preprocessing and EOF modes |
+| `fit_artifact` | — | Named immutable fit-selection artifact; mutually exclusive with `fit_window` |
+| `fit_split` | `basis_train` | Split label selected when `fit_artifact` supplies a `split(time)` selector |
 
 **Output variables** (all `mode`-indexed, 1-based):
 
 - `eofs(mode, [lev,] lat, lon)` — spatial patterns (unit-variance)
 - `pc(time, mode)` — principal component time series (unit variance)
-- `explained_variance(mode)` — fraction of total variance (%)
-- `explained_variance_error(mode)` — North's rule sampling error (unrotated only)
+- `explained_variance(mode)` — fraction of total variance in `[0, 1]`; renderers display it as percent
+- `explained_variance_error(mode)` — North's rule sampling-error fraction (unrotated only)
 
 **Plot types for EOF output**:
 
@@ -450,12 +457,15 @@ plots:
 | `source` | required | Source key from `sources:` or `analyses:` (e.g. an EOF key) |
 | `variable` | required | Variable name in that source |
 | `mode` | — | Integer (1-based): select one PC when `variable` has a `mode` dim |
-| `reduce` | `area_mean` | `area_mean` — spatial mean over all grid points; `{point: [lat, lon]}` — nearest-neighbor; `null`/omit — input is already 1-D |
+| `reduce` | `area_mean` | `area_mean` — cosine-latitude-weighted horizontal mean; `{point: [lat, lon]}` — nearest spherical grid cell with longitude wraparound; either method equal-weights any remaining non-horizontal dims and logs a warning; `null`/omit — input is already 1-D |
 | `omega0` | `6.0` | Morlet parameter ω₀ (higher → better frequency resolution) |
 | `significance_level` | `0.95` | Confidence level for the AR(1) red-noise significance test |
 | `dj` | `0.25` | Scale resolution (smaller → more scales) |
 | `s0` | auto | Smallest scale; defaults to `2 × dt` |
-| `j` | auto | Number of scales; defaults to spanning the full time series |
+| `j` | auto | Maximum scale index `J` (there are `J + 1` scales); defaults to spanning the full time series |
+
+Datetime64 and cftime calendars are regularized without changing calendar type. Wavelet
+inputs must be finite after reduction; fill or subset missing time samples before analysis.
 
 **Output** (SPECTRUM geometry — `power(time, period)` is the primary variable):
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import cftime
 import matplotlib.pyplot as plt
+import numpy as np
+from numpy.typing import NDArray
 
 from davinci_monet.plots import labeling
 from davinci_monet.plots.base import BasePlotter
@@ -16,6 +19,25 @@ if TYPE_CHECKING:
     import matplotlib.figure
 
     from davinci_monet.core.base import PlotSeries
+
+
+def _plot_time_coordinates(
+    values: NDArray[Any],
+) -> tuple[NDArray[Any], tuple[NDArray[np.float64], list[str]] | None]:
+    """Convert cftime values to elapsed days and provide calendar-aware ticks."""
+    time = np.asarray(values)
+    if time.size == 0 or not isinstance(time.flat[0], cftime.datetime):
+        return time, None
+    first = time.flat[0]
+    elapsed = np.asarray(
+        [(value - first).total_seconds() / 86400.0 for value in time],
+        dtype=np.float64,
+    )
+    indices = np.unique(np.linspace(0, time.size - 1, min(6, time.size), dtype=int))
+    labels = [
+        f"{time[index].year:04d}-{time[index].month:02d}-{time[index].day:02d}" for index in indices
+    ]
+    return elapsed, (elapsed[indices], labels)
 
 
 @register_plotter("wavelet_scalogram", arity="single_source", category="specialized")
@@ -40,6 +62,7 @@ class WaveletScalogramPlotter(BasePlotter):
         power = ds[s.var_name]
         time = power["time"].values
         period = power["period"].values
+        plot_time, calendar_ticks = _plot_time_coordinates(time)
 
         fig = plt.figure(
             figsize=self.config.figure.figsize,
@@ -53,7 +76,7 @@ class WaveletScalogramPlotter(BasePlotter):
         # Rasterize the dense data layers so the vector PDF stays small and
         # renders cleanly; axes/text/contour lines stay vector.
         mesh = ax_main.pcolormesh(
-            time,
+            plot_time,
             period,
             power.transpose("period", "time").values,
             cmap=get_sequential_cmap(),
@@ -67,13 +90,13 @@ class WaveletScalogramPlotter(BasePlotter):
             sig = ds["power_significance"].transpose("period", "time").values
             # A single significance line: cheap vector, left unrasterized
             # (matplotlib ignores rasterizing contour lines).
-            ax_main.contour(time, period, sig, levels=[1.0], colors="black", linewidths=1.0)
+            ax_main.contour(plot_time, period, sig, levels=[1.0], colors="black", linewidths=1.0)
 
         if "coi" in ds:
             coi = ds["coi"].values
-            ax_main.plot(time, coi, color="white", linestyle="--", linewidth=1.2)
+            ax_main.plot(plot_time, coi, color="white", linestyle="--", linewidth=1.2)
             ax_main.fill_between(
-                time,
+                plot_time,
                 coi,
                 float(period.max()),
                 color="white",
@@ -89,6 +112,9 @@ class WaveletScalogramPlotter(BasePlotter):
             fontsize=self.config.text.fontsize,
         )
         ax_main.set_xlabel("Time", fontsize=self.config.text.fontsize)
+        if calendar_ticks is not None:
+            positions, labels = calendar_ticks
+            ax_main.set_xticks(positions, labels)
         ax_main.tick_params(axis="x", rotation=45)
         self.set_title(
             ax_main,

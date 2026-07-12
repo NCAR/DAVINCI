@@ -212,6 +212,27 @@ def test_square_grid_preserves_lat_lon_dim_orientation():
     plt.close(fig)
 
 
+def test_global_grid_quadmesh_longitudes_and_data_are_sorted_together():
+    ds = _aod_grid()
+
+    fig, ax = _render(ds, "aod")
+
+    mesh = next(c for c in ax.collections if isinstance(c, QuadMesh))
+    coordinates = np.asarray(mesh.get_coordinates(), dtype=float)
+    x_edges = coordinates[0, :, 0]
+    assert np.all(np.diff(x_edges) > 0.0)
+
+    normalized_lon = np.where(
+        ds.longitude.values > 180.0,
+        ds.longitude.values - 360.0,
+        ds.longitude.values,
+    )
+    lon_order = np.argsort(normalized_lon)
+    rendered = np.asarray(mesh.get_array(), dtype=float).reshape(ds.aod.shape)
+    np.testing.assert_allclose(rendered, ds.aod.values[:, lon_order])
+    plt.close(fig)
+
+
 def test_grid_squeezes_singleton_product_group_dimension():
     ds = xr.Dataset(
         {

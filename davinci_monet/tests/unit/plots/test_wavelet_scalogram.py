@@ -6,6 +6,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import cftime  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -45,6 +46,26 @@ def test_scalogram_quadmesh_and_global_panel() -> None:
     # Dense data layer is rasterized so the vector PDF stays small.
     assert meshes[0].get_rasterized() is True
     assert len(fig.axes) >= 2
+    plt.close(fig)
+
+
+def test_scalogram_supports_noleap_cftime_axis() -> None:
+    spectrum = _spectrum().assign_coords(
+        time=xr.date_range(
+            "2024-01-01",
+            periods=60,
+            freq="D",
+            calendar="noleap",
+            use_cftime=True,
+        )
+    )
+
+    fig = WaveletScalogramPlotter().render(build_series(spectrum, "power"))
+
+    assert isinstance(spectrum["time"].values[0], cftime.DatetimeNoLeap)
+    meshes = [c for ax in fig.axes for c in ax.collections if isinstance(c, QuadMesh)]
+    assert meshes
+    assert any("2024-" in tick.get_text() for tick in fig.axes[0].get_xticklabels())
     plt.close(fig)
 
 

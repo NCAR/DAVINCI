@@ -46,6 +46,20 @@ def test_shared_transform_matches_direct_pycwt_contract() -> None:
     np.testing.assert_allclose(result.local_significance, direct_significance, rtol=0.0, atol=0.0)
 
 
+def test_global_significance_is_invariant_to_time_unit() -> None:
+    values = _series(256)
+    in_days = cwt_transform(values, dt=1.0, s0=2.0, j=20, alpha=0.2)
+    in_hours = cwt_transform(values, dt=24.0, s0=48.0, j=20, alpha=0.2)
+
+    np.testing.assert_allclose(in_hours.scales / 24.0, in_days.scales)
+    np.testing.assert_allclose(
+        in_hours.global_significance,
+        in_days.global_significance,
+        rtol=1.0e-13,
+        atol=1.0e-13,
+    )
+
+
 def test_unfiltered_inverse_round_trip_is_within_five_percent() -> None:
     values = _series()
     result = cwt_transform(values, dt=1.0, alpha=0.0)

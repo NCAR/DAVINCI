@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from davinci_monet.analysis.wavelet import WaveletAnalysis
@@ -51,3 +52,15 @@ def test_wavelet_recovers_injected_period() -> None:
     gsig = out["global_significance"].values
     i = int(np.argmax(gp))
     assert gp[i] > gsig[i]
+
+
+def test_wavelet_reports_nonfinite_input_with_variable_count_and_time() -> None:
+    data = _injected()
+    data["O3"][10, :, :] = np.nan
+    spec = WaveletSpec(type="wavelet", source="cam", variable="O3")
+
+    with pytest.raises(
+        ValueError,
+        match=r"wavelet input 'O3' has 1 non-finite samples .*2020-01-11.*fill or subset",
+    ):
+        WaveletAnalysis().analyze(data, spec)

@@ -59,6 +59,9 @@ def test_eof_recovers_patterns_and_pcs() -> None:
     assert _corr(out["pc"].sel(mode=1).values, pc1) > 0.9
     ev = out["explained_variance"].values
     assert ev[0] > ev[1] > ev[2]
+    assert np.all((0.0 <= ev) & (ev <= 1.0))
+    assert out["explained_variance"].attrs["display_as_percent"] is True
+    assert "percent" not in out["explained_variance"].attrs
     assert float(out["pc"].sel(mode=1).std()) == pytest.approx(1.0, abs=0.05)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cftime
 import numpy as np
 import pandas as pd
 import pytest
@@ -36,8 +37,17 @@ def _grid_nc(path: Path) -> None:
     ).to_netcdf(path)
 
 
-def _monthly_grid_nc(path: Path, n_months: int = 48) -> None:
-    times = pd.date_range("2018-01-01", periods=n_months, freq="MS")
+def _monthly_grid_nc(path: Path, n_months: int = 48, calendar: str | None = None) -> None:
+    if calendar is None:
+        times = pd.date_range("2018-01-01", periods=n_months, freq="MS")
+    else:
+        times = xr.date_range(
+            "2018-01-01",
+            periods=n_months,
+            freq="MS",
+            calendar=calendar,
+            use_cftime=True,
+        )
     lat = np.linspace(-5, 5, 6)
     lon = np.linspace(0, 30, 8)
     t = np.arange(n_months)
@@ -127,6 +137,36 @@ def test_wavelet_of_eof_pc_on_monthly_axis(tmp_path: Path) -> None:
     ctx = result.context
     assert ctx is not None
     assert "pc1_wav" in ctx.sources
+    assert not ctx.metadata.get("analysis_errors")
+    pngs = [p for p in ctx.results["plotting"].data["plots_generated"] if p.endswith(".png")]
+    scals = [p for p in pngs if "scal" in p]
+    assert scals
+    assert Path(scals[0]).exists()
+
+
+@pytest.mark.integration
+def test_wavelet_of_eof_pc_on_noleap_monthly_axis(tmp_path: Path) -> None:
+    src = tmp_path / "monthly_noleap.nc"
+    _monthly_grid_nc(src, calendar="noleap")
+    config = {
+        "analysis": {"output_dir": str(tmp_path / "out")},
+        "sources": {
+            "cam": {"type": "generic", "files": str(src), "variables": {"O3": {"units": "ppb"}}}
+        },
+        "analyses": {
+            "cam_O3_eof": {"type": "eof", "source": "cam", "variable": "O3", "n_modes": 3},
+            "pc1_wav": {"type": "wavelet", "source": "cam_O3_eof", "variable": "pc", "mode": 1},
+        },
+        "plots": {"scal": {"type": "wavelet_scalogram", "source": "pc1_wav", "variable": "power"}},
+    }
+
+    result = PipelineRunner(show_progress=False).run_from_config(config)
+
+    assert result.success, getattr(result, "error", None)
+    ctx = result.context
+    assert ctx is not None
+    assert "pc1_wav" in ctx.sources
+    assert isinstance(ctx.sources["pc1_wav"].data["time"].values[0], cftime.DatetimeNoLeap)
     assert not ctx.metadata.get("analysis_errors")
     pngs = [p for p in ctx.results["plotting"].data["plots_generated"] if p.endswith(".png")]
     scals = [p for p in pngs if "scal" in p]

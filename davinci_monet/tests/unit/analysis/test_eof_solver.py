@@ -186,6 +186,29 @@ def test_fit_artifact_selects_an_immutable_training_split(tmp_path) -> None:
     assert result.artifacts[0].role == "basis_fit"
 
 
+def test_fit_artifact_rejects_dual_selectors(tmp_path) -> None:
+    data = _modal_dataset(nt=20, nlat=4, nlon=5)
+    artifact = xr.Dataset(
+        {
+            "fit_mask": ("time", np.arange(20) < 10),
+            "split": ("time", np.where(np.arange(20) < 10, "basis_train", "test")),
+        },
+        coords={"time": data["time"]},
+    )
+    spec = EOFSpec(
+        type="eof",
+        source="model",
+        variable="log_aod",
+        n_modes=2,
+        fit_artifact="ambiguous_split",
+        fit_split="basis_train",
+    )
+    runtime = AnalysisRuntime(None, None, ArtifactService(tmp_path))
+
+    with pytest.raises(ValueError, match="exactly one selector; found both"):
+        EOFAnalysis().analyze_inputs({"source": data, "fit_artifact": artifact}, spec, runtime)
+
+
 def test_randomized_chunked_input_keeps_spatial_products_lazy() -> None:
     data = _modal_dataset(nt=192, nlat=24, nlon=32).chunk({"time": 32, "lat": 6, "lon": 8})
     spec = EOFSpec(

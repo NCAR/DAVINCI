@@ -208,10 +208,13 @@ def draw_spatial_field(
             rasterized=True,
         )
     if plot_type == "pcolormesh" and lats.ndim == 1 and data.ndim >= 2:
-        # Regular grid with 1-D coords — pcolormesh handles natively
+        # Regular grid with 1-D coords. Longitude normalization can move the
+        # western half of a 0..360 grid behind the eastern half, so sort the
+        # axis and matching data columns before handing them to pcolormesh.
         mesh_data = _orient_regular_grid_data(data, lats, lons, field_dims, lat_dim, lon_dim)
+        mesh_lons, mesh_data = _sort_regular_grid_longitudes(lons, mesh_data)
         return ax.pcolormesh(
-            lons,
+            mesh_lons,
             lats,
             mesh_data,
             **color_kwargs,
@@ -257,6 +260,19 @@ def _orient_regular_grid_data(
     if data.shape == (len(lons), len(lats)):
         return data.T
     return data
+
+
+def _sort_regular_grid_longitudes(
+    lons: np.ndarray,
+    data: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ascending longitudes with matching ``(lat, lon)`` data columns."""
+    if lons.size < 2 or data.ndim != 2 or data.shape[1] != lons.size:
+        return lons, data
+    if np.all(np.diff(lons) > 0.0):
+        return lons, data
+    order = np.argsort(lons, kind="stable")
+    return lons[order], np.take(data, order, axis=1)
 
 
 @dataclass

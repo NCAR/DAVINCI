@@ -82,7 +82,7 @@ def cwt_transform(
     )
     power = np.asarray(np.abs(coefficients) ** 2, dtype=np.float64)
     global_power = power.mean(axis=1)
-    degrees_of_freedom = series.size - scales_array
+    degrees_of_freedom = series.size - scales_array / dt
     global_significance, _ = pycwt.significance(
         1.0,
         dt,

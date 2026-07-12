@@ -17,6 +17,7 @@ from davinci_monet.analysis.eof_fit import (
     select_fit_data,
 )
 from davinci_monet.analysis.eof_solver import TruncatedSVD, decompose_weighted
+from davinci_monet.core.coordinates import VERTICAL_DIM_NAMES, vertical_dim_name
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.registry import analysis_registry
 
@@ -48,10 +49,24 @@ def _lon_coord(da: xr.DataArray) -> xr.DataArray:
 
 def _vertical_dim(da: xr.DataArray, lat: xr.DataArray, lon: xr.DataArray) -> str | None:
     horiz = set(lat.dims) | set(lon.dims)
-    verts = [d for d in da.dims if d != "time" and d not in horiz]
-    if len(verts) > 1:
-        raise ValueError(f"EOF: ambiguous vertical dims {verts}; expected one")
-    return str(verts[0]) if verts else None
+    extra_dims = [str(dim) for dim in da.dims if dim != "time" and dim not in horiz]
+    if not extra_dims:
+        return None
+    if len(extra_dims) > 1:
+        raise ValueError(
+            f"EOF variable '{da.name or '<unnamed>'}' has unsupported non-spatial "
+            f"dimensions {extra_dims}; select or reduce extra dimensions so only one "
+            "recognized vertical dimension remains"
+        )
+    candidate = extra_dims[0]
+    if vertical_dim_name(da) == candidate:
+        return candidate
+    recognized = ", ".join(VERTICAL_DIM_NAMES)
+    raise ValueError(
+        f"EOF variable '{da.name or '<unnamed>'}' has unsupported non-spatial dimension "
+        f"'{candidate}'; recognized vertical dimensions include {recognized}. Select or "
+        "reduce the extra dimension before EOF analysis"
+    )
 
 
 def _area_weight(da: xr.DataArray, lat: xr.DataArray) -> xr.DataArray:
@@ -275,9 +290,17 @@ class EOFAnalysis(DerivedAnalysis):
         lat = _lat_coord(da)
         lon = _lon_coord(da)
         vdim = _vertical_dim(da, lat, lon)
-        if spec.level is not None and vdim is not None:
-            da = da.isel({vdim: spec.level})
-            vdim = None
+        if spec.level is not None:
+            if vdim is None:
+                logger.warning(
+                    "EOF level=%s ignored for surface-only variable '%s'; no recognized "
+                    "vertical dimension is present",
+                    spec.level,
+                    spec.variable,
+                )
+            else:
+                da = da.isel({vdim: spec.level})
+                vdim = None
 
         fit_da, fit_selection = select_fit_data(da, spec, fit_artifact)
         time_mean = fit_da.mean("time")
@@ -342,7 +365,7 @@ class EOFAnalysis(DerivedAnalysis):
             "kind": "pc",
         }
         ev_ratio = ev_ratio.assign_coords(mode=mode_idx).rename("explained_variance")
-        ev_ratio.attrs = {"kind": "scalar", "percent": True}
+        ev_ratio.attrs = {"kind": "scalar", "display_as_percent": True}
         singular_value = xr.DataArray(
             decomposition.singular_values,
             dims=("mode",),

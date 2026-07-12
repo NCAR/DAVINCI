@@ -50,7 +50,9 @@ class EOFPatternPlotter(BaseSpatialPlotter):
             raise NotImplementedError("eof_pattern requires a 'mode' dimension on the variable.")
 
         lat_name, lon_name, lats, lons = resolve_spatial_coords(ds)
-        horiz = set(ds[lat_name].dims) | set(ds[lon_name].dims)
+        lat_dims = ds[lat_name].dims
+        lon_dims = ds[lon_name].dims
+        horiz = set(lat_dims) | set(lon_dims)
         units = get_variable_units(ds, s.var_name)
         quantity = str(ds.attrs.get("eof_quantity", ""))
 
@@ -77,6 +79,9 @@ class EOFPatternPlotter(BaseSpatialPlotter):
                 vmax=vmax,
                 marker_size=self.config.style.markersize * 2,
                 alpha=1.0,
+                field_dims=tuple(fld.dims),
+                lat_dim=lat_dims[0] if len(lat_dims) == 1 else None,
+                lon_dim=lon_dims[0] if len(lon_dims) == 1 else None,
             )
             # Rasterize the dense field layer; axes/text/colorbar stay vector.
             mappable.set_rasterized(True)
