@@ -119,6 +119,76 @@ The mismatch details are saved in:
 /glade/work/fillmore/Data/CERES_SSF_audit_known_cmr_size_mismatch.tsv
 ```
 
+## ASDC Archive Staging
+
+The read-only ASDC archive roots are:
+
+```text
+/ASDC_archive/GMAO/GEOSIT
+/ASDC_archive/MODIS
+```
+
+Both are backed by `/CERES_prd` (`GMAO` and `MODIS` are symbolic links under
+`/ASDC_archive`). The source files must remain unmodified.
+
+### Observed Source Hierarchy
+
+```text
+/ASDC_archive/
+├── GMAO/
+│   └── GEOSIT/<YYYY>/<MM>/
+│       ├── GEOS*.nc4
+│       └── GEOS*.nc4.xml
+└── MODIS/
+    ├── Aqua/C7/<YYYY>/<DDD>/
+    │   ├── MYD0203_SS*.nc
+    │   └── MYD04_L2*.nc
+    ├── Terra/C7/<YYYY>/<DDD>/
+    │   ├── MOD0203_SS*.nc
+    │   └── MOD04_L2*.nc
+    └── LAND/
+        └── C6|C61/<YYYY>/MCD43C1*.hdf
+```
+
+GEOSIT spans yearly directories with zero-padded monthly subdirectories and
+stores native NetCDF4 (`.nc4`) files with XML sidecars. MODIS Aqua and Terra
+Collection 7 data use a three-digit day-of-year directory; MODIS LAND has
+Collection 6 and 6.1 year directories, with observed `MCD43C1` HDF files.
+
+The observed Aqua/Terra Collection 7 files are Level 2. The daily one-degree
+MODIS AOD subset scripts use the C6.1 daily Level 3 inputs staged under the
+same platform/year/day convention:
+
+```text
+/ASDC_archive/MODIS/Terra/C61/<YYYY>/<DDD>/MOD08_D3.*.hdf
+/ASDC_archive/MODIS/Aqua/C61/<YYYY>/<DDD>/MYD08_D3.*.hdf
+```
+
+### Subset Output Layout
+
+The writable subset root is:
+
+```text
+/CERES/sarb/dfillmor/DAVINCI
+```
+
+The subset scripts preserve each source-relative path below this root:
+
+```text
+/CERES/sarb/dfillmor/DAVINCI/
+├── GMAO/GEOSIT/<YYYY>/<MM>/GEOSIT_AOD550_daily.<YYYYMMDD>.nc
+└── MODIS/
+    ├── Aqua/C61/<YYYY>/<DDD>/MYD08_D3.*.nc
+    ├── Terra/C61/<YYYY>/<DDD>/MOD08_D3.*.nc
+    └── LAND/C6|C61/<YYYY>/<subset-file>.nc
+```
+
+The scripts run with `conda activate nco` and use NCO operators for the
+subsets. For C6.1 MODIS HDF4 reads, the MODIS script defaults to
+`/usr/local/bin/ncks` (`NCKS_HDF4_BIN` can override it), which handles the
+older D3 files; it writes only the final NetCDF4 subset to the mirrored output
+tree.
+
 ## DAVINCI Reader Notes
 
 DAVINCI already has a `ceres_ssf` reader. Useful canonical variables include:
