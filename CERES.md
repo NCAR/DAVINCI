@@ -250,6 +250,52 @@ only final NetCDF subsets to the DAVINCI output tree.
   file in temporary storage, then remove the temporary source and intermediate
   files after validation.
 
+### Derecho Earthaccess Queue
+
+DAVINCI includes a PBS-array acquisition path for the daily AOD inputs:
+
+```bash
+scripts/qsub_aod_earthdata.sh \
+  --start 2019-08-01 --end 2019-08-31 \
+  --products merra2,terra,aqua
+```
+
+The submitter creates one array task per calendar month and defaults to at most
+two simultaneous tasks on `casper@casper-pbs`. Each worker authenticates from
+`~/.netrc`; credentials and bearer tokens are not passed through PBS variables
+or written to logs. Use `--search-only` for a queued CMR inventory and size
+estimate before downloading, or `--print-only` to inspect the `qsub` command.
+
+Raw files default to purgeable Derecho scratch storage:
+
+```text
+/glade/derecho/scratch/<user>/DAVINCI-AOD/raw/
+├── GMAO/MERRA2/<YYYY>/<MM>/MERRA2_*.tavg1_2d_aer_Nx.<YYYYMMDD>.nc4
+└── MODIS/
+    ├── Terra/C61/<YYYY>/<DDD>/MOD08_D3*.hdf
+    └── Aqua/C61/<YYYY>/<DDD>/MYD08_D3*.hdf
+```
+
+Terra/Aqua Level-2 aerosol swaths are optional because they add roughly 300
+granules per day across both platforms. Include them explicitly when needed:
+
+```bash
+scripts/qsub_aod_earthdata.sh \
+  --start 2019-08-01 --end 2019-08-31 \
+  --products merra2,terra,aqua,terra-l2,aqua-l2
+```
+
+The L2 keys stage `MOD04_L2` and `MYD04_L2` Collection 6.1 files alongside the
+daily products under the same Terra/Aqua year/day hierarchy. The downloader
+retains every acquisition but selects only the latest production revision for
+each platform, date, and acquisition time. The default `all` selection excludes
+L2 to prevent an unintended high-volume swath download.
+
+Every task writes a TSV under `<root>/manifests/` recording CMR size, local
+size, source URL, destination, and whether each file was downloaded, already
+present, or missing. The downloader filters out adjacent-day granules that CMR
+MODIS searches can return. Re-running a task skips existing non-empty files.
+
 ## DAVINCI Reader Notes
 
 DAVINCI already has a `ceres_ssf` reader. Useful canonical variables include:

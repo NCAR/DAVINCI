@@ -1,6 +1,6 @@
 # GDEX Datasets for DAVINCI on Derecho
 
-Last checked: 2026-06-21 on NCAR Derecho.
+Last checked: 2026-07-12 on NCAR Derecho.
 
 ## Local GDEX Roots
 
@@ -179,10 +179,34 @@ Links:
 
 ### MERRA-2
 
-DAVINCI already has MERRA-2 support and downloader scaffolding based on NASA
-Earthdata/GES DISC. MERRA-2 was not found in the GDEX ERA5 directory tree during
-this check; keep using the existing DAVINCI MERRA-2 layout and downloader unless
-a local campaign copy is identified.
+MERRA-2 is available in GDEX, but the mounted products do not include the daily
+aerosol collection needed for DAVINCI AOD evaluation (`M2T1NXAER` /
+`tavg1_2d_aer_Nx`). In particular, a search of the mounted archive found no
+`TOTEXTTAU`, `M2T1NXAER`, or `tavg1_2d_aer_Nx` files. Continue to acquire that
+collection from NASA GES DISC with Earthdata authentication.
+
+MERRA-2 datasets currently mounted on Derecho include:
+
+| GDEX ID | Product | Derecho path | DAVINCI relevance |
+| --- | --- | --- | --- |
+| `d927358` | Native-resolution `M2TMNXSLV` monthly single-level diagnostics, reorganized by variable | `/gdex/data/d927358` | Monthly meteorology; no aerosol AOD |
+| `d313003` | MERRA-2 global atmospheric forcing at native and remapped resolutions | `/gdex/data/d313003` | CESM/WRF meteorological forcing; no aerosol fields |
+| `d313002` | MERRA-2 forcing interpolated to the CESM2 grid and vertical levels | `/gdex/data/d313002` | CESM2 meteorological forcing; no aerosol fields |
+| `d651012` | ARTMIP Tier 1 MERRA-2 source data and atmospheric-river catalogs | `/gdex/data/d651012` | IVT/IWV and related AR diagnostics |
+| `d651018` | ARTMIP Tier 2 reanalysis source data and catalogs | `/gdex/data/d651018` | MERRA-2 IVT/IWV, pressure, and winds; no aerosol AOD |
+
+GDEX pages:
+
+- <https://gdex.ucar.edu/datasets/d927358/>
+- <https://gdex.ucar.edu/datasets/d313003/>
+- <https://gdex.ucar.edu/datasets/d313002/>
+- <https://gdex.ucar.edu/datasets/d651012/>
+- <https://gdex.ucar.edu/datasets/d651018/>
+
+The `d927358` convenience copy is small enough for direct use (about 16 GB) and
+contains 1980-present variable-specific NetCDF4 files. The forcing and ARTMIP
+datasets are much larger derived products and should not be treated as a
+substitute for the native daily aerosol collection.
 
 Current DAVINCI MERRA-2 collection names in `davinci_monet/io/download/merra2.py`:
 
