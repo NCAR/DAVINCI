@@ -127,11 +127,60 @@ def test_spatial_map_can_append_global_mean_and_use_tight_layout(monkeypatch):
         )
     )
 
-    assert any(
-        text.get_text().startswith("2008-07 | Mean: ")
-        for text in fig.axes[0].texts
-    )
+    assert any(text.get_text() == "2008-07 | Mean: 0.481" for text in fig.axes[0].texts)
     assert calls == [{"pad": 0.5}]
+    plt.close(fig)
+
+
+def test_spatial_map_can_format_global_mean_with_fixed_decimals():
+    plotter = SpatialPlotter(config=PlotConfig(title="Aerosol Optical Depth"))
+
+    fig = _single_figure(
+        plotter.render(
+            build_series(_aod_grid(), "aod"),
+            show_coastlines=False,
+            show_countries=False,
+            show_states=False,
+            show_gridlines=False,
+            show_global_mean=True,
+            global_mean_decimals=2,
+        )
+    )
+
+    assert any(text.get_text() == "Mean: 0.48" for text in fig.axes[0].texts)
+    plt.close(fig)
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (np.array([[0.90, 0.92], [0.98, 0.99]]), (0.90, 1.00)),
+        (np.array([[0.61, 0.67], [0.77, 0.81]]), (0.60, 0.85)),
+    ],
+)
+def test_spatial_map_uses_nice_robust_range(values, expected):
+    ds = xr.Dataset(
+        {"optics": (("latitude", "longitude"), values)},
+        coords={"latitude": [-1.0, 1.0], "longitude": [0.0, 90.0]},
+        attrs={"geometry": "grid"},
+    )
+
+    fig = _single_figure(
+        SpatialPlotter().render(
+            build_series(ds, "optics"),
+            show_coastlines=False,
+            show_countries=False,
+            show_states=False,
+            show_gridlines=False,
+            robust_pct=[2.0, 98.0],
+            nice_range=True,
+            nice_range_bounds=[0.0, 1.0],
+        )
+    )
+
+    mesh = next(item for item in fig.axes[0].collections if isinstance(item, QuadMesh))
+    assert mesh.norm.vmin == pytest.approx(expected[0])
+    assert mesh.norm.vmax == pytest.approx(expected[1])
     plt.close(fig)
 
 

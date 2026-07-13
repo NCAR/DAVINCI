@@ -74,10 +74,66 @@ def _subtitle_with_global_mean(
     field: xr.DataArray,
     latitude_name: str,
     subtitle: str | None,
+    decimals: int | None = None,
 ) -> str:
     mean = _global_area_mean(field, latitude_name)
-    mean_text = f"Mean: {mean:.6g}" if np.isfinite(mean) else "Mean: no finite values"
+    if decimals is not None and decimals < 0:
+        raise ValueError("global_mean_decimals must be nonnegative")
+    if not np.isfinite(mean):
+        mean_text = "Mean: no finite values"
+    elif decimals is None:
+        mean_text = f"Mean: {mean:.6g}"
+    else:
+        mean_text = f"Mean: {mean:.{decimals}f}"
     return f"{subtitle} | {mean_text}" if subtitle else mean_text
+
+
+def _nice_robust_limits(
+    finite: np.ndarray,
+    robust_pct: Sequence[float],
+    bounds: Sequence[float] | None,
+    *,
+    target_intervals: int = 5,
+) -> tuple[float, float]:
+    """Round robust data limits outward to compact human-friendly values."""
+    if target_intervals < 1:
+        raise ValueError("nice_range_target_intervals must be positive")
+    percentiles = np.asarray(robust_pct, dtype=float)
+    if percentiles.shape != (2,) or not np.all(np.isfinite(percentiles)):
+        raise ValueError("robust_pct must contain two finite percentiles")
+    low, high = (float(value) for value in np.nanpercentile(finite, percentiles))
+    if low > high:
+        low, high = high, low
+    span = high - low
+    if not np.isfinite(span) or span <= 0.0:
+        return low, high
+
+    raw_step = span / target_intervals
+    magnitude = 10.0 ** np.floor(np.log10(raw_step))
+    fraction = raw_step / magnitude
+    if fraction <= 1.0:
+        nice_fraction = 1.0
+    elif fraction <= 2.0:
+        nice_fraction = 2.0
+    elif fraction <= 2.5:
+        nice_fraction = 2.5
+    elif fraction <= 5.0:
+        nice_fraction = 5.0
+    else:
+        nice_fraction = 10.0
+    step = nice_fraction * magnitude
+    nice_low = float(np.floor(low / step) * step)
+    nice_high = float(np.ceil(high / step) * step)
+
+    if bounds is not None:
+        physical_bounds = np.asarray(bounds, dtype=float)
+        if physical_bounds.shape != (2,) or not np.all(np.isfinite(physical_bounds)):
+            raise ValueError("nice_range_bounds must contain two finite values")
+        if physical_bounds[0] > physical_bounds[1]:
+            raise ValueError("nice_range_bounds must be increasing")
+        nice_low = max(nice_low, float(physical_bounds[0]))
+        nice_high = min(nice_high, float(physical_bounds[1]))
+    return nice_low, nice_high
 
 
 @register_plotter("spatial", arity="single_source", category="spatial")
@@ -167,6 +223,10 @@ class SpatialPlotter(BaseSpatialPlotter):
         land_color: str | None = None,
         ocean_color: str | None = None,
         show_global_mean: bool = False,
+        global_mean_decimals: int | None = 3,
+        nice_range: bool = False,
+        nice_range_bounds: Sequence[float] | None = None,
+        nice_range_target_intervals: int = 5,
         tight_layout: bool = False,
         tight_layout_pad: float = 0.5,
         **kwargs: Any,
@@ -218,6 +278,7 @@ class SpatialPlotter(BaseSpatialPlotter):
                 field,
                 resolved_lat,
                 rendered_subtitle,
+                decimals=global_mean_decimals,
             )
         if finite.size == 0:
             ax.text(
@@ -261,8 +322,15 @@ class SpatialPlotter(BaseSpatialPlotter):
             )
             vmin = float(levels_arr[0])
             vmax = float(levels_arr[-1])
-        elif vmin is None and vmax is None and robust:
-            if symmetric:
+        elif vmin is None and vmax is None and (robust or nice_range):
+            if nice_range:
+                vmin, vmax = _nice_robust_limits(
+                    finite,
+                    robust_pct,
+                    nice_range_bounds,
+                    target_intervals=nice_range_target_intervals,
+                )
+            elif symmetric:
                 percentile = float(max(robust_pct)) if robust_pct else 98.0
                 vmin, vmax = calculate_symmetric_limits(finite, percentile=percentile)
             else:

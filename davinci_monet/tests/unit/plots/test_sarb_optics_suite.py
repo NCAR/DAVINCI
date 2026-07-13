@@ -29,12 +29,10 @@ def test_sarb_band_optics_suite_expands_expected_views() -> None:
     assert plots["optics_visible_column_aod"]["title"] == "Visible Aerosol Optical Depth"
     assert plots["optics_visible_asymmetry"]["title"] == "Visible Asymmetry Parameter"
     assert (
-        plots["optics_lw_window_scattering"]["title"]
-        == "Longwave Window Scattering Optical Depth"
+        plots["optics_lw_window_scattering"]["title"] == "Longwave Window Scattering Optical Depth"
     )
     assert (
-        plots["optics_lw_window_extinction"]["title"]
-        == "Longwave Window Extinction Optical Depth"
+        plots["optics_lw_window_extinction"]["title"] == "Longwave Window Extinction Optical Depth"
     )
     assert plots["optics_visible_column_aod"]["style_preset"] == "geosit_aod"
     assert plots["optics_lw_window_scattering"]["type"] == "spatial"
@@ -71,6 +69,40 @@ def test_sarb_band_optics_suite_allows_overrides() -> None:
     plot = plots["optics_lw_window_scattering"]
     assert plot["title"] == "Custom LW Scattering"
     assert plot["fig_kwargs"] == {"figsize": [8.0, 4.0]}
+
+
+def test_sarb_band_optics_suite_expands_named_spectral_fields() -> None:
+    plots = expand_plot_suite(
+        "uv_optics",
+        {
+            "preset": "sarb_band_aerosol_optics",
+            "source": "uv_optics",
+            "fields": {
+                "ultraviolet_column_aod": "column_aod",
+                "ultraviolet_single_scatter_albedo": "single_scatter_albedo",
+                "ultraviolet_asymmetry": "asymmetry",
+            },
+        },
+        available_fields=["column_aod", "single_scatter_albedo", "asymmetry"],
+        field_metadata={
+            "column_aod": {"display_name": "Ultraviolet Aerosol Optical Depth (0.340 µm)"},
+            "single_scatter_albedo": {
+                "display_name": "Ultraviolet Single-Scatter Albedo (0.340 µm)"
+            },
+            "asymmetry": {"display_name": "Ultraviolet Asymmetry Parameter (0.340 µm)"},
+        },
+    )
+
+    aod = plots["uv_optics_ultraviolet_column_aod"]
+    ssa = plots["uv_optics_ultraviolet_single_scatter_albedo"]
+    asymmetry = plots["uv_optics_ultraviolet_asymmetry"]
+    assert aod["title"] == "Ultraviolet Aerosol Optical Depth (0.340 µm)"
+    assert aod["style_preset"] == "geosit_aod"
+    assert aod["global_mean_decimals"] == 3
+    assert ssa["nice_range"] is True
+    assert ssa["nice_range_bounds"] == [0.0, 1.0]
+    assert asymmetry["nice_range"] is True
+    assert asymmetry["robust_pct"] == [2.0, 98.0]
 
 
 def test_unknown_sarb_field_override_is_not_global() -> None:

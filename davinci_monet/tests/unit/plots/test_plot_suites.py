@@ -25,6 +25,8 @@ def test_gridded_aod_suite_expands_absolute_and_difference_plots() -> None:
     assert "daily_aod_analyzed_aod" in plots
     assert plots["daily_aod_analyzed_aod"]["type"] == "spatial"
     assert plots["daily_aod_analyzed_aod"]["style_preset"] == "geosit_aod"
+    assert plots["daily_aod_analyzed_aod"]["global_mean_decimals"] == 3
+    assert plots["daily_aod_analysis_increment_aod"]["global_mean_decimals"] == 3
     assert plots["daily_aod_analysis_increment_aod"]["cmap"] == "RdBu_r"
     assert plots["daily_aod_analysis_increment_aod"]["robust"] is True
     assert plots["daily_aod_analysis_increment_aod"]["symmetric"] is True
