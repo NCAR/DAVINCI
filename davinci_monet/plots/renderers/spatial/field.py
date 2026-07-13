@@ -53,6 +53,33 @@ _PATH_SHAPES = {"track", "profile"}
 _ColorbarExtend = Literal["neither", "both", "min", "max"]
 
 
+def _global_area_mean(field: xr.DataArray, latitude_name: str) -> float:
+    """Return a finite-cell, latitude-area-weighted mean for a global field."""
+    if latitude_name not in field.coords:
+        finite = np.asarray(field.values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        return float(np.mean(finite)) if finite.size else float("nan")
+
+    latitude = field.coords[latitude_name]
+    weights = np.cos(np.deg2rad(latitude)).clip(min=0.0)
+    valid = field.notnull() & np.isfinite(field)
+    numerator = (field.where(valid).fillna(0.0) * weights).sum(skipna=True)
+    denominator = weights.where(valid).sum(skipna=True)
+    if float(denominator) <= 0.0:
+        return float("nan")
+    return float(numerator / denominator)
+
+
+def _subtitle_with_global_mean(
+    field: xr.DataArray,
+    latitude_name: str,
+    subtitle: str | None,
+) -> str:
+    mean = _global_area_mean(field, latitude_name)
+    mean_text = f"Mean: {mean:.6g}" if np.isfinite(mean) else "Mean: no finite values"
+    return f"{subtitle} | {mean_text}" if subtitle else mean_text
+
+
 @register_plotter("spatial", arity="single_source", category="spatial")
 class SpatialPlotter(BaseSpatialPlotter):
     """Single-source spatial field map (shape-aware).
@@ -139,6 +166,9 @@ class SpatialPlotter(BaseSpatialPlotter):
         resolution: str | None = None,
         land_color: str | None = None,
         ocean_color: str | None = None,
+        show_global_mean: bool = False,
+        tight_layout: bool = False,
+        tight_layout_pad: float = 0.5,
         **kwargs: Any,
     ) -> matplotlib.figure.Figure:
         import cartopy.crs as ccrs
@@ -182,6 +212,13 @@ class SpatialPlotter(BaseSpatialPlotter):
 
         values = field.values
         finite = values[np.isfinite(values)]
+        rendered_subtitle = subtitle if subtitle is not None else self.config.subtitle
+        if show_global_mean:
+            rendered_subtitle = _subtitle_with_global_mean(
+                field,
+                resolved_lat,
+                rendered_subtitle,
+            )
         if finite.size == 0:
             ax.text(
                 0.5,
@@ -192,6 +229,9 @@ class SpatialPlotter(BaseSpatialPlotter):
                 transform=ax.transAxes,
                 fontsize=self.config.text.fontsize,
             )
+            self.set_title(ax, self.config.title, subtitle=rendered_subtitle)
+            if tight_layout:
+                fig.tight_layout(pad=tight_layout_pad)
             return fig
         norm: mcolors.Normalize | None = None
         if style_preset is not None:
@@ -290,12 +330,18 @@ class SpatialPlotter(BaseSpatialPlotter):
         )
 
         if self.config.title:
-            self.set_title(ax, self.config.title, subtitle=subtitle)
+            self.set_title(ax, self.config.title, subtitle=rendered_subtitle)
         else:
             # Source name leads the title, de-duped against the quantity, e.g.
             # "AERONET AOD (500 nm)" / "CESM NO2 Column" (not "… (CESM)").
             title_q = labeling.quantity_label(ds, variable)
-            self.set_title(ax, labeling.sourced_title(source_label, title_q), subtitle=subtitle)
+            self.set_title(
+                ax,
+                labeling.sourced_title(source_label, title_q),
+                subtitle=rendered_subtitle,
+            )
+        if tight_layout:
+            fig.tight_layout(pad=tight_layout_pad)
         return fig
 
     # -- helpers ---------------------------------------------------------------

@@ -26,6 +26,16 @@ def test_sarb_band_optics_suite_expands_expected_views() -> None:
 
     assert "optics_visible_column_aod" in plots
     assert "optics_lw_window_scattering" in plots
+    assert plots["optics_visible_column_aod"]["title"] == "Visible Aerosol Optical Depth"
+    assert plots["optics_visible_asymmetry"]["title"] == "Visible Asymmetry Parameter"
+    assert (
+        plots["optics_lw_window_scattering"]["title"]
+        == "Longwave Window Scattering Optical Depth"
+    )
+    assert (
+        plots["optics_lw_window_extinction"]["title"]
+        == "Longwave Window Extinction Optical Depth"
+    )
     assert plots["optics_visible_column_aod"]["style_preset"] == "geosit_aod"
     assert plots["optics_lw_window_scattering"]["type"] == "spatial"
     assert plots["optics_sw_spectral_profile"]["type"] == "timeseries"
