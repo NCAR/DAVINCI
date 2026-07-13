@@ -12,6 +12,7 @@ Rules for all AI agents working in this repository. **Read `CLAUDE.md` for full 
 ## Git Workflow
 
 - **NEVER auto commit or push**: Wait for explicit user confirmation
+- **Routine commit/push uses plain Git**: When the user explicitly requests a commit and push, use `git` directly on the authorized branch; do not require the GitHub CLI or create a pull request unless the user asks for PR work
 - **Work on develop**: Start from and stay on `develop` by default
 - **No stray branches**: Do not create feature, codex, topic, or worktree branches unless the user explicitly authorizes that branch or worktree by name
 - **Main is user-controlled**: Merge or push to `main` only when the user explicitly requests it
