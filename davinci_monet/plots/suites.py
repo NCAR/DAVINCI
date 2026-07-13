@@ -81,13 +81,16 @@ def _plot_overrides(
 
 
 def _aod_plot_options(field: str) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    if "aod" in field:
+        options["global_mean_decimals"] = 3
     if field.endswith("_aod") and "minus" not in field and "increment" not in field:
-        return {"style_preset": "geosit_aod"}
+        options["style_preset"] = "geosit_aod"
     if "minus" in field or "increment" in field:
-        return {"cmap": "RdBu_r", "robust": True, "symmetric": True}
+        options.update({"cmap": "RdBu_r", "robust": True, "symmetric": True})
     if "fraction" in field:
-        return {"cmap": "gray_r", "vmin": 0.0, "vmax": 1.0}
-    return {}
+        options.update({"cmap": "gray_r", "vmin": 0.0, "vmax": 1.0})
+    return options
 
 
 def _field_title(field: str, default: str, field_metadata: dict[str, dict[str, Any]]) -> str:
@@ -110,11 +113,31 @@ def _title_with_group_prefix(title: str, group: Any) -> str:
 
 
 def _sarb_plot_options(field: str) -> dict[str, Any]:
-    if field in {"visible_column_aod", "lw_window_extinction"}:
-        return {"style_preset": "geosit_aod"}
+    options: dict[str, Any] = {}
+    is_optical_depth = (
+        field.endswith("_aod")
+        or ("extinction" in field and "vertical" not in field)
+        or field.endswith(("_scattering", "_scattering_optical_depth"))
+    )
+    if is_optical_depth:
+        options["global_mean_decimals"] = 3
+    if field.endswith("_aod") or ("extinction" in field and "vertical" not in field):
+        options["style_preset"] = "geosit_aod"
     if "scatter_albedo" in field or "asymmetry" in field:
-        return {"vmin": 0.0, "vmax": 1.0}
-    return {}
+        options.update(
+            {
+                "robust": True,
+                "robust_pct": [2.0, 98.0],
+                "nice_range": True,
+                "nice_range_bounds": [0.0, 1.0],
+            }
+        )
+    return options
+
+
+def _humanize_sarb_field(field: str) -> str:
+    title = field.replace("_", " ").title()
+    return title.replace("Aod", "AOD").replace("Lw", "LW").replace("Sw", "SW")
 
 
 def _sarb_plot_type(field: str) -> str:
@@ -173,13 +196,23 @@ def _expand_sarb_suite(
     suite: dict[str, Any],
     *,
     available_fields: list[str],
+    field_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     source = suite["source"]
     fields = suite.get("fields") or {}
     overrides = suite.get("overrides") or {}
     available = {str(field) for field in available_fields}
+    field_metadata = field_metadata or {}
+    titles = dict(_SARB_TITLES)
+    for field, variable in fields.items():
+        if field not in titles:
+            titles[field] = _field_title(
+                str(variable),
+                _humanize_sarb_field(field),
+                field_metadata,
+            )
     plots: dict[str, dict[str, Any]] = {}
-    for field, title in _SARB_TITLES.items():
+    for field, title in titles.items():
         variable = str(fields.get(field, field))
         if variable not in available:
             continue
@@ -194,7 +227,7 @@ def _expand_sarb_suite(
             **_plot_overrides(
                 overrides,
                 field,
-                set(_SARB_TITLES),
+                set(titles),
                 allow_unknown_dict_globals=False,
             ),
         }
@@ -223,5 +256,10 @@ def expand_plot_suite(
             field_metadata=field_metadata,
         )
     if preset == "sarb_band_aerosol_optics":
-        return _expand_sarb_suite(suite_name, suite, available_fields=available_fields)
+        return _expand_sarb_suite(
+            suite_name,
+            suite,
+            available_fields=available_fields,
+            field_metadata=field_metadata,
+        )
     raise ValueError(f"unknown plot suite preset: {preset}")
