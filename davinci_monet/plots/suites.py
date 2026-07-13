@@ -26,13 +26,13 @@ _AOD_MAP_CONTEXT = {
 }
 
 _SARB_TITLES = {
-    "visible_column_aod": "Visible Column AOD",
+    "visible_column_aod": "Visible Aerosol Optical Depth",
     "visible_single_scatter_albedo": "Visible Single-Scatter Albedo",
-    "visible_asymmetry": "Visible Asymmetry",
+    "visible_asymmetry": "Visible Asymmetry Parameter",
     "sw_spectral_profile": "SW Spectral Profile",
     "dust_vertical_extinction": "Dust Vertical Extinction",
-    "lw_window_scattering": "LW Window Scattering",
-    "lw_window_extinction": "LW Window Extinction",
+    "lw_window_scattering": "Longwave Window Scattering Optical Depth",
+    "lw_window_extinction": "Longwave Window Extinction Optical Depth",
 }
 
 _GLOBAL_OVERRIDE_KEYS = {

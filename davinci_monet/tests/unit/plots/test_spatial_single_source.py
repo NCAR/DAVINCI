@@ -103,6 +103,38 @@ def test_spatial_title_position_is_finite_with_subtitle():
     plt.close(fig)
 
 
+def test_spatial_map_can_append_global_mean_and_use_tight_layout(monkeypatch):
+    calls: list[dict[str, float]] = []
+    monkeypatch.setattr(
+        matplotlib.figure.Figure,
+        "tight_layout",
+        lambda self, **kwargs: calls.append(kwargs),
+    )
+    plotter = SpatialPlotter(config=PlotConfig(title="Visible Column AOD", subtitle="2008-07"))
+
+    fig = _single_figure(
+        plotter.render(
+            build_series(_aod_grid(), "aod"),
+            show_coastlines=False,
+            show_countries=False,
+            show_states=False,
+            show_gridlines=False,
+            land_color="none",
+            ocean_color="none",
+            show_global_mean=True,
+            tight_layout=True,
+            tight_layout_pad=0.5,
+        )
+    )
+
+    assert any(
+        text.get_text().startswith("2008-07 | Mean: ")
+        for text in fig.axes[0].texts
+    )
+    assert calls == [{"pad": 0.5}]
+    plt.close(fig)
+
+
 def test_domain_type_sets_fixed_map_extent():
     """A named domain pins the map extent so sparse-data maps aren't auto-clipped
     to their few sites — every map shares the same fixed extent."""
