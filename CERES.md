@@ -296,6 +296,43 @@ size, source URL, destination, and whether each file was downloaded, already
 present, or missing. The downloader filters out adjacent-day granules that CMR
 MODIS searches can return. Re-running a task skips existing non-empty files.
 
+### Derecho AOD Subsetting
+
+Create compact NetCDF4 subsets from the purgeable scratch inputs with:
+
+```bash
+scripts/subset_aod_earthdata.py \
+  --start 2008-07-01 --end 2008-07-31 \
+  --products merra2,terra,aqua,terra-l2,aqua-l2
+```
+
+The direct script defaults to the Earthaccess staging root above and writes to:
+
+```text
+/glade/work/fillmore/Data/CERES-SARB-CAM7/AOD_SUBSETS/
+├── GMAO/MERRA2/<YYYY>/<MM>/MERRA2_TOTEXTTAU_daily.<YYYYMMDD>.nc4
+└── MODIS/<Terra|Aqua>/C61/<YYYY>/<DDD>/*.AOD550.nc4
+```
+
+MERRA-2 outputs contain the daily mean of the 24 hourly `TOTEXTTAU` samples.
+MODIS D3 outputs contain the combined Dark Target/Deep Blue 550-nm daily mean.
+MODIS L2 outputs contain the combined 550-nm AOD, QA and algorithm flags,
+latitude, longitude, and scan start time. Optional latitude/longitude bounds
+apply to all selected products; L2 granules outside the requested region are
+recorded as `outside-bounds` and are not written.
+
+For the full L2 inventory, submit one throttled PBS array task per UTC day:
+
+```bash
+scripts/qsub_aod_subsets.sh \
+  --start 2008-07-01 --end 2008-07-31 \
+  --products merra2,terra,aqua,terra-l2,aqua-l2
+```
+
+The subsetter's `all` selection includes all five products. Outputs are written
+atomically, existing non-empty outputs are skipped unless `--overwrite` is
+used, and each task writes a TSV under `<output-root>/manifests/`.
+
 ## DAVINCI Reader Notes
 
 DAVINCI already has a `ceres_ssf` reader. Useful canonical variables include:
