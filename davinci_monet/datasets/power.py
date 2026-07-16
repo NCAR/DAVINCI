@@ -67,46 +67,79 @@ class PowerVariable:
     """Catalog entry: what POWER sends, and how to get it to SI.
 
     ``value_si = value_native * scale + offset``
+
+    ``display_name`` is a terse, publication-quality quantity name. POWER's own
+    ``long_name`` values are titles rather than labels -- "All Sky Surface
+    Shortwave Downward Irradiance" is 43 characters, and an axis carries a
+    source and units besides -- so they overflow and clip. The label system
+    already honours ``display_name`` ahead of ``long_name``, so supplying one
+    here fixes the label without touching shared label precedence.
     """
 
     native_units: str
     units: str
     scale: float = 1.0
     offset: float = 0.0
+    display_name: str = ""
 
 
-def _radiation(temporal: str) -> PowerVariable:
+def _radiation(temporal: str, display_name: str) -> PowerVariable:
     """Radiative flux entry for ``temporal`` (units differ by level)."""
     if temporal == "hourly":
         # Wh/m^2 accumulated over one hour *is* W/m^2 -- scale 1, not 3600.
-        return PowerVariable(native_units="Wh/m^2", units="W m-2", scale=1.0)
-    return PowerVariable(native_units="kW-hr/m^2/day", units="W m-2", scale=KWH_M2_DAY_TO_W_M2)
+        return PowerVariable(
+            native_units="Wh/m^2", units="W m-2", scale=1.0, display_name=display_name
+        )
+    return PowerVariable(
+        native_units="kW-hr/m^2/day",
+        units="W m-2",
+        scale=KWH_M2_DAY_TO_W_M2,
+        display_name=display_name,
+    )
 
 
-_TEMPERATURE = PowerVariable(native_units="C", units="K", offset=273.15)
-_RADIATION_PARAMS = ("ALLSKY_SFC_SW_DWN", "CLRSKY_SFC_SW_DWN", "ALLSKY_SFC_LW_DWN")
+def _temperature(display_name: str) -> PowerVariable:
+    return PowerVariable(native_units="C", units="K", offset=273.15, display_name=display_name)
+
+
+#: Radiative flux parameters and their terse labels.
+_RADIATION_PARAMS = {
+    "ALLSKY_SFC_SW_DWN": "Surface Downwelling Shortwave",
+    "CLRSKY_SFC_SW_DWN": "Clear-Sky Downwelling Shortwave",
+    "ALLSKY_SFC_LW_DWN": "Surface Downwelling Longwave",
+}
 
 #: (parameter, temporal) -> conversion. ``None`` temporal means "any level".
 #: Every native_units string here was measured against the live API.
 POWER_CATALOG: dict[tuple[str, str | None], PowerVariable] = {
     **{
-        (param, temporal): _radiation(temporal)
-        for param in _RADIATION_PARAMS
+        (param, temporal): _radiation(temporal, display_name)
+        for param, display_name in _RADIATION_PARAMS.items()
         for temporal in ("hourly", "daily", "monthly")
     },
-    ("T2M", None): _TEMPERATURE,
+    ("T2M", None): _temperature("2 m Temperature"),
     # T2M_MAX/T2M_MIN are daily aggregates -- the hourly endpoint rejects them.
-    ("T2M_MAX", "daily"): _TEMPERATURE,
-    ("T2M_MAX", "monthly"): _TEMPERATURE,
-    ("T2M_MIN", "daily"): _TEMPERATURE,
-    ("T2M_MIN", "monthly"): _TEMPERATURE,
-    ("RH2M", None): PowerVariable(native_units="%", units="%"),
-    ("WS10M", None): PowerVariable(native_units="m/s", units="m s-1"),
-    ("WS50M", None): PowerVariable(native_units="m/s", units="m s-1"),
-    ("PS", None): PowerVariable(native_units="kPa", units="Pa", scale=1000.0),
+    ("T2M_MAX", "daily"): _temperature("2 m Temperature, Daily Max"),
+    ("T2M_MAX", "monthly"): _temperature("2 m Temperature, Daily Max"),
+    ("T2M_MIN", "daily"): _temperature("2 m Temperature, Daily Min"),
+    ("T2M_MIN", "monthly"): _temperature("2 m Temperature, Daily Min"),
+    ("RH2M", None): PowerVariable(
+        native_units="%", units="%", display_name="2 m Relative Humidity"
+    ),
+    ("WS10M", None): PowerVariable(
+        native_units="m/s", units="m s-1", display_name="10 m Wind Speed"
+    ),
+    ("WS50M", None): PowerVariable(
+        native_units="m/s", units="m s-1", display_name="50 m Wind Speed"
+    ),
+    ("PS", None): PowerVariable(
+        native_units="kPa", units="Pa", scale=1000.0, display_name="Surface Pressure"
+    ),
     # Left as a depth rate: mm/day is the conventional met unit and no model
     # comparison in v1 needs kg m-2 s-1.
-    ("PRECTOTCORR", None): PowerVariable(native_units="mm/day", units="mm day-1"),
+    ("PRECTOTCORR", None): PowerVariable(
+        native_units="mm/day", units="mm day-1", display_name="Precipitation"
+    ),
 }
 
 
@@ -384,7 +417,10 @@ class POWERReader:
                 )
 
             converted = masked * entry.scale + entry.offset
-            ds[name] = converted.assign_attrs({**var.attrs, "units": entry.units})
+            new_attrs = {**var.attrs, "units": entry.units}
+            if entry.display_name:
+                new_attrs["display_name"] = entry.display_name
+            ds[name] = converted.assign_attrs(new_attrs)
             # valid_min/max arrive in native units; they no longer describe the
             # converted values, so drop rather than mislead downstream masking.
             for attr in ("valid_min", "valid_max"):

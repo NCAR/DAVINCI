@@ -355,6 +355,61 @@ def test_daily_time_is_not_shifted(stub_fetch, tmp_path: Path) -> None:
     assert [str(t)[11:16] for t in ds["time"].values] == ["00:00", "00:00", "00:00"]
 
 
+def test_catalogued_params_carry_a_terse_display_name(stub_fetch, tmp_path: Path) -> None:
+    """POWER's long_name is far too long for an axis and clips it.
+
+    POWER ships long_name "All Sky Surface Shortwave Downward Irradiance" (43
+    chars); an axis also carries a source and units, so it overflows. The
+    label system already honours ``display_name`` ahead of ``long_name`` and
+    treats it as publication-quality, so the catalog supplies a terse one.
+    This is reader-local -- no change to the shared label precedence.
+    """
+    stub_fetch(
+        {"boulder": _power_response({"ALLSKY_SFC_SW_DWN": ([1.0, 2.0, 0.0], "kW-hr/m^2/day")})}
+    )
+    reader = power_reader.POWERReader()
+    ds = reader.open(
+        [],
+        variables=["ALLSKY_SFC_SW_DWN"],
+        temporal="daily",
+        sites=[{"name": "boulder", "latitude": 40.02, "longitude": -105.27}],
+        cache_dir=tmp_path,
+        time_range=("2024-02-01", "2024-02-03"),
+    )
+    name = ds["ALLSKY_SFC_SW_DWN"].attrs["display_name"]
+    assert name == "Surface Downwelling Shortwave"
+    assert len(name) < 32
+    # long_name is preserved: display_name outranks it, so there is no need to
+    # discard the source's own description.
+    assert ds["ALLSKY_SFC_SW_DWN"].attrs["long_name"] == "ALLSKY_SFC_SW_DWN"
+
+
+def test_uncatalogued_param_gets_no_display_name(stub_fetch, tmp_path: Path) -> None:
+    """Without a catalog entry we have no terse name to offer; long_name stands."""
+    stub_fetch({"boulder": _power_response({"WEIRD_PARAM": ([1.0, 2.0, 3.0], "furlongs")})})
+    reader = power_reader.POWERReader()
+    ds = reader.open(
+        [],
+        variables=["WEIRD_PARAM"],
+        temporal="daily",
+        sites=[{"name": "boulder", "latitude": 40.02, "longitude": -105.27}],
+        cache_dir=tmp_path,
+        time_range=("2024-02-01", "2024-02-03"),
+    )
+    assert "display_name" not in ds["WEIRD_PARAM"].attrs
+
+
+def test_every_catalogued_param_has_a_display_name() -> None:
+    missing = sorted(
+        {
+            param
+            for (param, _), entry in power_reader.POWER_CATALOG.items()
+            if not entry.display_name
+        }
+    )
+    assert not missing, f"catalogued POWER params with no display_name: {missing}"
+
+
 def test_registered_under_the_power_source_type() -> None:
     from davinci_monet.core.registry import source_registry
     from davinci_monet.io.source_registration import ensure_builtin_source_readers_registered
