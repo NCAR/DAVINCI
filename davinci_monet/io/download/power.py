@@ -108,7 +108,9 @@ def build_power_url(
         the coordinates for the mode are missing.
     """
     if temporal not in TEMPORAL_LEVELS:
-        raise ValueError(f"Unknown temporal level {temporal!r}. Known: {', '.join(TEMPORAL_LEVELS)}")
+        raise ValueError(
+            f"Unknown temporal level {temporal!r}. Known: {', '.join(TEMPORAL_LEVELS)}"
+        )
     if mode not in MODES:
         raise ValueError(f"Unknown mode {mode!r}. Known: {', '.join(MODES)}")
     if not params:
@@ -214,7 +216,7 @@ def plan_requests(
     """
     start_str = format_power_date(start, temporal)
     end_str = format_power_date(end, temporal)
-    common = dict(
+    common: dict[str, Any] = dict(
         temporal=temporal,
         mode=mode,
         community=community,

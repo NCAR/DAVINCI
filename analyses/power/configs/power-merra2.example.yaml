@@ -1,0 +1,129 @@
+# MERRA-2 evaluated against NASA POWER.
+#
+# Two legs that look alike and mean opposite things — read this before quoting
+# any number out of this run:
+#
+#   Leg A (SWGDN vs ALLSKY_SFC_SW_DWN) is a GENUINE EVALUATION. POWER's solar
+#     derives from CERES SYN1deg, which is independent of the GEOS radiation
+#     scheme that produced MERRA-2's SWGDN. A bias here is a real result.
+#
+#   Leg B (T2M vs T2M) is CIRCULAR — a traceability check, not a result.
+#     POWER's meteorology *is* MERRA-2, served on MERRA-2's own native grid.
+#     The two must agree; if they do not, this reader is wrong. Never present
+#     leg B as an evaluation, and never present leg A unless leg B passed —
+#     an unvalidated reader turns every bias into "GEOS, or our bug?"
+#
+# Staging (long pole — start first; /Volumes/Io is not mounted everywhere, so
+# pass --root explicitly):
+#   davinci-stage-merra2 --collection tavg1_2d_rad_Nx --start 2024-02 --end 2024-02 \
+#     --root ${POWER_DATA} --dry-run      # drop --dry-run to stage
+#   davinci-stage-merra2 --collection tavg1_2d_slv_Nx --start 2024-02 --end 2024-02 \
+#     --root ${POWER_DATA}
+#
+#   export POWER_DATA=~/Data/POWER
+#   export POWER_ANALYSIS=$(pwd)
+#   export POWER_CACHE=${POWER_ANALYSIS}/cache
+#   davinci-monet run configs/power-merra2.example.yaml
+
+analysis:
+  start_time: "2024-02-01"
+  end_time: "2024-02-29"
+  output_dir: ${POWER_ANALYSIS}/output
+  log_dir: ${POWER_ANALYSIS}/logs
+  style:
+    theme: ncar
+    context: presentation
+
+sources:
+  merra2_rad:
+    type: merra2
+    files: ${POWER_DATA}/MERRA2_tavg1/rad_Nx/*.nc4     # tavg1_2d_rad_Nx (M2T1NXRAD)
+    variables:
+      SWGDN: {units: "W m-2"}     # GEOS radiation scheme's own answer
+
+  merra2_slv:
+    type: merra2
+    files: ${POWER_DATA}/MERRA2_tavg1/slv_Nx/*.nc4     # tavg1_2d_slv_Nx (M2T1NXSLV)
+    variables:
+      T2M: {units: K}
+
+  power:
+    type: power
+    temporal: hourly       # matches MERRA-2 tavg1 natively — no aggregation either side
+    community: RE
+    cache_dir: ${POWER_CACHE}
+    # No time_standard knob: the reader always requests time-standard=UTC.
+    # POWER's own default is LST, which would phase-shift this against MERRA-2
+    # by ~7 h at Boulder and make leg B look like a reader bug.
+    sites:
+      - {name: boulder,   latitude: 40.02,  longitude: -105.27}
+      - {name: table_mtn, latitude: 40.125, longitude: -105.24}
+      - {name: desert_rock, latitude: 36.626, longitude: -116.018}
+      - {name: bondville, latitude: 40.052, longitude: -88.373}
+    variables:
+      ALLSKY_SFC_SW_DWN: {}   # CERES-derived -> INDEPENDENT of MERRA-2. Evaluation.
+      T2M: {}                 # MERRA-2-derived -> CIRCULAR. Traceability only.
+
+  power_grid:
+    type: power
+    temporal: hourly
+    community: RE
+    cache_dir: ${POWER_CACHE}
+    # Regional needs >= 2 deg on BOTH axes; anything smaller is a 422.
+    bbox: {lat_min: 30, lat_max: 50, lon_min: -125, lon_max: -100}
+    variables:
+      ALLSKY_SFC_SW_DWN: {}
+
+pairs:
+  # Leg A — EVALUATION.
+  merra2_vs_power_swdn:
+    x: {source: power,      variable: ALLSKY_SFC_SW_DWN}
+    y: {source: merra2_rad, variable: SWGDN}
+
+  # Leg B — TRACEABILITY. Circular by construction; this is the reader's test.
+  merra2_vs_power_t2m:
+    x: {source: power,      variable: T2M}
+    y: {source: merra2_slv, variable: T2M}
+
+  # Leg A regional — the grids genuinely differ: POWER solar arrives on CERES
+  # SYN1deg's native 1.0 deg, MERRA-2 SWGDN is 0.5 x 0.625. Bin both onto the
+  # COARSER grid; gridding to 0.5 would upsample POWER and invent structure.
+  merra2_vs_power_grid_swdn:
+    x: {source: power_grid, variable: ALLSKY_SFC_SW_DWN}
+    y: {source: merra2_rad, variable: SWGDN}
+    method: grid
+    grid:
+      horizontal_res: 1.0
+      time_resolution: 1D     # daily-averages both sides; a bias map wants no diurnal cycle
+      min_sample_count: 1
+
+plots:
+  swdn_scatter:
+    type: scatter
+    pairs: [merra2_vs_power_swdn]
+    title: "Surface Downwelling Shortwave"
+    show_density: true
+
+  swdn_timeseries:
+    type: timeseries
+    pairs: [merra2_vs_power_swdn]
+    title: "Surface Downwelling Shortwave"
+
+  swdn_spatial_bias:
+    type: spatial_bias
+    pairs: [merra2_vs_power_grid_swdn]
+    title: "Surface Downwelling Shortwave Bias"
+
+  # Leg B plots are labelled as the consistency check they are, so a reader
+  # skimming the output directory cannot mistake them for a result.
+  t2m_scatter_traceability:
+    type: scatter
+    pairs: [merra2_vs_power_t2m]
+    title: "2 m Temperature Consistency Check"
+
+stats:
+  metrics: [N, MB, RMSE, R, NMB, NME, IOA]
+
+summary:
+  enabled: true
+  model: claude-haiku-4-5

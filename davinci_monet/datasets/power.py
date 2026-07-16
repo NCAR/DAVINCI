@@ -9,16 +9,22 @@ so reruns are offline and free.
 Three config modes, exactly one of:
 
 * ``sites:``  -> POINT ``(time, site)``  -- "virtual stations"
-* ``bbox:``   -> GRID  ``(time, lat, lon)`` on POWER's 0.5 deg grid
+* ``bbox:``   -> GRID  ``(time, lat, lon)``, on the parameter's **parent grid**
 * ``files:``  -> GRID, opened from previously staged NetCDF, no network
+
+Regional responses are **not** on a common 0.5 deg grid: each parameter comes
+back on its parent's native grid -- solar on CERES SYN1deg's 1.0 deg, met on
+MERRA-2's 0.5 x 0.625 (measured 2026-07-15). Pairing two POWER parameters
+against each other spatially therefore needs regridding.
 
 Provenance
 ----------
 POWER is **not ground truth**. Its solar parameters derive from CERES
-SYN1deg/FLASHFlux; its meteorology *is* MERRA-2/GEOS regridded. Evaluating
-MERRA-2 against POWER solar is a genuine comparison; evaluating MERRA-2
-against POWER ``T2M`` is circular and is only a traceability check. See
-POWER.md.
+SYN1deg/FLASHFlux (and an earlier parent before the CERES era -- the record
+starts 1984 while SYN1deg starts 2000); its meteorology *is* MERRA-2/GEOS,
+served on MERRA-2's own grid rather than regridded. So evaluating MERRA-2
+against POWER solar is a genuine comparison, while evaluating MERRA-2 against
+POWER ``T2M`` is circular -- a traceability check only. See POWER.md.
 
 Units
 -----
@@ -37,6 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import numpy as np
 import xarray as xr
 
 from davinci_monet.core.protocols import DataGeometry
@@ -73,9 +80,7 @@ def _radiation(temporal: str) -> PowerVariable:
     if temporal == "hourly":
         # Wh/m^2 accumulated over one hour *is* W/m^2 -- scale 1, not 3600.
         return PowerVariable(native_units="Wh/m^2", units="W m-2", scale=1.0)
-    return PowerVariable(
-        native_units="kW-hr/m^2/day", units="W m-2", scale=KWH_M2_DAY_TO_W_M2
-    )
+    return PowerVariable(native_units="kW-hr/m^2/day", units="W m-2", scale=KWH_M2_DAY_TO_W_M2)
 
 
 _TEMPERATURE = PowerVariable(native_units="C", units="K", offset=273.15)
@@ -216,12 +221,11 @@ class POWERReader:
                 ds = xr.merge([xr.open_dataset(p) for p in paths])
                 self._geometry = DataGeometry.GRID
 
+        ds = self._decode_monthly_time(ds)
         ds = self._normalize(ds, temporal)
         return set_geometry_attr(ds, self._geometry)
 
-    def _open_files(
-        self, file_paths: Sequence[str | Path], params: Sequence[str]
-    ) -> xr.Dataset:
+    def _open_files(self, file_paths: Sequence[str | Path], params: Sequence[str]) -> xr.Dataset:
         """Open staged POWER NetCDF without touching the network."""
         paths = [str(p) for p in file_paths]
         ds = (
@@ -255,6 +259,36 @@ class POWERReader:
             longitude=("site", [coords[n][1] for n in names]),
         )
         return out
+
+    def _decode_monthly_time(self, ds: xr.Dataset) -> xr.Dataset:
+        """Turn the monthly endpoint's ``YYYYMM`` integers into real datetimes.
+
+        Two quirks, both measured against the live API:
+
+        * ``time`` arrives as **int64 YYYYMM**, not datetime64, so without this
+          every downstream time operation -- selection, resampling, the x axis
+          of a plot -- is operating on the integer 198101.
+        * Each year carries a **13th "month"**: ``YYYY13`` is that year's annual
+          mean. Left in, it is an extra data point every 13th step that is not a
+          month at all, quietly contaminating any series or statistic.
+
+        The annual means are dropped rather than surfaced; a caller who wants
+        them can resample the monthly series, which is unambiguous.
+        """
+        if "time" not in ds.coords or np.issubdtype(ds["time"].dtype, np.datetime64):
+            return ds
+
+        stamps = np.asarray(ds["time"].values).astype("int64")
+        months = stamps % 100
+        annual = months == 13
+        if annual.any():
+            logger.debug("Dropping %d POWER annual-mean (YYYY13) entries", int(annual.sum()))
+            ds = ds.isel(time=~annual)
+            stamps = stamps[~annual]
+
+        years, months = stamps // 100, stamps % 100
+        decoded = np.array([np.datetime64(f"{y:04d}-{m:02d}", "ns") for y, m in zip(years, months)])
+        return ds.assign_coords(time=("time", decoded))
 
     def _normalize(self, ds: xr.Dataset, temporal: str) -> xr.Dataset:
         """Mask fill values, then convert each variable to canonical SI units.
