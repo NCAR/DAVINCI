@@ -67,6 +67,36 @@ def test_regional_url_uses_bbox_bounds() -> None:
     assert "longitude-min=-106&longitude-max=-104" in url
 
 
+def test_regional_rejects_a_bbox_narrower_than_two_degrees() -> None:
+    """Verified live: <2 deg in either axis is a 422 telling you to use point."""
+    with pytest.raises(ValueError) as exc:
+        power.build_power_url(
+            temporal="daily",
+            mode="regional",
+            params=["T2M"],
+            start="2024-02-01",
+            end="2024-02-02",
+            bbox={"lat_min": 40, "lat_max": 41, "lon_min": -106, "lon_max": -104},
+        )
+    message = str(exc.value)
+    assert "2 degree" in message
+    assert "latitude" in message
+    assert "point" in message  # the API's own advice: use the point endpoint
+
+
+def test_regional_accepts_a_bbox_of_exactly_two_degrees() -> None:
+    """Exactly 2 deg is accepted upstream, so we must not reject it."""
+    url = power.build_power_url(
+        temporal="daily",
+        mode="regional",
+        params=["T2M"],
+        start="2024-02-01",
+        end="2024-02-02",
+        bbox={"lat_min": 40, "lat_max": 42, "lon_min": -106, "lon_max": -104},
+    )
+    assert "latitude-min=40" in url
+
+
 def test_regional_rejects_more_than_one_parameter() -> None:
     """The API hard-caps regional at 1 parameter (2 -> HTTP 422)."""
     with pytest.raises(ValueError) as exc:

@@ -16,8 +16,9 @@ analysis-ready solar and meteorological parameters through a free REST API — n
 - **Meteorology** derives from MERRA-2 / GEOS 5.12.4 (native 0.5° × ⅝°; GEOS covers the near-real-time tail).
 - **Temporal levels**: hourly, daily, monthly, climatology; record from 1981 to within days of present.
 - **Endpoints**: `https://power.larc.nasa.gov/api/temporal/{hourly|daily|monthly|climatology}/{point|regional}`.
-  Point requests allow ≤ 20 parameters; regional requests allow **1 parameter** on a 0.5° × 0.5° grid.
-  Output formats include JSON, CSV, ASCII, and **NetCDF**.
+  Point requests allow ≤ 20 parameters; regional requests allow **1 parameter**, and require a bbox of
+  **≥ 2° on both axes**. Output formats include JSON, CSV, ASCII, and **NetCDF**.
+- **Regional grids are per-parameter native, NOT a uniform 0.5°** (see the grid table below).
 
 **Why DAVINCI wants it**: a long, gap-free, globally complete evaluation reference for model surface
 meteorology and radiation, obtainable in seconds at exactly the sites/regions/windows an analysis needs.
@@ -41,8 +42,16 @@ variable. This is the single most important thing to get right in the demo and i
 
 | POWER variable | Parent | Pairing MERRA-2 against it is… |
 |---|---|---|
-| `T2M`, `RH2M`, `WS10M`, `PS`, `PRECTOTCORR` | **MERRA-2**, regridded to 0.5° × 0.5° | **circular — a traceability check.** Must agree to regridding error. Disagreement means our reader is wrong, so this is the strongest correctness test available. |
-| `ALLSKY_SFC_SW_DWN`, `CLRSKY_SFC_SW_DWN`, `ALLSKY_SFC_LW_DWN` | **CERES SYN1deg + FLASHFlux** | **a genuine evaluation.** CERES is independent of GEOS's radiation scheme, so MERRA-2 `SWGDN` vs POWER `ALLSKY_SFC_SW_DWN` is a real result, not a tautology. |
+| `T2M`, `RH2M`, `WS10M`, `PS`, `PRECTOTCORR` | **MERRA-2**, served on **MERRA-2's own native grid** | **circular — a traceability check.** Regional POWER met comes back on 0.5° × 0.625°, i.e. MERRA-2's exact grid — **not regridded at all**. So agreement should be near-*exact*, not merely close. Disagreement means our reader is wrong; this is the strongest correctness test available. |
+| `ALLSKY_SFC_SW_DWN`, `CLRSKY_SFC_SW_DWN`, `ALLSKY_SFC_LW_DWN` | **CERES SYN1deg + FLASHFlux**, on SYN1deg's native **1.0° × 1.0°** | **a genuine evaluation.** CERES is independent of GEOS's radiation scheme, so MERRA-2 `SWGDN` vs POWER `ALLSKY_SFC_SW_DWN` is a real result, not a tautology. The grids genuinely differ, so this leg needs regridding. |
+
+**Verified regional grids** (2026-07-15, 10° × 10° CONUS bbox) — POWER does *not* regrid to a common
+resolution; each parameter arrives on its parent's grid:
+
+| Parameter | Parent | Returned grid |
+|---|---|---|
+| `ALLSKY_SFC_SW_DWN` | CERES SYN1deg | **1.0° × 1.0°** |
+| `T2M` | MERRA-2 | **0.5° × 0.625°** — MERRA-2's native grid, exactly |
 
 Verify the exact per-parameter source attribution against the POWER methodology docs at implementation
 (especially `ALLSKY_SFC_LW_DWN`, and which parameters GEOS 5.12.4 FP — not MERRA-2 — supplies in the
@@ -186,8 +195,10 @@ pairs:
     x: {source: power,      variable: T2M}
     y: {source: merra2_slv, variable: T2M}
 
-  # Leg A regional - spatial bias map. Both sides are GRID on DIFFERENT grids
-  # (POWER 0.5x0.5 vs MERRA-2 0.5x0.625), so bin both onto a common grid.
+  # Leg A regional - spatial bias map. The grids genuinely differ: POWER solar
+  # arrives on CERES SYN1deg's native 1.0 deg, MERRA-2 SWGDN is 0.5 x 0.625.
+  # So bin both onto a common grid at the COARSER of the two - gridding to 0.5
+  # would upsample POWER and invent structure it does not have.
   # NOTE: unlike the point legs above, this one DOES aggregate - time_resolution
   # daily-averages both sides. That is deliberate for a bias map (a diurnal cycle
   # has no business in one), but it means the regional and point legs answer
@@ -197,7 +208,7 @@ pairs:
     y: {source: merra2_rad, variable: SWGDN}
     method: grid
     grid:
-      horizontal_res: 0.5
+      horizontal_res: 1.0        # POWER solar's native resolution, not 0.5
       time_resolution: 1D
       min_sample_count: 1
 
@@ -289,10 +300,14 @@ machine-specific `power-cam-<machine>.yaml`. Nothing in the reader build depends
 - **Campaign acceptance** (live data, run by hand — not CI, which must stay offline):
   - Leg C green end-to-end against the live API — the gate before anything else.
   - **Leg B is the reader's live correctness test**: POWER `T2M` vs MERRA-2 `T2M` is circular, so it must
-    agree to regridding error. Decide the pass threshold *before* looking at the numbers (proposed: MB
-    within a few tenths K, R > 0.99) and treat a miss as a reader bug — wrong grid, wrong time convention,
-    wrong unit offset — not as a finding. This is the highest-value check in the plan: it is the one place
-    where the right answer is known in advance.
+    agree. Decide the pass threshold *before* looking at the numbers and treat a miss as a reader bug —
+    wrong grid, wrong time convention, wrong unit offset — not as a finding. This is the highest-value
+    check in the plan: the one place where the right answer is known in advance.
+  - **Regional leg B should be near-exact, not merely close.** POWER met arrives on MERRA-2's *native*
+    0.5° × 0.625° grid, so there is no regridding error to hide behind: same grid, same parent, same
+    hour. Proposed thresholds — regional: |MB| < 0.05 K and R > 0.999; point: looser, pending the
+    open question below on how POWER samples a point (nearest cell vs interpolation). If regional leg B
+    shows a systematic offset, suspect the °C→K conversion or the time standard before anything else.
 - Present the test design (entry points + data flow) for approval before writing tests (repo rule).
 
 ## Error handling
@@ -353,6 +368,9 @@ These were open questions; they are now measured, not assumed. Encode them in go
 | NETCDF per endpoint | **Works for point *and* regional.** `format=NETCDF` → HTTP 200, `application/x-netcdf`. No JSON fallback needed. |
 | Monthly date format | **Year-only.** `start=2020&end=2021` → 200; `start=20200101` → **422** "Please provide a correct start date formatting." Data keys are `YYYYMM`. |
 | Regional param limit | **1, enforced.** 2 params → **422** "A maximum of 1 parameters are can c…". Planner must split. |
+| Regional **minimum** bbox | **≥ 2° on both axes.** 1.9° → 422 "Please provide at least a 2 degree range in latitude; otherwise use the point endpoint." Exactly 2.0° is accepted. The plan had assumed only a *maximum* limit; the binding one is a minimum. |
+| Regional grid | **Per-parameter native, not uniform 0.5°** — solar 1.0°, met 0.5° × 0.625°. See the grid table above. |
+| `T2M_MAX` / `T2M_MIN` hourly | **Do not exist.** "One of your parameters is incorrect: T2M_MAX." They are daily aggregates; the catalog is keyed by (parameter, temporal) partly for this. |
 | Hourly window limit | **≥ 2 years works** for hourly point (8760 pts/yr; a 2-yr request returned 200). No 1-year cap observed — year-chunking is optional, not required. |
 | Fill value | **−999.0**, declared in the JSON `header.fill_value`. |
 | Sources | Response `header.sources` self-declares e.g. `["SYN1DEG","MERRA2"]` — **per request, not per parameter**, so it cannot resolve attribution for a mixed request. Use the parameter dictionary. |
@@ -369,14 +387,21 @@ single most important correctness detail in the client.
 
 ### Units are per (parameter, temporal level) — the exact strings
 
-| Parameter | Level | **Native units string** | → canonical |
+All 11 v1 catalog parameters probed on hourly, daily and monthly (community RE):
+
+| Parameter(s) | hourly | daily / monthly | → canonical |
 |---|---|---|---|
-| `ALLSKY_SFC_SW_DWN` | daily | `kW-hr/m^2/day` | W m⁻² (× 41.667) |
-| `ALLSKY_SFC_SW_DWN` | **hourly** | **`Wh/m^2`** | W m⁻² (× 1.0 — Wh per 1 h *is* W) |
-| `T2M` | any | `C` | K (+ 273.15) |
+| `ALLSKY_SFC_SW_DWN`, `CLRSKY_SFC_SW_DWN`, `ALLSKY_SFC_LW_DWN` | **`Wh/m^2`** | `kW-hr/m^2/day` | W m⁻² (× 1.0 hourly; × 41.667 daily) |
+| `T2M` | `C` | `C` | K (+ 273.15) |
+| `T2M_MAX`, `T2M_MIN` | **unavailable (422)** | `C` | K (+ 273.15) |
+| `RH2M` | `%` | `%` | `%` (unchanged) |
+| `WS10M`, `WS50M` | `m/s` | `m/s` | m s⁻¹ (unchanged) |
+| `PS` | `kPa` | `kPa` | Pa (× 1000) |
+| `PRECTOTCORR` | `mm/day` | `mm/day` | mm day⁻¹ (unchanged — no v1 model comparison needs kg m⁻² s⁻¹) |
 
 The original design assumed hourly solar arrived as `W/m^2`. **It does not** — it is `Wh/m^2`. Since the
 reader asserts the units string against the catalog, that assumption would have failed every hourly read.
+`MJ/m^2/day` for community AG is still **unverified** — probe before relying on it.
 
 ### Response shape (NetCDF)
 
@@ -388,16 +413,21 @@ Variable attrs are rich and CF-ish: `units`, `valid_min`, `valid_max`, `long_nam
 ## Open questions (remaining)
 
 1. **Talk date** — still not recorded. It sets the cut line in the checklist above. Fill this in.
-2. **GRID↔GRID pairing** — the regional leg pairs POWER (0.5° × 0.5°) against MERRA-2 (0.5° × ⅝°), two
-   different grids. Confirm whether geometry precedence samples one onto the other sensibly, or whether
-   `method: grid` (intermediate gridding) is required. The config above assumes `method: grid`.
-3. **Regional bbox size limit** — not probed; tile if needed.
-4. **Community default `RE`** — any reason to prefer `AG`/`SB`? Normalization makes it mostly moot.
+2. **How does POWER *point* sample a grid cell** — nearest cell, or interpolated? This sets the point-mode
+   leg-B threshold: if nearest-cell, POWER `T2M` should equal MERRA-2's containing cell *exactly* and the
+   threshold can be as tight as the regional one. Probe by comparing a point response against the
+   containing cell of a regional response for the same parameter and hour.
+3. **Regional bbox *maximum*** — the binding constraint turned out to be a minimum (≥2°); a maximum was
+   not probed. Tile if one exists.
+4. **Community default `RE`** — any reason to prefer `AG`/`SB`? Normalization makes it mostly moot, though
+   `MJ/m^2/day` (the AG solar unit) is not yet verified.
 5. **MERRA-2 monthly collections absent** — `MERRA2_COLLECTIONS` has `tavgM` for aerosol only, not rad/slv.
    Not needed for v1 (leg C is POWER-only), but a monthly MERRA-2 cross-check would first need `M2TMNXRAD` /
    `M2TMNXSLV` added to the collection map.
 
-*Resolved by the probes above: monthly date format, NETCDF availability, hourly window, T2M in K.*
+*Resolved by the probes above: monthly date format, NETCDF availability, hourly window, T2M in K, and
+GRID↔GRID pairing (the solar grids genuinely differ — 1.0° vs 0.5°×0.625° — so `method: grid` is required
+for leg A regional; regional leg B needs no regridding at all, since both sides are MERRA-2's own grid).*
 
 ## Deferred ideas backlog (not in v1)
 
