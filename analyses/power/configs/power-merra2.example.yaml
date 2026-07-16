@@ -72,6 +72,32 @@ sources:
       ALLSKY_SFC_SW_DWN: {}   # CERES-derived -> INDEPENDENT of MERRA-2. Evaluation.
       T2M: {}                 # MERRA-2-derived -> CIRCULAR. Traceability only.
 
+  # Daily counterparts of the two sources above, at the SAME sites. These exist
+  # so the hourly-vs-daily correlation question is answered BY THE PIPELINE
+  # rather than by a side script: the hourly leg's R is inflated by the diurnal
+  # cycle (night hours agree trivially at 0), and the only honest way to show
+  # that is to compute both legs through the same path and compare.
+  merra2_rad_daily:
+    type: merra2
+    files: ${POWER_DATA}/MERRA2_tavg1/rad_Nx/*.nc4
+    radius_of_influence: 50000
+    resample: "1D"          # hourly tavg1 -> daily mean, to match POWER daily
+    variables:
+      SWGDN: {units: "W m-2"}
+
+  power_daily:
+    type: power
+    temporal: daily         # daily solar arrives as kW-hr/m^2/day -> W m-2
+    community: RE
+    cache_dir: ${POWER_CACHE}
+    sites:
+      - {name: boulder,     latitude: 40.02,  longitude: -105.27}
+      - {name: table_mtn,   latitude: 40.125, longitude: -105.24}
+      - {name: desert_rock, latitude: 36.626, longitude: -116.018}
+      - {name: bondville,   latitude: 40.052, longitude: -88.373}
+    variables:
+      ALLSKY_SFC_SW_DWN: {}
+
   power_grid:
     type: power
     # DAILY, not hourly: POWER has no hourly/regional endpoint (it 404s with an
@@ -89,6 +115,14 @@ pairs:
   merra2_vs_power_swdn:
     x: {source: power,      variable: ALLSKY_SFC_SW_DWN}
     y: {source: merra2_rad, variable: SWGDN}
+
+  # Leg A, DAILY — same sites, same quantity, same code path as the hourly leg
+  # above; only the averaging differs. Compare this R against the hourly leg's:
+  # the drop is the diurnal cycle leaving the correlation, not skill changing.
+  # Quote the daily R in the talk.
+  merra2_vs_power_swdn_daily:
+    x: {source: power_daily,      variable: ALLSKY_SFC_SW_DWN}
+    y: {source: merra2_rad_daily, variable: SWGDN}
 
   # Leg B — TRACEABILITY. Circular by construction; this is the reader's test.
   merra2_vs_power_t2m:
@@ -125,6 +159,12 @@ plots:
     type: timeseries
     pairs: [merra2_vs_power_swdn]
     title: "Surface Downwelling Shortwave"
+
+  swdn_scatter_daily:
+    type: scatter
+    pairs: [merra2_vs_power_swdn_daily]
+    title: "Surface Downwelling Shortwave, Daily Mean"
+    show_density: true
 
   swdn_spatial_bias:
     type: spatial_bias
