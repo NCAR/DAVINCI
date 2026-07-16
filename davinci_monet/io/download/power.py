@@ -18,9 +18,21 @@ on 2026-07-15; see POWER.md "API facts". The load-bearing ones:
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlencode
+
+from davinci_monet.core.exceptions import DataNotFoundError
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://power.larc.nasa.gov/api/temporal"
 
@@ -137,3 +149,267 @@ def build_power_url(
     ]
 
     return f"{BASE_URL}/{temporal}/{mode}?{urlencode(query)}"
+
+
+@dataclass(frozen=True)
+class PowerRequest:
+    """One API-legal POWER request, plus the identity needed to reassemble it.
+
+    ``site`` is None for regional requests. For point requests it carries the
+    configured site name, because the API response has no site dimension --
+    it returns ``(time, lat=1, lon=1)`` -- so the caller must label the
+    response itself before concatenating.
+    """
+
+    url: str
+    temporal: str
+    mode: str
+    params: tuple[str, ...]
+    community: str
+    start: str
+    end: str
+    site: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+def _chunk(items: Sequence[str], size: int) -> list[tuple[str, ...]]:
+    return [tuple(items[i : i + size]) for i in range(0, len(items), size)]
+
+
+def plan_requests(
+    temporal: str,
+    mode: str,
+    params: Sequence[str],
+    *,
+    start: str | date | datetime,
+    end: str | date | datetime,
+    sites: Sequence[Mapping[str, Any]] | None = None,
+    bbox: Mapping[str, float] | None = None,
+    community: str = "RE",
+    fmt: str = "NETCDF",
+    time_standard: str = "UTC",
+) -> list[PowerRequest]:
+    """Split an ask into API-legal requests.
+
+    Point requests fan out over sites (the API serves one coordinate each) and
+    chunk parameters at 20. Regional requests fan out over parameters, because
+    the API serves exactly one parameter per regional request.
+    """
+    start_str = format_power_date(start, temporal)
+    end_str = format_power_date(end, temporal)
+    common = dict(
+        temporal=temporal,
+        mode=mode,
+        community=community,
+        start=start_str,
+        end=end_str,
+    )
+
+    requests: list[PowerRequest] = []
+    if mode == "point":
+        if not sites:
+            raise ValueError("point mode requires at least one site.")
+        for site in sites:
+            for chunk in _chunk(list(params), POINT_MAX_PARAMS):
+                url = build_power_url(
+                    temporal,
+                    mode,
+                    chunk,
+                    start=start,
+                    end=end,
+                    latitude=site["latitude"],
+                    longitude=site["longitude"],
+                    community=community,
+                    fmt=fmt,
+                    time_standard=time_standard,
+                )
+                requests.append(
+                    PowerRequest(
+                        url=url,
+                        params=chunk,
+                        site=site.get("name"),
+                        latitude=site["latitude"],
+                        longitude=site["longitude"],
+                        **common,
+                    )
+                )
+    else:
+        if bbox is None:
+            raise ValueError("regional mode requires a bbox.")
+        for param in params:
+            url = build_power_url(
+                temporal,
+                mode,
+                [param],
+                start=start,
+                end=end,
+                bbox=bbox,
+                community=community,
+                fmt=fmt,
+                time_standard=time_standard,
+            )
+            requests.append(PowerRequest(url=url, params=(param,), **common))
+    return requests
+
+
+def _slug(text: str) -> str:
+    """Reduce text to a filesystem-safe token."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
+
+
+def cache_path(cache_dir: str | Path, request: PowerRequest) -> Path:
+    """Return the deterministic cache location for ``request``.
+
+    Layout is ``<cache_dir>/<temporal>/<community>/<mode>/<slug>-<hash>.nc``.
+    The slug keeps the directory browsable; the hash is taken over the full
+    URL, so any difference that changes the response -- parameters, window,
+    coordinates, format, time standard -- changes the path. Hashing the URL
+    rather than a hand-picked field list means a new query field can never
+    silently alias onto an existing cache entry.
+    """
+    digest = hashlib.sha256(request.url.encode()).hexdigest()[:12]
+    if request.site is not None:
+        label = _slug(request.site)
+    elif request.mode == "regional":
+        label = _slug("-".join(request.params))
+    else:
+        label = _slug(f"{request.latitude}-{request.longitude}")
+    name = f"{label}-{request.start}-{request.end}-{digest}.nc"
+    return Path(cache_dir) / request.temporal / request.community / request.mode / name
+
+
+class PowerHTTPError(RuntimeError):
+    """An error response from the POWER API, carrying the offending URL.
+
+    The URL is part of the message on purpose: a POWER 422 names the field it
+    rejected, and without the request beside it the message is unactionable.
+    """
+
+    def __init__(self, status: int, body: str, url: str) -> None:
+        self.status = status
+        self.body = body
+        self.url = url
+        super().__init__(f"POWER API returned HTTP {status} for {url}\n{body}")
+
+
+#: Statuses worth retrying: rate limiting and transient server faults. A 422
+#: is a validation failure -- the same request will fail identically forever,
+#: so retrying it only burns the rate limit.
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+DEFAULT_MAX_TRIES = 3
+DEFAULT_TIMEOUT = 60.0
+
+
+def _sleep(seconds: float) -> None:
+    """Sleep between retries (its own function so tests can stub it)."""
+    time.sleep(seconds)
+
+
+def _fetch(url: str, timeout: float = DEFAULT_TIMEOUT) -> bytes:
+    """Fetch ``url``, raising ``PowerHTTPError`` on an error status.
+
+    This is the module's only network call, kept in one small function so the
+    rest of the module -- and every test -- runs offline by stubbing it.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            data: bytes = response.read()
+            return data
+    except urllib.error.HTTPError as exc:  # noqa: PERF203 - translate, don't swallow
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:  # pragma: no cover - body is best-effort context
+            pass
+        raise PowerHTTPError(exc.code, body, url) from exc
+    except urllib.error.URLError as exc:
+        raise PowerHTTPError(0, f"Network error: {exc.reason}", url) from exc
+
+
+def fetch_to_cache(
+    request: PowerRequest,
+    cache_dir: str | Path,
+    *,
+    force: bool = False,
+    offline: bool = False,
+    max_tries: int = DEFAULT_MAX_TRIES,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> Path:
+    """Return the cached NetCDF for ``request``, fetching it if needed.
+
+    Parameters
+    ----------
+    force
+        Refetch even on a cache hit.
+    offline
+        Never fetch. A miss raises ``DataNotFoundError`` naming the command
+        that would populate the cache.
+    max_tries
+        Attempts for retryable statuses (429/5xx), with exponential backoff.
+    """
+    path = cache_path(cache_dir, request)
+    if path.exists() and not force:
+        logger.debug("POWER cache hit: %s", path)
+        return path
+
+    if offline:
+        raise DataNotFoundError(
+            f"POWER cache miss for {request.temporal}/{request.mode} "
+            f"[{request.start}..{request.end}] and offline=True.\n"
+            f"Populate it with:\n  {suggested_stage_command(request, cache_dir)}"
+        )
+
+    body = _fetch_with_retries(request.url, max_tries=max_tries, timeout=timeout)
+
+    # Write via a temp file in the same directory, then atomically replace, so
+    # an interrupted write can never leave a truncated file that a later run
+    # would mistake for a valid cache hit.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".partial")
+    tmp.write_bytes(body)
+    tmp.replace(path)
+    logger.debug("POWER cached %d bytes to %s", len(body), path)
+    return path
+
+
+def _fetch_with_retries(url: str, *, max_tries: int, timeout: float) -> bytes:
+    last: PowerHTTPError | None = None
+    for attempt in range(1, max_tries + 1):
+        try:
+            return _fetch(url, timeout=timeout)
+        except PowerHTTPError as exc:
+            if exc.status not in RETRY_STATUSES:
+                raise
+            last = exc
+            if attempt < max_tries:
+                backoff = 2.0 ** (attempt - 1)
+                logger.warning(
+                    "POWER HTTP %s (attempt %d/%d); retrying in %.0fs",
+                    exc.status,
+                    attempt,
+                    max_tries,
+                    backoff,
+                )
+                _sleep(backoff)
+    assert last is not None  # only reachable after a retryable failure
+    raise last
+
+
+def suggested_stage_command(request: PowerRequest, cache_dir: str | Path) -> str:
+    """Render the ``davinci-stage-power`` command that would cache ``request``."""
+    parts = [
+        "davinci-stage-power",
+        f"--temporal {request.temporal}",
+        f"--params {','.join(request.params)}",
+        f"--start {request.start}",
+        f"--end {request.end}",
+        f"--community {request.community}",
+        f"--cache-dir {cache_dir}",
+    ]
+    if request.mode == "point":
+        site = f"{request.latitude},{request.longitude}"
+        if request.site:
+            site += f",{request.site}"
+        parts.append(f"--site {site}")
+    return " ".join(parts)

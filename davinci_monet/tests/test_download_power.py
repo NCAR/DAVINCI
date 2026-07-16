@@ -7,8 +7,11 @@ module touches the network.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from davinci_monet.core.exceptions import DataNotFoundError
 from davinci_monet.io.download import power
 
 
@@ -105,3 +108,220 @@ def test_time_standard_defaults_to_utc_not_the_api_default_lst() -> None:
     )
     assert "time-standard=UTC" in url
     assert "LST" not in url
+
+
+SITES = [
+    {"name": "boulder", "latitude": 40.02, "longitude": -105.27},
+    {"name": "table_mtn", "latitude": 40.125, "longitude": -105.24},
+]
+BBOX = {"lat_min": 40, "lat_max": 42, "lon_min": -106, "lon_max": -104}
+
+
+def test_plan_point_emits_one_request_per_site() -> None:
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="point",
+        params=["T2M", "ALLSKY_SFC_SW_DWN"],
+        sites=SITES,
+        start="2024-02-01",
+        end="2024-02-03",
+    )
+    assert [r.site for r in reqs] == ["boulder", "table_mtn"]
+    assert all(r.params == ("T2M", "ALLSKY_SFC_SW_DWN") for r in reqs)
+    assert "latitude=40.02" in reqs[0].url
+
+
+def test_plan_point_chunks_params_over_the_twenty_cap() -> None:
+    """25 params must become 2 legal requests per site, not one 422."""
+    params = [f"P{i}" for i in range(25)]
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="point",
+        params=params,
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
+    )
+    assert len(reqs) == 2
+    assert len(reqs[0].params) == 20
+    assert len(reqs[1].params) == 5
+    # Every param survives the split exactly once.
+    assert [p for r in reqs for p in r.params] == params
+
+
+def test_plan_regional_emits_one_request_per_parameter() -> None:
+    """Regional caps at 1 param, so N params must fan out into N requests."""
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="regional",
+        params=["T2M", "ALLSKY_SFC_SW_DWN"],
+        bbox=BBOX,
+        start="2024-02-01",
+        end="2024-02-02",
+    )
+    assert len(reqs) == 2
+    assert [r.params for r in reqs] == [("T2M",), ("ALLSKY_SFC_SW_DWN",)]
+    assert all(r.site is None for r in reqs)
+
+
+def test_cache_path_is_deterministic_for_the_same_request() -> None:
+    kw = dict(
+        temporal="daily",
+        mode="point",
+        params=["T2M"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
+    )
+    first = power.plan_requests(**kw)[0]
+    second = power.plan_requests(**kw)[0]
+    assert power.cache_path("/tmp/cache", first) == power.cache_path("/tmp/cache", second)
+
+
+def test_cache_path_differs_when_the_request_differs() -> None:
+    base = power.plan_requests(
+        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
+        start="2024-02-01", end="2024-02-03",
+    )[0]
+    other_window = power.plan_requests(
+        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
+        start="2024-02-01", end="2024-02-04",
+    )[0]
+    other_param = power.plan_requests(
+        temporal="daily", mode="point", params=["PS"], sites=SITES[:1],
+        start="2024-02-01", end="2024-02-03",
+    )[0]
+    paths = {
+        power.cache_path("/tmp/cache", base),
+        power.cache_path("/tmp/cache", other_window),
+        power.cache_path("/tmp/cache", other_param),
+    }
+    assert len(paths) == 3
+
+
+def test_cache_path_layout_is_readable() -> None:
+    req = power.plan_requests(
+        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
+        start="2024-02-01", end="2024-02-03", community="AG",
+    )[0]
+    path = power.cache_path("/tmp/cache", req)
+    assert path.suffix == ".nc"
+    assert path.parent == Path("/tmp/cache/daily/AG/point")
+
+
+def _one_request() -> power.PowerRequest:
+    return power.plan_requests(
+        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
+        start="2024-02-01", end="2024-02-03",
+    )[0]
+
+
+def test_fetch_to_cache_writes_response_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NETCDF-BYTES")
+    req = _one_request()
+    path = power.fetch_to_cache(req, tmp_path)
+    assert path.read_bytes() == b"NETCDF-BYTES"
+    assert path == power.cache_path(tmp_path, req)
+
+
+def test_fetch_to_cache_hit_does_not_touch_the_network(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    req = _one_request()
+    cached = power.cache_path(tmp_path, req)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"CACHED")
+
+    def _boom(url: str, timeout: float = 60.0) -> bytes:
+        raise AssertionError("cache hit must not fetch")
+
+    monkeypatch.setattr(power, "_fetch", _boom)
+    assert power.fetch_to_cache(req, tmp_path).read_bytes() == b"CACHED"
+
+
+def test_fetch_to_cache_force_refetches_over_a_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    req = _one_request()
+    cached = power.cache_path(tmp_path, req)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"STALE")
+    monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"FRESH")
+    assert power.fetch_to_cache(req, tmp_path, force=True).read_bytes() == b"FRESH"
+
+
+def test_offline_cache_miss_names_the_command_that_would_fix_it(
+    tmp_path: Path,
+) -> None:
+    """An offline miss must be actionable, not just 'not found'."""
+    with pytest.raises(DataNotFoundError) as exc:
+        power.fetch_to_cache(_one_request(), tmp_path, offline=True)
+    assert "davinci-stage-power" in str(exc.value)
+
+
+def test_http_422_raises_immediately_with_the_offending_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """422 is a validation error -- retrying it just burns the rate limit."""
+    calls = {"n": 0}
+
+    def _fake(url: str, timeout: float = 60.0) -> bytes:
+        calls["n"] += 1
+        raise power.PowerHTTPError(422, "Please provide a correct start date formatting.", url)
+
+    monkeypatch.setattr(power, "_fetch", _fake)
+    with pytest.raises(power.PowerHTTPError) as exc:
+        power.fetch_to_cache(_one_request(), tmp_path)
+    assert calls["n"] == 1, "422 must not be retried"
+    assert "start date formatting" in str(exc.value)
+    assert "power.larc.nasa.gov" in str(exc.value)
+
+
+def test_http_429_is_retried_then_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = {"n": 0}
+
+    def _fake(url: str, timeout: float = 60.0) -> bytes:
+        calls["n"] += 1
+        raise power.PowerHTTPError(429, "rate limited", url)
+
+    monkeypatch.setattr(power, "_fetch", _fake)
+    monkeypatch.setattr(power, "_sleep", lambda seconds: None)
+    with pytest.raises(power.PowerHTTPError):
+        power.fetch_to_cache(_one_request(), tmp_path, max_tries=3)
+    assert calls["n"] == 3
+
+
+def test_http_429_that_recovers_returns_the_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = {"n": 0}
+
+    def _fake(url: str, timeout: float = 60.0) -> bytes:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise power.PowerHTTPError(503, "unavailable", url)
+        return b"OK"
+
+    monkeypatch.setattr(power, "_fetch", _fake)
+    monkeypatch.setattr(power, "_sleep", lambda seconds: None)
+    assert power.fetch_to_cache(_one_request(), tmp_path, max_tries=3).read_bytes() == b"OK"
+
+
+def test_partial_write_is_not_left_in_the_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed fetch must not leave a truncated file that later reads as a hit."""
+    req = _one_request()
+
+    def _fake(url: str, timeout: float = 60.0) -> bytes:
+        raise power.PowerHTTPError(500, "boom", url)
+
+    monkeypatch.setattr(power, "_fetch", _fake)
+    monkeypatch.setattr(power, "_sleep", lambda seconds: None)
+    with pytest.raises(power.PowerHTTPError):
+        power.fetch_to_cache(req, tmp_path, max_tries=1)
+    assert not power.cache_path(tmp_path, req).exists()
