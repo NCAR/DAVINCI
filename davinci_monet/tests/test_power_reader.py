@@ -300,6 +300,61 @@ def test_monthly_annual_mean_month_13_is_dropped(stub_fetch, tmp_path: Path) -> 
     assert max(months) == 12
 
 
+def _hourly_response(hours: int = 3) -> xr.Dataset:
+    """Hourly POWER response: times stamped on the hour (interval START)."""
+    time = np.array(
+        [np.datetime64("2024-02-01T00:00") + np.timedelta64(i, "h") for i in range(hours)]
+    )
+    return xr.Dataset(
+        {
+            "T2M": (
+                ("time", "lat", "lon"),
+                np.arange(hours, dtype="float32").reshape(hours, 1, 1),
+                {"units": "C"},
+            )
+        },
+        coords={"time": time, "lat": [40.02], "lon": [-105.27]},
+    )
+
+
+def test_hourly_time_is_shifted_to_the_interval_midpoint(stub_fetch, tmp_path: Path) -> None:
+    """POWER hourly labels the interval start; models label tavg1 at the midpoint.
+
+    Measured 2026-07-15: POWER hourly T2M at Boulder matches MERRA-2 tavg1
+    stamped :30 to RMSE 0.003 K, and the previous hour to 1.16 K. So POWER's
+    00:00 *is* the 00:00-01:00 mean, and labelling it 00:30 is the honest
+    label. Without the shift the two are 30 min apart in both directions and
+    nearest-neighbour pairing is an ambiguous tie.
+    """
+    stub_fetch({"boulder": _hourly_response()})
+    reader = power_reader.POWERReader()
+    ds = reader.open(
+        [],
+        variables=["T2M"],
+        temporal="hourly",
+        sites=[{"name": "boulder", "latitude": 40.02, "longitude": -105.27}],
+        cache_dir=tmp_path,
+        time_range=("2024-02-01", "2024-02-01"),
+    )
+    stamps = [str(t)[11:16] for t in ds["time"].values]
+    assert stamps == ["00:30", "01:30", "02:30"], stamps
+
+
+def test_daily_time_is_not_shifted(stub_fetch, tmp_path: Path) -> None:
+    """The midpoint shift is an hourly-only correction; daily keeps day-start."""
+    stub_fetch({"boulder": _power_response({"T2M": ([0.0, 1.0, 2.0], "C")})})
+    reader = power_reader.POWERReader()
+    ds = reader.open(
+        [],
+        variables=["T2M"],
+        temporal="daily",
+        sites=[{"name": "boulder", "latitude": 40.02, "longitude": -105.27}],
+        cache_dir=tmp_path,
+        time_range=("2024-02-01", "2024-02-03"),
+    )
+    assert [str(t)[11:16] for t in ds["time"].values] == ["00:00", "00:00", "00:00"]
+
+
 def test_registered_under_the_power_source_type() -> None:
     from davinci_monet.core.registry import source_registry
     from davinci_monet.io.source_registration import ensure_builtin_source_readers_registered
