@@ -413,3 +413,116 @@ def suggested_stage_command(request: PowerRequest, cache_dir: str | Path) -> str
             site += f",{request.site}"
         parts.append(f"--site {site}")
     return " ".join(parts)
+
+
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "davinci" / "power"
+
+
+def stage_power(
+    temporal: str,
+    params: Sequence[str],
+    *,
+    start: str | date | datetime,
+    end: str | date | datetime,
+    sites: Sequence[Mapping[str, Any]] | None = None,
+    bbox: Mapping[str, float] | None = None,
+    community: str = "RE",
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+    force: bool = False,
+    dry_run: bool = False,
+    time_standard: str = "UTC",
+) -> list[PowerRequest] | list[Path]:
+    """Stage POWER data into the cache.
+
+    Returns the planned requests when ``dry_run`` is set, otherwise the cached
+    file paths. This is the same fetch path the reader uses, so anything staged
+    here is a cache hit at pipeline runtime.
+    """
+    mode = "regional" if bbox is not None else "point"
+    requests = plan_requests(
+        temporal,
+        mode,
+        params,
+        start=start,
+        end=end,
+        sites=sites,
+        bbox=bbox,
+        community=community,
+        time_standard=time_standard,
+    )
+    if dry_run:
+        return requests
+    return [fetch_to_cache(req, cache_dir, force=force) for req in requests]
+
+
+def _parse_site(value: str) -> dict[str, Any]:
+    """Parse a ``LAT,LON[,NAME]`` CLI site argument."""
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) not in (2, 3):
+        raise ValueError(f"--site expects LAT,LON[,NAME]; got {value!r}")
+    site: dict[str, Any] = {"latitude": float(parts[0]), "longitude": float(parts[1])}
+    site["name"] = parts[2] if len(parts) == 3 else f"{parts[0]}_{parts[1]}"
+    return site
+
+
+def _parse_bbox(value: str) -> dict[str, float]:
+    """Parse a ``LATMIN,LATMAX,LONMIN,LONMAX`` CLI bbox argument."""
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 4:
+        raise ValueError(f"--bbox expects LATMIN,LATMAX,LONMIN,LONMAX; got {value!r}")
+    lat_min, lat_max, lon_min, lon_max = (float(p) for p in parts)
+    return {"lat_min": lat_min, "lat_max": lat_max, "lon_min": lon_min, "lon_max": lon_max}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI: stage POWER data to the local cache. Returns a process exit code."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="davinci-stage-power",
+        description="Stage NASA POWER data to a local cache via the POWER REST API.",
+    )
+    parser.add_argument("--temporal", required=True, choices=sorted(TEMPORAL_LEVELS))
+    parser.add_argument("--params", required=True, help="Comma-separated POWER parameter names")
+    parser.add_argument("--site", action="append", help="LAT,LON[,NAME]; repeatable")
+    parser.add_argument("--bbox", help="LATMIN,LATMAX,LONMIN,LONMAX (regional mode)")
+    parser.add_argument("--start", required=True, help="ISO start, e.g. 2024-02-01")
+    parser.add_argument("--end", required=True, help="ISO end, e.g. 2024-02-28")
+    parser.add_argument("--community", default="RE", help="POWER community (default: RE)")
+    parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
+    parser.add_argument("--force", action="store_true", help="Refetch over cache hits")
+    parser.add_argument("--dry-run", action="store_true", help="Plan only; do not fetch")
+    ns = parser.parse_args(argv)
+
+    if bool(ns.site) == bool(ns.bbox):
+        parser.error("Pass exactly one of --site (point) or --bbox (regional).")
+
+    params = [p.strip() for p in ns.params.split(",") if p.strip()]
+    sites = [_parse_site(s) for s in ns.site] if ns.site else None
+    bbox = _parse_bbox(ns.bbox) if ns.bbox else None
+
+    result = stage_power(
+        ns.temporal,
+        params,
+        start=ns.start,
+        end=ns.end,
+        sites=sites,
+        bbox=bbox,
+        community=ns.community,
+        cache_dir=ns.cache_dir,
+        force=ns.force,
+        dry_run=ns.dry_run,
+    )
+
+    if ns.dry_run:
+        requests = [r for r in result if isinstance(r, PowerRequest)]
+        print(f"{len(requests)} request(s) planned:")
+        for req in requests:
+            print(f"  {req.url}")
+    else:
+        print(f"Staged {len(result)} file(s) to {ns.cache_dir}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
