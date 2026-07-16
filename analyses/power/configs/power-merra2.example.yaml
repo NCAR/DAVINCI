@@ -30,6 +30,12 @@ analysis:
   end_time: "2024-02-29"
   output_dir: ${POWER_ANALYSIS}/output
   log_dir: ${POWER_ANALYSIS}/logs
+  # KNOWN LIMITATION: the spatial_bias map draws the whole globe for this
+  # CONUS-only data. Analysis-level `domain` and per-plot `domain_type` only
+  # set the extent for SINGLE-SOURCE spatial plots; on a PAIRED spatial_bias
+  # they filter the data (already regional here) but not the map extent. Fixing
+  # the paired-map extent needs a shared renderer change (not yet approved), so
+  # no domain key is set here -- it would imply a fix that does not apply.
   style:
     theme: ncar
     context: presentation
