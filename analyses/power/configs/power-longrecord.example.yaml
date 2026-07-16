@@ -37,16 +37,29 @@ sources:
       T2M: {}                 # MERRA-2-derived; -> K
 
 plots:
+  # show_individual_sites is REQUIRED here, not cosmetic. The default averages
+  # over the site dim, and the mean of Boulder, Mauna Loa and the South Pole is
+  # a physically meaningless number -- the South Pole alone has six months of
+  # darkness, so averaging it into a solar record smears the signal the plot
+  # exists to show. One line per site instead.
   swdn_record:
     type: timeseries
     source: power_monthly
     variable: ALLSKY_SFC_SW_DWN
+    show_individual_sites: true
+    # The renderer looks for `site_name` by default; the POWER reader names the
+    # coord `site`. Without this the legend reads "Site 0", "Site 1", ...
+    site_label_var: site
     title: "Surface Downwelling Shortwave"
 
   t2m_record:
     type: timeseries
     source: power_monthly
     variable: T2M
+    show_individual_sites: true
+    # The renderer looks for `site_name` by default; the POWER reader names the
+    # coord `site`. Without this the legend reads "Site 0", "Site 1", ...
+    site_label_var: site
     title: "2 m Temperature"
 
 summary:
