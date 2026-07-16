@@ -79,6 +79,52 @@ class TestTimeseriesRenderSingleSource:
         assert len(ax.collections) >= 1  # +/-1 sigma PolyCollection
         plt.close(fig)
 
+
+def _named_site_series(source_label: str = "power") -> PlotSeries:
+    """Single-source multi-site series whose site coord carries NAMES.
+
+    Mirrors what the POWER reader emits: a `site` dim whose coordinate values
+    are station names, not integers.
+    """
+    rng = np.random.default_rng(1)
+    times = np.datetime64("2024-02-01") + np.arange(12) * np.timedelta64(1, "h")
+    names = ["boulder", "mauna_loa", "south_pole"]
+    ds = xr.Dataset(
+        {"swdn": (("time", "site"), rng.uniform(50, 300, (12, len(names))), {"units": "W m-2"})},
+        coords={"time": times, "site": names},
+    )
+    ds["swdn"].attrs["source_label"] = source_label
+    return PlotSeries(ds, "swdn", "swdn", None, source_label, 0)
+
+
+class TestIndividualSitesLegend:
+    """Per-site timeseries must be readable: a legend naming each site.
+
+    Regression: the single-source per-site path drew unlabelled lines and no
+    legend, so a four-site record was four indistinguishable coloured lines.
+    """
+
+    def test_per_site_lines_carry_a_legend_with_site_names(self) -> None:
+        fig = TimeSeriesPlotter().render(
+            [_named_site_series()], show_individual_sites=True, site_label_var="site"
+        )
+        ax = fig.axes[0]
+        legend = ax.get_legend()
+        assert legend is not None, "per-site timeseries must draw a legend"
+        labels = {t.get_text() for t in legend.get_texts()}
+        assert {"boulder", "mauna_loa", "south_pole"} <= labels, labels
+        plt.close(fig)
+
+    def test_site_names_are_used_even_without_an_explicit_label_var(self) -> None:
+        """String coord values on the split dim are labels; never "Site 0"."""
+        fig = TimeSeriesPlotter().render([_named_site_series()], show_individual_sites=True)
+        ax = fig.axes[0]
+        legend = ax.get_legend()
+        assert legend is not None
+        labels = {t.get_text() for t in legend.get_texts()}
+        assert "boulder" in labels, labels
+        plt.close(fig)
+
     def test_single_source_uses_config_subtitle(self) -> None:
         plotter = TimeSeriesPlotter(
             PlotConfig(title="O3 Time Series", subtitle="2024-02-01 - 2024-02-02")
