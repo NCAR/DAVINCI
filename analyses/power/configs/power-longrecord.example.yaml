@@ -1,0 +1,54 @@
+# NASA POWER four-decade surface record — single-source, no staged data.
+#
+# This is the campaign's go/no-go gate: it needs no login, no granules and no
+# model output, so it runs anywhere with a network connection. Green here means
+# the client, cache, reader and pipeline wiring all work.
+#
+#   export POWER_ANALYSIS=$(pwd)
+#   export POWER_CACHE=${POWER_ANALYSIS}/cache
+#   davinci-monet run configs/power-longrecord.example.yaml
+#
+# POWER is not ground truth: its solar derives from CERES SYN1deg and its
+# meteorology *is* MERRA-2. This config only displays POWER's own record, so
+# that caveat does not bite here — but it does the moment you pair against it.
+
+analysis:
+  start_time: "1981-01-01"
+  end_time: "2024-12-31"
+  output_dir: ${POWER_ANALYSIS}/output
+  log_dir: ${POWER_ANALYSIS}/logs
+  style:
+    theme: ncar
+    context: presentation
+
+sources:
+  power_monthly:
+    type: power
+    temporal: monthly       # monthly sends year-only dates; the client handles that
+    community: RE
+    cache_dir: ${POWER_CACHE}
+    sites:
+      - {name: boulder,     latitude: 40.02,  longitude: -105.27}
+      - {name: table_mtn,   latitude: 40.125, longitude: -105.24}
+      - {name: mauna_loa,   latitude: 19.536, longitude: -155.576}
+      - {name: south_pole,  latitude: -89.997, longitude: -24.8}
+    variables:
+      ALLSKY_SFC_SW_DWN: {}   # CERES-derived; -> W m-2
+      T2M: {}                 # MERRA-2-derived; -> K
+
+plots:
+  swdn_record:
+    type: timeseries
+    source: power_monthly
+    variable: ALLSKY_SFC_SW_DWN
+    title: "Surface Downwelling Shortwave"
+
+  t2m_record:
+    type: timeseries
+    source: power_monthly
+    variable: T2M
+    title: "2 m Temperature"
+
+summary:
+  enabled: true
+  model: claude-haiku-4-5

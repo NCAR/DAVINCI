@@ -210,16 +210,28 @@ def test_cache_path_is_deterministic_for_the_same_request() -> None:
 
 def test_cache_path_differs_when_the_request_differs() -> None:
     base = power.plan_requests(
-        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
-        start="2024-02-01", end="2024-02-03",
+        temporal="daily",
+        mode="point",
+        params=["T2M"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
     )[0]
     other_window = power.plan_requests(
-        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
-        start="2024-02-01", end="2024-02-04",
+        temporal="daily",
+        mode="point",
+        params=["T2M"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-04",
     )[0]
     other_param = power.plan_requests(
-        temporal="daily", mode="point", params=["PS"], sites=SITES[:1],
-        start="2024-02-01", end="2024-02-03",
+        temporal="daily",
+        mode="point",
+        params=["PS"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
     )[0]
     paths = {
         power.cache_path("/tmp/cache", base),
@@ -231,8 +243,13 @@ def test_cache_path_differs_when_the_request_differs() -> None:
 
 def test_cache_path_layout_is_readable() -> None:
     req = power.plan_requests(
-        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
-        start="2024-02-01", end="2024-02-03", community="AG",
+        temporal="daily",
+        mode="point",
+        params=["T2M"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
+        community="AG",
     )[0]
     path = power.cache_path("/tmp/cache", req)
     assert path.suffix == ".nc"
@@ -241,8 +258,12 @@ def test_cache_path_layout_is_readable() -> None:
 
 def _one_request() -> power.PowerRequest:
     return power.plan_requests(
-        temporal="daily", mode="point", params=["T2M"], sites=SITES[:1],
-        start="2024-02-01", end="2024-02-03",
+        temporal="daily",
+        mode="point",
+        params=["T2M"],
+        sites=SITES[:1],
+        start="2024-02-01",
+        end="2024-02-03",
     )[0]
 
 
@@ -309,9 +330,7 @@ def test_http_422_raises_immediately_with_the_offending_url(
     assert "power.larc.nasa.gov" in str(exc.value)
 
 
-def test_http_429_is_retried_then_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_http_429_is_retried_then_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = {"n": 0}
 
     def _fake(url: str, timeout: float = 60.0) -> bytes:
@@ -399,12 +418,18 @@ def test_cli_site_argument_parses_lat_lon_name(
     monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NC")
     rc = power.main(
         [
-            "--temporal", "daily",
-            "--params", "T2M",
-            "--site", "40.02,-105.27,boulder",
-            "--start", "2024-02-01",
-            "--end", "2024-02-03",
-            "--cache-dir", str(tmp_path),
+            "--temporal",
+            "daily",
+            "--params",
+            "T2M",
+            "--site",
+            "40.02,-105.27,boulder",
+            "--start",
+            "2024-02-01",
+            "--end",
+            "2024-02-03",
+            "--cache-dir",
+            str(tmp_path),
         ]
     )
     assert rc == 0
@@ -422,12 +447,18 @@ def test_cli_dry_run_reports_plan_without_fetching(
     monkeypatch.setattr(power, "_fetch", _boom)
     rc = power.main(
         [
-            "--temporal", "monthly",
-            "--params", "T2M,ALLSKY_SFC_SW_DWN",
-            "--site", "40.02,-105.27,boulder",
-            "--start", "2020-01-01",
-            "--end", "2021-12-31",
-            "--cache-dir", str(tmp_path),
+            "--temporal",
+            "monthly",
+            "--params",
+            "T2M,ALLSKY_SFC_SW_DWN",
+            "--site",
+            "40.02,-105.27,boulder",
+            "--start",
+            "2020-01-01",
+            "--end",
+            "2021-12-31",
+            "--cache-dir",
+            str(tmp_path),
             "--dry-run",
         ]
     )
@@ -443,12 +474,18 @@ def test_cli_bbox_argument_plans_regional_requests(
     monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NC")
     rc = power.main(
         [
-            "--temporal", "daily",
-            "--params", "T2M,ALLSKY_SFC_SW_DWN",
-            "--bbox", "40,42,-106,-104",
-            "--start", "2024-02-01",
-            "--end", "2024-02-02",
-            "--cache-dir", str(tmp_path),
+            "--temporal",
+            "daily",
+            "--params",
+            "T2M,ALLSKY_SFC_SW_DWN",
+            "--bbox",
+            "40,42,-106,-104",
+            "--start",
+            "2024-02-01",
+            "--end",
+            "2024-02-02",
+            "--cache-dir",
+            str(tmp_path),
         ]
     )
     assert rc == 0
@@ -460,12 +497,19 @@ def test_cli_rejects_both_site_and_bbox(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         power.main(
             [
-                "--temporal", "daily",
-                "--params", "T2M",
-                "--site", "40.02,-105.27",
-                "--bbox", "40,42,-106,-104",
-                "--start", "2024-02-01",
-                "--end", "2024-02-02",
-                "--cache-dir", str(tmp_path),
+                "--temporal",
+                "daily",
+                "--params",
+                "T2M",
+                "--site",
+                "40.02,-105.27",
+                "--bbox",
+                "40,42,-106,-104",
+                "--start",
+                "2024-02-01",
+                "--end",
+                "2024-02-02",
+                "--cache-dir",
+                str(tmp_path),
             ]
         )

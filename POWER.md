@@ -403,6 +403,30 @@ The original design assumed hourly solar arrived as `W/m^2`. **It does not** —
 reader asserts the units string against the catalog, that assumption would have failed every hourly read.
 `MJ/m^2/day` for community AG is still **unverified** — probe before relying on it.
 
+### ⚠️ The monthly endpoint has a 13th month, and an integer time axis
+
+Two quirks that the pipeline **does not** fail on — it ran green and produced plots with both bugs live:
+
+- **`time` is int64 `YYYYMM`**, not datetime64. Every downstream time operation would silently act on the
+  integer `198101`.
+- **`YYYY13` is that year's annual mean**, not a month. A 1981–2024 request returns **572** steps
+  (44 × 13), not 528. Left in, it is a spurious point every 13th step contaminating any series or statistic.
+
+The reader decodes the integers and drops the annual means (`_decode_monthly_time`). Verified after the fix:
+528 steps, `datetime64[ns]`, max month 12.
+
+### Record start differs by parameter — "four decades" is not uniform
+
+At Boulder, monthly: **`T2M` starts 1981-01** (full record) but **`ALLSKY_SFC_SW_DWN` starts 1984-01** —
+1981–83 are all-NaN. Two consequences:
+
+- The talk's "four decades of radiation and meteorology" holds (1984 → present is four decades), but the
+  two records are **not coextensive**; do not imply solar goes back to 1981.
+- **Pre-2000 solar cannot be CERES SYN1deg** — SYN1deg starts in 2000, so POWER's historical solar comes
+  from a different parent (NASA/GEWEX SRB). **This bounds leg D**: the CERES cross-check is only meaningful
+  over the CERES era. Verify the historical solar parent before making any provenance claim about it, and
+  check `header.sources` on a pre-2000 request rather than assuming.
+
 ### Response shape (NetCDF)
 
 Both modes return **`(time, lat, lon)`** with `time`/`lat`/`lon` coords — point is simply `lat=1, lon=1`,
