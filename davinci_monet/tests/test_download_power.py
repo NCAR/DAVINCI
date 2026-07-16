@@ -325,3 +325,117 @@ def test_partial_write_is_not_left_in_the_cache(
     with pytest.raises(power.PowerHTTPError):
         power.fetch_to_cache(req, tmp_path, max_tries=1)
     assert not power.cache_path(tmp_path, req).exists()
+
+
+def test_stage_power_dry_run_plans_but_does_not_fetch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def _boom(url: str, timeout: float = 60.0) -> bytes:
+        raise AssertionError("dry run must not fetch")
+
+    monkeypatch.setattr(power, "_fetch", _boom)
+    planned = power.stage_power(
+        temporal="daily",
+        params=["T2M", "PS"],
+        sites=SITES,
+        start="2024-02-01",
+        end="2024-02-03",
+        cache_dir=tmp_path,
+        dry_run=True,
+    )
+    assert len(planned) == 2  # one request per site
+    assert list(tmp_path.rglob("*.nc")) == []
+
+
+def test_stage_power_fetches_every_planned_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NC")
+    paths = power.stage_power(
+        temporal="daily",
+        params=["T2M"],
+        sites=SITES,
+        start="2024-02-01",
+        end="2024-02-03",
+        cache_dir=tmp_path,
+    )
+    assert len(paths) == 2
+    assert all(Path(p).read_bytes() == b"NC" for p in paths)
+
+
+def test_cli_site_argument_parses_lat_lon_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NC")
+    rc = power.main(
+        [
+            "--temporal", "daily",
+            "--params", "T2M",
+            "--site", "40.02,-105.27,boulder",
+            "--start", "2024-02-01",
+            "--end", "2024-02-03",
+            "--cache-dir", str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    cached = list(tmp_path.rglob("*.nc"))
+    assert len(cached) == 1
+    assert "boulder" in cached[0].name
+
+
+def test_cli_dry_run_reports_plan_without_fetching(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def _boom(url: str, timeout: float = 60.0) -> bytes:
+        raise AssertionError("dry run must not fetch")
+
+    monkeypatch.setattr(power, "_fetch", _boom)
+    rc = power.main(
+        [
+            "--temporal", "monthly",
+            "--params", "T2M,ALLSKY_SFC_SW_DWN",
+            "--site", "40.02,-105.27,boulder",
+            "--start", "2020-01-01",
+            "--end", "2021-12-31",
+            "--cache-dir", str(tmp_path),
+            "--dry-run",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "1 request" in out
+    assert "start=2020" in out  # monthly year-only formatting is visible in the plan
+
+
+def test_cli_bbox_argument_plans_regional_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(power, "_fetch", lambda url, timeout=60.0: b"NC")
+    rc = power.main(
+        [
+            "--temporal", "daily",
+            "--params", "T2M,ALLSKY_SFC_SW_DWN",
+            "--bbox", "40,42,-106,-104",
+            "--start", "2024-02-01",
+            "--end", "2024-02-02",
+            "--cache-dir", str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    # Regional caps at 1 param, so 2 params must have become 2 cached files.
+    assert len(list(tmp_path.rglob("*.nc"))) == 2
+
+
+def test_cli_rejects_both_site_and_bbox(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        power.main(
+            [
+                "--temporal", "daily",
+                "--params", "T2M",
+                "--site", "40.02,-105.27",
+                "--bbox", "40,42,-106,-104",
+                "--start", "2024-02-01",
+                "--end", "2024-02-02",
+                "--cache-dir", str(tmp_path),
+            ]
+        )
