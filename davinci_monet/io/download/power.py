@@ -41,6 +41,11 @@ BASE_URL = "https://power.larc.nasa.gov/api/temporal"
 POINT_MAX_PARAMS = 20
 REGIONAL_MAX_PARAMS = 1
 
+#: The regional endpoint refuses a bbox narrower than this on either axis
+#: ("Please provide at least a 2 degree range in latitude; otherwise use the
+#: point endpoint."). Verified live: exactly 2.0 is accepted, 1.9 is a 422.
+REGIONAL_MIN_SPAN_DEGREES = 2.0
+
 TEMPORAL_LEVELS = ("hourly", "daily", "monthly")
 MODES = ("point", "regional")
 
@@ -134,6 +139,17 @@ def build_power_url(
         missing = {"lat_min", "lat_max", "lon_min", "lon_max"} - set(bbox)
         if missing:
             raise ValueError(f"bbox is missing {', '.join(sorted(missing))}.")
+        for axis, lo, hi in (
+            ("latitude", "lat_min", "lat_max"),
+            ("longitude", "lon_min", "lon_max"),
+        ):
+            span = bbox[hi] - bbox[lo]
+            if span < REGIONAL_MIN_SPAN_DEGREES:
+                raise ValueError(
+                    f"POWER regional requires at least a {REGIONAL_MIN_SPAN_DEGREES:g} degree "
+                    f"range in {axis}; got {span:g}. Use the point endpoint (sites:) for a "
+                    f"smaller area."
+                )
         query += [
             ("latitude-min", bbox["lat_min"]),
             ("latitude-max", bbox["lat_max"]),
