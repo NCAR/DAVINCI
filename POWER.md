@@ -415,6 +415,74 @@ Two quirks that the pipeline **does not** fail on — it ran green and produced 
 The reader decodes the integers and drops the annual means (`_decode_monthly_time`). Verified after the fix:
 528 steps, `datetime64[ns]`, max month 12.
 
+### ⚠️ There is no `hourly/regional` endpoint
+
+Full temporal × mode matrix, probed 2026-07-15 — **every combination returns 200 except one**:
+
+| | point | regional |
+|---|---|---|
+| hourly | 200 | **404** |
+| daily | 200 | 200 |
+| monthly | 200 | 200 |
+| climatology | 200 | 200 |
+
+`hourly/regional` returns a **404 HTML page**, not a JSON API error, so the failure surfaces as a wall of
+markup with no hint the combination is simply unsupported. The client now refuses it up front.
+
+**This bit the v1 campaign**: the demo config asked for an hourly POWER grid and the pipeline died at
+`load_sources`. The regional leg is therefore **daily** while the point legs are **hourly** — so the bias
+map and the scatter answer *different questions* (daily-mean vs hourly bias). A daily-mean bias hides
+compensating diurnal errors; say so if both appear in the talk.
+
+## RESULTS — v1 campaign run 2026-07-15 (Feb 2024, 4 CONUS sites + CONUS bbox)
+
+Both legs ran through `PipelineRunner.run_from_config()`. Leg B passed first, so leg A is interpretable.
+
+| Leg | N | MB | RMSE | R | IOA |
+|---|---|---|---|---|---|
+| **B — T2M traceability** (point, hourly) | 2688 | **0.0000 K** | **0.0030 K** | **1.0000** | 1.000 |
+| **A — SWdn evaluation** (point, hourly) | 2688 | **+9.12 W m⁻²** | 60.78 | 0.963 | 0.980 |
+| **A — SWdn evaluation** (regional, daily-mean) | 14500 | **+7.18 W m⁻²** | 61.80 | 0.558 | 0.725 |
+
+**Headline result**: MERRA-2's `SWGDN` is biased **high by ~7–9 W m⁻² (NMB +5.4 to +6.4%)** against
+CERES-derived POWER — consistent across the point and regional legs, which were computed independently.
+That is the expected direction for GEOS under-predicting cloud.
+
+### ⚠️ The hourly R = 0.963 is mostly the diurnal cycle — do not quote it as skill
+
+The point leg (hourly) reports R = 0.963 while the regional leg (daily-mean) reports R = 0.558. Daily means
+should correlate *better* than hourly, not worse, so this looked like a bug. It is not — verified with a
+single-cell control (POWER daily vs MERRA-2 daily-mean at 40.5 N, 105.5 W, 10 days): **R = 0.613**, matching
+the regional leg. The daily values show why:
+
+```
+POWER (CERES): 147.7  113.8  120.3  140.0  155.4
+MERRA-2 SWGDN: 148.8   80.0   52.5  156.0  162.9
+```
+
+MERRA-2 and CERES genuinely disagree day to day — day 3 has MERRA-2 heavily clouded (52.5) where CERES sees
+120.3. **Hourly correlation is inflated because the diurnal cycle dominates the variance**: the sun rises and
+sets in both datasets, and that shared signal swamps the cloud disagreement. Averaging to daily removes it
+and exposes the real, cloud-driven skill.
+
+**For the talk**: quote the *bias* from either leg (they agree), but quote **R from the daily leg**. Citing
+R = 0.963 would flatter MERRA-2 for a reason that has nothing to do with its radiation scheme.
+
+### ✅ Leg B PASSES — the reader is validated to 3 mK
+
+Measured 2026-07-15 at Boulder, 72 h, POWER `T2M` vs staged MERRA-2 `tavg1_2d_slv_Nx`:
+
+**MB = −0.00028 K, RMSE = 0.00299 K, R = 0.99999972** — against the pre-registered threshold
+(|MB| < 0.05 K, R > 0.999). The residual is float32 plus POWER's own 2-significant-digit rounding.
+
+Two open questions collapse out of that one number:
+
+- **POWER point returns the NEAREST cell, not an interpolation** — it reproduced MERRA-2's 40.0/−105.0
+  cell exactly. (Was open question #2.)
+- **POWER hourly *is* the `tavg1` hourly mean**, labelled at the interval start.
+
+Leg B passing is what makes leg A's radiation bias interpretable at all.
+
 ### ⚠️ MERRA-2 `tavg1` is stamped at :30; POWER hourly is stamped at :00
 
 Measured in a staged granule (`MERRA2_400.tavg1_2d_rad_Nx.20240206.nc4`): `time` runs **00:30 → 23:30**,
