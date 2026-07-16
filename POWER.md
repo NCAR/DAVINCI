@@ -415,6 +415,25 @@ Two quirks that the pipeline **does not** fail on — it ran green and produced 
 The reader decodes the integers and drops the annual means (`_decode_monthly_time`). Verified after the fix:
 528 steps, `datetime64[ns]`, max month 12.
 
+### ⚠️ MERRA-2 `tavg1` is stamped at :30; POWER hourly is stamped at :00
+
+Measured in a staged granule (`MERRA2_400.tavg1_2d_rad_Nx.20240206.nc4`): `time` runs **00:30 → 23:30**,
+because `tavg1` is a 1-hour *average* labelled at the interval midpoint. POWER hourly labels the same kind
+of hourly mean at the interval **start** (`2024020100`). The two describe the same hour under different
+labelling conventions, offset by 30 minutes.
+
+**Why this is dangerous for leg B specifically**: the pipeline pairs on nearest-neighbour time, so POWER's
+00:00 is *equidistant* (30 min) from MERRA-2's 23:30 and 00:30 — an ambiguous tie that can resolve to the
+wrong hour. In a circular comparison that must agree near-exactly, a half-hour misalignment shows up as a
+diurnal phase error and reads exactly like a reader bug. This is the third time-convention trap in POWER
+(after LST-vs-UTC and the YYYY13 month).
+
+**Resolve empirically before trusting any leg-A/B number**: compare POWER hourly `T2M` against MERRA-2
+`T2M` at the containing cell, with and without a 30-minute shift, and keep whichever alignment collapses
+the residual. Do not guess — this is cheap to measure and expensive to get wrong. Also confirm what POWER
+hourly actually represents (interval mean vs instantaneous); the daily response advertises
+`cell_methods: time: mean`, but the hourly one has not been checked.
+
 ### Record start differs by parameter — "four decades" is not uniform
 
 At Boulder, monthly: **`T2M` starts 1981-01** (full record) but **`ALLSKY_SFC_SW_DWN` starts 1984-01** —
