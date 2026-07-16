@@ -79,9 +79,12 @@ Mirrors `io/download/merra2.py` structure (module-level collection/catalog const
 hooks, `stage_*()` function, argparse `main()`, `console_scripts` entry `davinci-stage-power`).
 
 - **URL builder** (pure function, golden-tested):
-  `build_power_url(temporal, mode, params, *, lat/lon or bbox, start, end, community, fmt="NETCDF")`.
-  Example (from POWER docs):
-  `…/api/temporal/daily/point?parameters=T2M,PS,WS10M&community=AG&longitude=0&latitude=0&start=20170101&end=20170201&format=CSV`
+  `build_power_url(temporal, mode, params, *, lat/lon or bbox, start, end, community,
+  fmt="NETCDF", time_standard="UTC")`.
+  **`time_standard` defaults to UTC and is not optional** — the API defaults to LST, which silently
+  phase-shifts everything against a UTC model. See the time-standard warning above.
+  Date formatting is temporal-dependent: `YYYYMMDD` for hourly/daily, **`YYYY` for monthly** (a
+  `YYYYMMDD` monthly request is a 422).
 - **Fetcher**: stdlib `urllib` isolated in a lazy module-local function (the `earthaccess` lazy-import
   pattern) — zero new dependencies, monkeypatchable seam for tests. Bounded retries with backoff on
   HTTP 429/5xx; HTTP 422 (validation) raised immediately with the offending URL in the message.
@@ -95,14 +98,18 @@ hooks, `stage_*()` function, argparse `main()`, `console_scripts` entry `davinci
   (sorted params, rounded coords/bbox, start, end). Fetch checks cache first; `--force` refetches.
   Default `cache_dir`: `~/.cache/davinci/power`, overridable in config/CLI.
 - `stage_power(...)` + CLI with `--temporal --params --site LAT,LON[,NAME] / --bbox ... --start --end
-  --cache-dir --dry-run` (dry-run prints the planned request list, mirroring `DryRunReport`).
+  --cache-dir --dry-run`; dry-run prints the planned request list. Mirror `merra2.py:main()` — an
+  argparse `main(argv) -> int` returning an exit code, printing a count on dry-run. (There is **no**
+  `DryRunReport` class in `io/download/earthdata.py`; an earlier draft of this plan invented one.)
 
 ### 2. `davinci_monet/datasets/power.py` — `@source_registry.register("power")`
 
 - **Config modes** (exactly one of):
   - `sites:` list → live/cached fetch → **POINT** dataset `(time, site)` with `latitude(site)`,
     `longitude(site)`, site-name coord — same shape `pt_sfc`/AirNow produce; pairs with model grids via
-    the existing point strategy.
+    the existing point strategy. **The API does not return a `site` dim**: a point response is
+    `(time, lat=1, lon=1)`, same shape as regional. The reader fetches per site, squeezes the degenerate
+    lat/lon, and concats along a new `site` dim itself.
   - `bbox:` → live/cached fetch → **GRID** dataset `(time, lat, lon)` on POWER's 0.5° grid.
   - `files:` glob → pure file mode: open previously staged/cached POWER NetCDF, no network (offline
     reruns, CI).
@@ -148,6 +155,9 @@ sources:
     type: power
     temporal: hourly      # matches MERRA-2 tavg1 natively — no aggregation on either side
     community: RE         # affects native units; normalized away by the catalog
+    # NOTE: no time_standard knob. The reader always requests time-standard=UTC.
+    # POWER's own default is LST, which would phase-shift this against MERRA-2 by
+    # ~7h at Boulder. Exposing LST is a backlog item for solar-resource users only.
     cache_dir: ${POWER_CACHE}   # optional; default ~/.cache/davinci/power
     sites:                # POINT mode ("virtual stations")
       - {name: boulder,   latitude: 40.02,  longitude: -105.27}
@@ -226,11 +236,12 @@ Module-level `POWER_CATALOG` in `datasets/power.py` (pattern: `SSF_CATALOG` in `
 **POWER's official parameter names** (they are community-standard; the labeling system supplies display
 names). Each entry: expected native units per temporal level, normalization scale/offset, canonical units.
 
-- **Normalize to SI on read**: POWER's native units vary by community and temporal level (e.g. daily solar
-  arrives as kWh m⁻² day⁻¹ for RE, MJ m⁻² day⁻¹ for AG; hourly as W m⁻²). The catalog converts everything
-  to fixed canonical units: radiative fluxes → **W m⁻²** (kWh m⁻² day⁻¹ × 41.667; MJ m⁻² day⁻¹ × 11.574),
-  **T2M °C → K (+273.15)** to match model conventions (offset handled inside the reader — config
-  `unit_scale` has no offset support and shouldn't grow one for this).
+- **Normalize to SI on read.** POWER's native units vary by community *and* temporal level, so the catalog
+  is keyed by **(parameter, temporal)** — not parameter alone. Verified strings (2026-07-15):
+  `kW-hr/m^2/day` (daily solar, RE) × 41.667 → W m⁻²; **`Wh/m^2` (hourly solar) × 1.0 → W m⁻²** (a
+  watt-hour delivered over one hour *is* a watt); `C` → K (+273.15). Expect `MJ/m^2/day` × 11.574 for
+  community AG — not probed, verify before relying on it.
+  The T2M offset lives inside the reader: config `unit_scale` has no offset support and shouldn't grow one.
 - Reader asserts the response's `units` attr matches the catalog's expectation before scaling — a unit
   drift in the upstream API fails loudly instead of silently corrupting stats.
 - v1 catalog (demo needs + obvious neighbors): `ALLSKY_SFC_SW_DWN`, `CLRSKY_SFC_SW_DWN`,
@@ -298,10 +309,14 @@ machine-specific `power-cam-<machine>.yaml`. Nothing in the reader build depends
 
 **Start step 0 first — it runs unattended while the build proceeds.**
 
-0. **Kick off MERRA-2 staging** (long pole; needs Earthdata creds + network + disk):
-   `davinci-stage-merra2 tavg1_2d_rad_Nx --start 2026-05-01 --end 2026-05-31 --root ${POWER_DATA} --dry-run`
-   first to size it, then the real run; repeat for `tavg1_2d_slv_Nx`. Note `DEFAULT_ROOT` is `/Volumes/Io`,
-   which is **not mounted on the build machine** — pass `--root` explicitly to local disk.
+0. **Kick off MERRA-2 staging** (long pole; needs Earthdata creds + network + disk). Verified CLI shape —
+   `--collection` is a flag, not positional, and dates are `YYYY-MM`:
+   ```bash
+   davinci-stage-merra2 --collection tavg1_2d_rad_Nx --start 2026-05 --end 2026-05 \
+     --root ${POWER_DATA} --dry-run     # prints granule count; drop --dry-run to stage
+   davinci-stage-merra2 --collection tavg1_2d_slv_Nx --start 2026-05 --end 2026-05 --root ${POWER_DATA}
+   ```
+   `DEFAULT_ROOT` is `/Volumes/Io`, **not mounted on the build machine** — pass `--root` explicitly.
 1. Pre-implementation audit refresh (CLAUDE.md): re-read `io/download/merra2.py`, `datasets/surface/airnow.py`
    (dates mode), `datasets/satellite/ceres_ssf.py` (catalog pattern), `pt_sfc` standardization.
 2. Verify against live API (small manual probes, then encode in golden tests): NETCDF format availability
@@ -329,29 +344,60 @@ unvalidated reader turns every bias into "is this GEOS, or is this our bug?" **D
 talk unless leg B passed.** If B fails and there is no time to fix it, cut A too and give the POWER-only
 talk (leg C), which stands on its own.
 
-## Open questions (resolve at implementation; proposed defaults stated)
+## API facts — VERIFIED against the live API 2026-07-15 (API v2.9.4/v2.9.5)
 
-**Blocking** — the rescope made these load-bearing:
+These were open questions; they are now measured, not assumed. Encode them in golden tests.
 
-1. **Talk date** — not yet recorded. It sets the cut line in the checklist above. Fill this in.
-2. **Monthly endpoint date format** — likely year-only `start`/`end`; verify and encode in URL builder
-   tests. **Leg C, the go/no-go gate, is monthly** — this must work.
-3. **Hourly request window limit** — legs A and B are hourly across a month at several sites, so the
-   planner's chunking is exercised on day one, not deferred. Verify the exact limit; chunk, don't cap.
-4. **GRID↔GRID pairing** — the regional leg pairs POWER (0.5° × 0.5°) against MERRA-2 (0.5° × ⅝°), two
-   different grids. Confirm whether the geometry precedence rules sample one onto the other sensibly, or
-   whether `method: grid` (intermediate gridding) is required. The config above assumes `method: grid`.
+| Question | **Verified answer** |
+|---|---|
+| NETCDF per endpoint | **Works for point *and* regional.** `format=NETCDF` → HTTP 200, `application/x-netcdf`. No JSON fallback needed. |
+| Monthly date format | **Year-only.** `start=2020&end=2021` → 200; `start=20200101` → **422** "Please provide a correct start date formatting." Data keys are `YYYYMM`. |
+| Regional param limit | **1, enforced.** 2 params → **422** "A maximum of 1 parameters are can c…". Planner must split. |
+| Hourly window limit | **≥ 2 years works** for hourly point (8760 pts/yr; a 2-yr request returned 200). No 1-year cap observed — year-chunking is optional, not required. |
+| Fill value | **−999.0**, declared in the JSON `header.fill_value`. |
+| Sources | Response `header.sources` self-declares e.g. `["SYN1DEG","MERRA2"]` — **per request, not per parameter**, so it cannot resolve attribution for a mixed request. Use the parameter dictionary. |
 
-**Non-blocking**:
+### ⚠️ Time standard: POWER defaults to **LST**, not UTC
 
-5. **Regional bbox size limit** — verify; tile if needed.
-6. **NETCDF for every endpoint** — if an endpoint lacks NETCDF, fall back to JSON → xarray construction in
-   the client (response schema is stable).
-7. **T2M in K** — the rescope settles this: leg B compares against MERRA-2 `T2M`, which is in K, so K it is.
-8. **Community default `RE`** — any reason to prefer `AG`/`SB`? Normalization makes it mostly moot.
-9. **MERRA-2 monthly collections absent** — `MERRA2_COLLECTIONS` has `tavgM` for aerosol only, not rad/slv.
+`header.time_standard` is **`LST`** (Local Solar Time) by default on hourly *and* daily. MERRA-2 is UTC.
+Measured at Boulder for 2024-02-01T00: **LST `T2M` = 3.52 °C vs UTC `T2M` = 8.27 °C** — a ~7 h phase shift.
+
+**Both hourly and daily accept `time-standard=UTC`** (verified: header echoes `UTC`, no warning messages).
+**The reader must request UTC** — pairing LST POWER against UTC MERRA-2 would shift the diurnal cycle and
+blow up leg B, which we would then misread as a reader bug. Not in the original design; it is now the
+single most important correctness detail in the client.
+
+### Units are per (parameter, temporal level) — the exact strings
+
+| Parameter | Level | **Native units string** | → canonical |
+|---|---|---|---|
+| `ALLSKY_SFC_SW_DWN` | daily | `kW-hr/m^2/day` | W m⁻² (× 41.667) |
+| `ALLSKY_SFC_SW_DWN` | **hourly** | **`Wh/m^2`** | W m⁻² (× 1.0 — Wh per 1 h *is* W) |
+| `T2M` | any | `C` | K (+ 273.15) |
+
+The original design assumed hourly solar arrived as `W/m^2`. **It does not** — it is `Wh/m^2`. Since the
+reader asserts the units string against the catalog, that assumption would have failed every hourly read.
+
+### Response shape (NetCDF)
+
+Both modes return **`(time, lat, lon)`** with `time`/`lat`/`lon` coords — point is simply `lat=1, lon=1`,
+**not** a `site` dim. So POINT mode must fetch per site, squeeze, and concat along a new `site` dim itself.
+Variable attrs are rich and CF-ish: `units`, `valid_min`, `valid_max`, `long_name`, `standard_name`,
+`cell_methods`, `definition` — the catalog can lean on `units`, and `valid_min`/`valid_max` come free.
+
+## Open questions (remaining)
+
+1. **Talk date** — still not recorded. It sets the cut line in the checklist above. Fill this in.
+2. **GRID↔GRID pairing** — the regional leg pairs POWER (0.5° × 0.5°) against MERRA-2 (0.5° × ⅝°), two
+   different grids. Confirm whether geometry precedence samples one onto the other sensibly, or whether
+   `method: grid` (intermediate gridding) is required. The config above assumes `method: grid`.
+3. **Regional bbox size limit** — not probed; tile if needed.
+4. **Community default `RE`** — any reason to prefer `AG`/`SB`? Normalization makes it mostly moot.
+5. **MERRA-2 monthly collections absent** — `MERRA2_COLLECTIONS` has `tavgM` for aerosol only, not rad/slv.
    Not needed for v1 (leg C is POWER-only), but a monthly MERRA-2 cross-check would first need `M2TMNXRAD` /
    `M2TMNXSLV` added to the collection map.
+
+*Resolved by the probes above: monthly date format, NETCDF availability, hourly window, T2M in K.*
 
 ## Deferred ideas backlog (not in v1)
 
@@ -366,6 +412,8 @@ talk (leg C), which stands on its own.
   span concretely rather than claiming it. Cheap once suitable output is staged; MPAS is the preferred
   exemplar when its reader exists.
 - **Climatology level** (`temporal: climatology`) — needs time-axis-less pairing semantics.
+- **Expose `time-standard: LST`** — v1 hard-codes UTC, which is right for model evaluation and wrong for
+  solar-resource work (where local solar noon is the point). Pairs with the applications angle below.
 - **Applications angle (JOSS impact)**: renewable-energy / agroclimatology derived analyses in the
   `analyses:` block (capacity-factor-style solar resource, degree-days) benchmarked against POWER.
 - **Virtual-station generator**: auto-derive `sites:` from another source's coordinates (e.g. put POWER
