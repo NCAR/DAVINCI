@@ -58,6 +58,77 @@ class SpatialBiasPlotter(BaseSpatialPlotter):
     name: str = "spatial_bias"
     default_figsize: tuple[float, float] = (8, 5)  # Wide for geographic extent
 
+    @staticmethod
+    def _fit_extent_to_finite(
+        ax: matplotlib.axes.Axes,
+        bias: Any,
+        lat_name: str,
+        lon_name: str,
+    ) -> None:
+        """Set the map extent to the bounding box of finite ``bias`` data.
+
+        Intermediate gridding always builds a GLOBAL grid, so a regional pair
+        arrives as a mostly-NaN global field; without this the map is ~95% empty
+        ocean. When ``lat_name``/``lon_name`` are separate dims (grid), bounds
+        come from reducing the finite mask along each named dim -- robust to
+        axis order (the gridded pair is lon-major). Otherwise (point/curvilinear,
+        lat/lon share dims) the coords are broadcast to the field and masked.
+        No-op when nothing is finite. A small margin is added, then the box is
+        clamped to valid lon/lat.
+        """
+        import cartopy.crs as ccrs
+
+        values = np.asarray(bias.values)
+        if not np.isfinite(values).any():
+            return
+
+        bounds: tuple[float, float, float, float] | None = None
+        dims = tuple(getattr(bias, "dims", ()))
+        if lat_name in dims and lon_name in dims and lat_name != lon_name:
+            finite = np.isfinite(bias)
+            lat_has = finite.any(dim=[d for d in finite.dims if d != lat_name]).values
+            lon_has = finite.any(dim=[d for d in finite.dims if d != lon_name]).values
+            lat_c = np.asarray(bias[lat_name].values, dtype=float)
+            lon_c = np.asarray(bias[lon_name].values, dtype=float)
+            if lat_has.any() and lon_has.any():
+                bounds = (
+                    float(lat_c[lat_has].min()),
+                    float(lat_c[lat_has].max()),
+                    float(lon_c[lon_has].min()),
+                    float(lon_c[lon_has].max()),
+                )
+        if bounds is None:
+            try:
+                lat_g = np.broadcast_to(
+                    np.asarray(bias[lat_name].values, dtype=float), values.shape
+                )
+                lon_g = np.broadcast_to(
+                    np.asarray(bias[lon_name].values, dtype=float), values.shape
+                )
+            except (ValueError, KeyError):
+                return
+            mask = np.isfinite(values)
+            bounds = (
+                float(lat_g[mask].min()),
+                float(lat_g[mask].max()),
+                float(lon_g[mask].min()),
+                float(lon_g[mask].max()),
+            )
+
+        lat_min, lat_max, lon_min, lon_max = bounds
+        lat_pad = max((lat_max - lat_min) * 0.05, 0.5)
+        lon_pad = max((lon_max - lon_min) * 0.05, 0.5)
+        lon_min, lon_max = max(-180.0, lon_min - lon_pad), min(180.0, lon_max + lon_pad)
+        lat_min, lat_max = max(-90.0, lat_min - lat_pad), min(90.0, lat_max + lat_pad)
+        if lon_max <= lon_min or lat_max <= lat_min:
+            return
+        try:
+            getattr(ax, "set_extent")([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+        except Exception:
+            # A degenerate or near-global extent can raise inside cartopy;
+            # leaving the default view is preferable to failing the plot.
+            pass
+
     def render(
         self,
         series: list[PlotSeries],
@@ -222,6 +293,15 @@ class SpatialBiasPlotter(BaseSpatialPlotter):
         )
         if norm is not None:
             scatter.set_norm(norm)
+
+        # Fit the map to where the data actually is. Intermediate gridding
+        # (method: grid) always builds a GLOBAL grid, so a regional pair lands
+        # as a mostly-NaN global field and the map is otherwise ~95% empty
+        # ocean. A globally finite field fits to the globe, so global-coverage
+        # maps are unchanged; only regional-on-global-grid maps change. An
+        # explicitly configured extent always wins.
+        if self.map_config.extent is None:
+            self._fit_extent_to_finite(ax, bias, resolved_lat, resolved_lon)
 
         # Add colorbar
         units = get_variable_units(paired_data, x_var)
