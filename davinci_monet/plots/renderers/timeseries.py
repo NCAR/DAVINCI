@@ -364,7 +364,7 @@ class TimeSeriesPlotter(BasePlotter):
 
             sdim = aggregate_dim if (aggregate_dim in non_time_dims) else non_time_dims[0]
             n = ds.sizes[sdim]
-            site_labels = self._site_line_labels(ds, sdim, site_label_var, n)
+            site_labels = self._site_line_labels(ds, str(sdim), site_label_var, n)
             palette = cm.tab20(np.linspace(0, 1, min(n, 20)))
             for i in range(n):
                 ax.plot(
