@@ -218,7 +218,7 @@ class POWERReader:
                 ds = self._assemble_points(requests, paths)
                 self._geometry = DataGeometry.POINT
             else:
-                ds = xr.merge([xr.open_dataset(p) for p in paths])
+                ds = self._assemble_grid(paths)
                 self._geometry = DataGeometry.GRID
 
         ds = self._decode_monthly_time(ds)
@@ -322,6 +322,34 @@ class POWERReader:
             }
         )
         return shifted
+
+    def _assemble_grid(self, paths: Sequence[Path]) -> xr.Dataset:
+        """Merge regional responses, stitching bbox tiles back into one field.
+
+        A domain wider than 10 deg on either axis has to be requested as tiles
+        (the API rejects anything larger), so the pieces must be reassembled
+        here. Adjacent tiles can return a shared edge row -- the met grid
+        includes its bbox boundary while the solar grid does not -- so
+        duplicate coordinates are dropped rather than left to become a
+        double-counted row in a bias map.
+        """
+        datasets = [xr.open_dataset(p) for p in paths]
+        if len(datasets) == 1:
+            return datasets[0]
+        merged = xr.combine_by_coords(datasets, combine_attrs="override")
+        if not isinstance(merged, xr.Dataset):  # pragma: no cover - defensive
+            merged = merged.to_dataset()
+        for dim in ("lat", "lon"):
+            if dim in merged.dims:
+                _, keep = np.unique(merged[dim].values, return_index=True)
+                if len(keep) != merged.sizes[dim]:
+                    logger.debug(
+                        "Dropping %d duplicate %s values from tiled POWER grid",
+                        merged.sizes[dim] - len(keep),
+                        dim,
+                    )
+                    merged = merged.isel({dim: np.sort(keep)})
+        return merged
 
     def _normalize(self, ds: xr.Dataset, temporal: str) -> xr.Dataset:
         """Mask fill values, then convert each variable to canonical SI units.

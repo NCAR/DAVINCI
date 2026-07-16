@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
 import time
 import urllib.error
@@ -46,8 +47,19 @@ REGIONAL_MAX_PARAMS = 1
 #: point endpoint."). Verified live: exactly 2.0 is accepted, 1.9 is a 422.
 REGIONAL_MIN_SPAN_DEGREES = 2.0
 
+#: ...and refuses one wider than this ("Please provide a maximum of 10 degree
+#: range in latitude."). Verified live. A CONUS-sized domain therefore has to
+#: be tiled; see :func:`tile_bbox`.
+REGIONAL_MAX_SPAN_DEGREES = 10.0
+
 TEMPORAL_LEVELS = ("hourly", "daily", "monthly")
 MODES = ("point", "regional")
+
+#: (temporal, mode) pairs the API does not serve. Probed 2026-07-15: every
+#: combination returns 200 except hourly/regional, which 404s with an HTML
+#: page rather than a JSON API error -- so it must be caught locally or the
+#: user sees a wall of markup with no clue the combination is unsupported.
+UNSUPPORTED_ENDPOINTS = frozenset({("hourly", "regional")})
 
 
 def _coerce_date(value: str | date | datetime) -> date:
@@ -115,6 +127,12 @@ def build_power_url(
         raise ValueError(f"Unknown mode {mode!r}. Known: {', '.join(MODES)}")
     if not params:
         raise ValueError("At least one parameter is required.")
+    if (temporal, mode) in UNSUPPORTED_ENDPOINTS:
+        raise ValueError(
+            f"POWER has no {temporal}/{mode} endpoint (it returns a 404 HTML page, not an "
+            f"API error). Every other temporal x mode combination exists. Use daily/{mode} "
+            f"for an area, or {temporal}/point for specific sites."
+        )
 
     query: list[tuple[str, Any]] = [
         ("parameters", ",".join(params)),
@@ -189,10 +207,51 @@ class PowerRequest:
     site: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    #: The tile this request covers (regional only). Present so the caller can
+    #: see the tiling the planner chose without re-parsing the URL.
+    bbox: Mapping[str, float] | None = None
 
 
 def _chunk(items: Sequence[str], size: int) -> list[tuple[str, ...]]:
     return [tuple(items[i : i + size]) for i in range(0, len(items), size)]
+
+
+def _split_span(lo: float, hi: float) -> list[tuple[float, float]]:
+    """Split ``[lo, hi]`` into contiguous pieces the regional endpoint accepts.
+
+    Every piece is <= 10 deg (the API maximum) and >= 2 deg (the API minimum).
+    The minimum is the subtle half: naively chunking a 21 deg span into 10 + 10
+    + 1 produces a 1 deg sliver that is itself a 422. When the remainder would
+    be too small, the last two tiles are rebalanced to share the tail evenly.
+    """
+    span = hi - lo
+    if span <= REGIONAL_MAX_SPAN_DEGREES:
+        return [(lo, hi)]
+
+    n = math.ceil(span / REGIONAL_MAX_SPAN_DEGREES)
+    # An even split is <= the max by construction; it can only fall under the
+    # minimum for spans under 2 deg, which the caller has already rejected.
+    step = span / n
+    edges = [lo + i * step for i in range(n)] + [hi]
+    return [(edges[i], edges[i + 1]) for i in range(n)]
+
+
+def tile_bbox(bbox: Mapping[str, float]) -> list[dict[str, float]]:
+    """Split ``bbox`` into API-legal tiles (each 2-10 deg on both axes).
+
+    Tiles are contiguous and non-overlapping in *request* space. Note the two
+    parents grid their edges differently -- solar (1 deg) returns cell centres
+    strictly inside the box, while met (0.5 x 0.625) includes the boundary --
+    so adjacent tiles can return a shared edge row for met. The reader
+    de-duplicates coordinates when merging.
+    """
+    lat_tiles = _split_span(bbox["lat_min"], bbox["lat_max"])
+    lon_tiles = _split_span(bbox["lon_min"], bbox["lon_max"])
+    return [
+        {"lat_min": a, "lat_max": b, "lon_min": c, "lon_max": d}
+        for a, b in lat_tiles
+        for c, d in lon_tiles
+    ]
 
 
 def plan_requests(
@@ -255,19 +314,27 @@ def plan_requests(
     else:
         if bbox is None:
             raise ValueError("regional mode requires a bbox.")
-        for param in params:
-            url = build_power_url(
-                temporal,
-                mode,
-                [param],
-                start=start,
-                end=end,
-                bbox=bbox,
-                community=community,
-                fmt=fmt,
-                time_standard=time_standard,
+        tiles = tile_bbox(bbox)
+        if len(tiles) > 1:
+            logger.info(
+                "POWER regional bbox spans more than %g deg; tiling into %d requests.",
+                REGIONAL_MAX_SPAN_DEGREES,
+                len(tiles) * len(params),
             )
-            requests.append(PowerRequest(url=url, params=(param,), **common))
+        for param in params:
+            for tile in tiles:
+                url = build_power_url(
+                    temporal,
+                    mode,
+                    [param],
+                    start=start,
+                    end=end,
+                    bbox=tile,
+                    community=community,
+                    fmt=fmt,
+                    time_standard=time_standard,
+                )
+                requests.append(PowerRequest(url=url, params=(param,), bbox=tile, **common))
     return requests
 
 

@@ -67,6 +67,48 @@ def test_regional_url_uses_bbox_bounds() -> None:
     assert "longitude-min=-106&longitude-max=-104" in url
 
 
+def test_hourly_regional_is_rejected_because_the_endpoint_does_not_exist() -> None:
+    """Verified live: hourly/regional 404s (an HTML page, not an API error).
+
+    Every other temporal x mode combination returns 200, so this one cell of
+    the matrix has to be refused locally -- otherwise the user gets a wall of
+    404 HTML with no hint that the combination is simply unsupported.
+    """
+    with pytest.raises(ValueError) as exc:
+        power.build_power_url(
+            temporal="hourly",
+            mode="regional",
+            params=["T2M"],
+            start="2024-02-01",
+            end="2024-02-02",
+            bbox={"lat_min": 40, "lat_max": 42, "lon_min": -106, "lon_max": -104},
+        )
+    message = str(exc.value)
+    assert "hourly" in message and "regional" in message
+    assert "daily" in message  # point the user at the combination that works
+
+
+def test_hourly_point_and_daily_regional_are_both_allowed() -> None:
+    """Guard the fix against over-reach: only hourly+regional is unsupported."""
+    assert power.build_power_url(
+        temporal="hourly",
+        mode="point",
+        params=["T2M"],
+        start="2024-02-01",
+        end="2024-02-02",
+        latitude=40.02,
+        longitude=-105.27,
+    )
+    assert power.build_power_url(
+        temporal="daily",
+        mode="regional",
+        params=["T2M"],
+        start="2024-02-01",
+        end="2024-02-02",
+        bbox={"lat_min": 40, "lat_max": 42, "lon_min": -106, "lon_max": -104},
+    )
+
+
 def test_regional_rejects_a_bbox_narrower_than_two_degrees() -> None:
     """Verified live: <2 deg in either axis is a 422 telling you to use point."""
     with pytest.raises(ValueError) as exc:
@@ -192,6 +234,74 @@ def test_plan_regional_emits_one_request_per_parameter() -> None:
     assert len(reqs) == 2
     assert [r.params for r in reqs] == [("T2M",), ("ALLSKY_SFC_SW_DWN",)]
     assert all(r.site is None for r in reqs)
+
+
+def test_regional_bbox_larger_than_ten_degrees_is_tiled() -> None:
+    """Verified live: >10 deg on an axis is a 422. CONUS needs tiling."""
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="regional",
+        params=["ALLSKY_SFC_SW_DWN"],
+        bbox={"lat_min": 30, "lat_max": 50, "lon_min": -125, "lon_max": -100},
+        start="2024-02-01",
+        end="2024-02-02",
+    )
+    # 20 deg lat -> 2 tiles; 25 deg lon -> 3 tiles.
+    assert len(reqs) == 6, [r.bbox for r in reqs]
+    for r in reqs:
+        assert r.bbox is not None
+        assert r.bbox["lat_max"] - r.bbox["lat_min"] <= 10.0
+        assert r.bbox["lon_max"] - r.bbox["lon_min"] <= 10.0
+
+
+def test_tiles_cover_the_whole_domain_without_gaps() -> None:
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="regional",
+        params=["T2M"],
+        bbox={"lat_min": 30, "lat_max": 50, "lon_min": -125, "lon_max": -100},
+        start="2024-02-01",
+        end="2024-02-02",
+    )
+    lat_lo = min(r.bbox["lat_min"] for r in reqs)
+    lat_hi = max(r.bbox["lat_max"] for r in reqs)
+    lon_lo = min(r.bbox["lon_min"] for r in reqs)
+    lon_hi = max(r.bbox["lon_max"] for r in reqs)
+    assert (lat_lo, lat_hi) == (30, 50)
+    assert (lon_lo, lon_hi) == (-125, -100)
+
+    # Tile edges must be contiguous along each axis -- no gap between tiles.
+    lat_edges = sorted({(r.bbox["lat_min"], r.bbox["lat_max"]) for r in reqs})
+    for (_, prev_hi), (next_lo, _) in zip(lat_edges, lat_edges[1:]):
+        assert next_lo == prev_hi, f"gap or overlap between lat tiles: {lat_edges}"
+
+
+def test_tiling_never_emits_a_sliver_below_the_two_degree_minimum() -> None:
+    """A 21-deg span must not tile into 10 + 10 + 1 -- that last tile is a 422."""
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="regional",
+        params=["T2M"],
+        bbox={"lat_min": 30, "lat_max": 51, "lon_min": -110, "lon_max": -105},
+        start="2024-02-01",
+        end="2024-02-02",
+    )
+    for r in reqs:
+        span = r.bbox["lat_max"] - r.bbox["lat_min"]
+        assert span >= 2.0, f"tile {r.bbox} is below the API's 2 deg minimum"
+        assert span <= 10.0
+
+
+def test_a_bbox_within_limits_is_not_tiled() -> None:
+    reqs = power.plan_requests(
+        temporal="daily",
+        mode="regional",
+        params=["T2M"],
+        bbox={"lat_min": 40, "lat_max": 45, "lon_min": -110, "lon_max": -105},
+        start="2024-02-01",
+        end="2024-02-02",
+    )
+    assert len(reqs) == 1
 
 
 def test_cache_path_is_deterministic_for_the_same_request() -> None:
