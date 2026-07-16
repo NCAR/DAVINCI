@@ -438,35 +438,42 @@ compensating diurnal errors; say so if both appear in the talk.
 
 Both legs ran through `PipelineRunner.run_from_config()`. Leg B passed first, so leg A is interpretable.
 
+**Every number below is computed by `PipelineRunner.run_from_config()`** — no side scripts. (An earlier
+draft of this section quoted R = 0.613 from an ad-hoc `xr.align` check; the pipeline says **0.812** for the
+same comparison. The ad-hoc number came from an arbitrary 10-day single-cell sample and was simply wrong.
+Cite pipeline output only.)
+
 | Leg | N | MB | RMSE | R | IOA |
 |---|---|---|---|---|---|
 | **B — T2M traceability** (point, hourly) | 2688 | **0.0000 K** | **0.0030 K** | **1.0000** | 1.000 |
-| **A — SWdn evaluation** (point, hourly) | 2688 | **+9.12 W m⁻²** | 60.78 | 0.963 | 0.980 |
-| **A — SWdn evaluation** (regional, daily-mean) | 14500 | **+7.18 W m⁻²** | 61.80 | 0.558 | 0.725 |
+| **A — SWdn evaluation** (point, hourly) | 2688 | **+9.115 W m⁻²** | 60.78 | 0.963 | 0.980 |
+| **A — SWdn evaluation** (point, **daily**) | 112 | **+9.116 W m⁻²** | 27.89 | **0.812** | 0.889 |
+| **A — SWdn evaluation** (regional, daily) | 14500 | **+7.18 W m⁻²** | 61.80 | 0.558 | 0.725 |
 
 **Headline result**: MERRA-2's `SWGDN` is biased **high by ~7–9 W m⁻² (NMB +5.4 to +6.4%)** against
-CERES-derived POWER — consistent across the point and regional legs, which were computed independently.
-That is the expected direction for GEOS under-predicting cloud.
+CERES-derived POWER — consistent across point and regional legs computed independently. That is the
+expected direction for GEOS under-predicting cloud.
 
 ### ⚠️ The hourly R = 0.963 is mostly the diurnal cycle — do not quote it as skill
 
-The point leg (hourly) reports R = 0.963 while the regional leg (daily-mean) reports R = 0.558. Daily means
-should correlate *better* than hourly, not worse, so this looked like a bug. It is not — verified with a
-single-cell control (POWER daily vs MERRA-2 daily-mean at 40.5 N, 105.5 W, 10 days): **R = 0.613**, matching
-the regional leg. The daily values show why:
+The hourly and daily point legs use the **same sites, same quantity, same code path**; only the averaging
+differs. Across them:
 
-```
-POWER (CERES): 147.7  113.8  120.3  140.0  155.4
-MERRA-2 SWGDN: 148.8   80.0   52.5  156.0  162.9
-```
+- **MB is identical** — +9.115 vs +9.116 W m⁻². The bias is real and robust to averaging.
+- **R falls 0.963 → 0.812** once the diurnal cycle is averaged out.
 
-MERRA-2 and CERES genuinely disagree day to day — day 3 has MERRA-2 heavily clouded (52.5) where CERES sees
-120.3. **Hourly correlation is inflated because the diurnal cycle dominates the variance**: the sun rises and
-sets in both datasets, and that shared signal swamps the cloud disagreement. Averaging to daily removes it
-and exposes the real, cloud-driven skill.
+Hourly correlation is inflated because the diurnal cycle dominates the variance: the sun rises and sets in
+both datasets, and that shared signal swamps the cloud disagreement the comparison is actually about. The
+leg-A scatter shows it directly — the bright density peak at the origin is thousands of night hours where
+both datasets agree on zero, for free.
 
-**For the talk**: quote the *bias* from either leg (they agree), but quote **R from the daily leg**. Citing
-R = 0.963 would flatter MERRA-2 for a reason that has nothing to do with its radiation scheme.
+**For the talk**: quote the **bias** from either leg (they agree to 3 decimals), but quote **R from the
+daily leg**. Citing R = 0.963 would flatter MERRA-2 for a reason that has nothing to do with its radiation
+scheme.
+
+The regional daily leg is lower still (R = 0.558) — but it is a *different sample* (all of CONUS, including
+the cloudy Pacific Northwest) rather than four mostly-sunny sites, so it is not directly comparable to the
+point legs. Do not read the point→regional drop as a further diurnal effect.
 
 ### ✅ Leg B PASSES — the reader is validated to 3 mK
 
