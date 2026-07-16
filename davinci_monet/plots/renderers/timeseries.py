@@ -300,6 +300,22 @@ class TimeSeriesPlotter(BasePlotter):
             return self._render_single(series[0], ax=ax, **kwargs)
         return self._render_overlay(series, ax=ax, **kwargs)
 
+    @staticmethod
+    def _site_line_labels(ds: "xr.Dataset", sdim: str, site_label_var: str, n: int) -> list[str]:
+        """Legend labels for per-site lines.
+
+        Prefer an explicit label coord (``site_label_var``), else the split
+        dim's own coordinate values (station names), else a positional
+        fallback. The middle case is what makes station names appear without
+        any config: the POWER reader names its ``site`` coord with the sites.
+        """
+        for candidate in (site_label_var, sdim):
+            if candidate in ds.coords:
+                values = ds[candidate].values
+                if len(values) == n:
+                    return [str(v) for v in values]
+        return [f"Site {i}" for i in range(n)]
+
     def _render_single(
         self,
         s: PlotSeries,
@@ -312,6 +328,7 @@ class TimeSeriesPlotter(BasePlotter):
         show_uncertainty: bool = False,
         uncertainty_type: Literal["std", "iqr", "range"] = "std",
         show_individual_sites: bool = False,
+        site_label_var: str = "site_name",
         time_dim: str = "time",
         aggregate_dim: str | None = None,
         **kwargs: Any,
@@ -321,6 +338,11 @@ class TimeSeriesPlotter(BasePlotter):
         ``show_uncertainty`` shades a band about the mean across the aggregated
         dimension(s); ``uncertainty_type`` selects ``std`` (mean ± 1σ), ``iqr``
         (Q1–Q3), or ``range`` (min–max).
+
+        ``show_individual_sites`` instead draws one line per site, labelled and
+        with a legend. Labels come from ``site_label_var`` if that coord exists,
+        else the split dim's own coordinate values (station names), else a
+        positional fallback.
         """
         if ax is None:
             fig, ax = self.create_figure()
@@ -342,6 +364,7 @@ class TimeSeriesPlotter(BasePlotter):
 
             sdim = aggregate_dim if (aggregate_dim in non_time_dims) else non_time_dims[0]
             n = ds.sizes[sdim]
+            site_labels = self._site_line_labels(ds, sdim, site_label_var, n)
             palette = cm.tab20(np.linspace(0, 1, min(n, 20)))
             for i in range(n):
                 ax.plot(
@@ -350,7 +373,21 @@ class TimeSeriesPlotter(BasePlotter):
                     color=palette[i % len(palette)],
                     linewidth=1.0,
                     alpha=0.7,
+                    label=site_labels[i],
                 )
+            # Unlabelled per-site lines are indistinguishable; a legend is not
+            # optional here. Move it outside the axes once it would crowd the
+            # data. No tight_layout() call: the figure uses constrained layout
+            # (tight_layout would warn, and the gate escalates UserWarnings),
+            # and the save path already crops to include an outside legend.
+            if n > 5:
+                ax.legend(
+                    bbox_to_anchor=(1.02, 1),
+                    loc="upper left",
+                    fontsize=self.config.text.legend_small,
+                )
+            else:
+                ax.legend(fontsize=self.config.text.legend)
         else:
             agg_dims = (
                 [aggregate_dim] if (aggregate_dim and aggregate_dim in da.dims) else non_time_dims
