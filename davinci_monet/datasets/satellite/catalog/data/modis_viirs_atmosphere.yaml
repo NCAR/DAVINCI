@@ -8,6 +8,7 @@ products:
     geometry: GRID
     file_format: HDF4
     time_parse: "A%Y%j"
+    cadence: monthly
     dim_aliases: { XDim: lon, YDim: lat, "XDim:mod08": lon, "YDim:mod08": lat }
     variables:
       - display_name: aod_550nm
@@ -24,6 +25,7 @@ products:
     geometry: GRID
     file_format: HDF4
     time_parse: "A%Y%j"
+    cadence: monthly
     dim_aliases: { XDim: lon, YDim: lat, "XDim:mod08": lon, "YDim:mod08": lat }
     variables:
       - display_name: aod_550nm
@@ -31,6 +33,46 @@ products:
         units: "1"
         wavelength_nm: 550
         long_name: "AOD at 0.55um (land+ocean), monthly mean of daily mean"
+  - product_id: MOD08_D3
+    instrument: MODIS
+    platform: Terra
+    daac: LAADS
+    collection: "061"
+    level: L3
+    geometry: GRID
+    file_format: HDF4
+    time_parse: "A%Y%j"
+    cadence: daily
+    dim_aliases: { XDim: lon, YDim: lat, "XDim:mod08": lon, "YDim:mod08": lat }
+    variables:
+      - display_name: aod_550nm
+        sds_name: AOD_550_Dark_Target_Deep_Blue_Combined_Mean
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Combined Dark Target and Deep Blue AOD at 0.55um, daily mean"
+        valid_min: 0.0
+        valid_max: 5.0
+        qa_screening: level2_usefulness_flag
+  - product_id: MYD08_D3
+    instrument: MODIS
+    platform: Aqua
+    daac: LAADS
+    collection: "061"
+    level: L3
+    geometry: GRID
+    file_format: HDF4
+    time_parse: "A%Y%j"
+    cadence: daily
+    dim_aliases: { XDim: lon, YDim: lat, "XDim:mod08": lon, "YDim:mod08": lat }
+    variables:
+      - display_name: aod_550nm
+        sds_name: AOD_550_Dark_Target_Deep_Blue_Combined_Mean
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Combined Dark Target and Deep Blue AOD at 0.55um, daily mean"
+        valid_min: 0.0
+        valid_max: 5.0
+        qa_screening: level2_usefulness_flag
   - product_id: AERDB_L2_VIIRS_NOAA20
     instrument: VIIRS
     platform: NOAA-20
@@ -40,6 +82,7 @@ products:
     geometry: SWATH
     file_format: NetCDF4
     time_parse: "A%Y%j"
+    cadence: granule
     dim_aliases: { Idx_Atrack: y, Idx_Xtrack: x }
     aliases: [viirs_aerdb_noaa20]
     variables:

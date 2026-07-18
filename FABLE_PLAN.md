@@ -2,11 +2,17 @@
 
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
 > Status: **P0-P8 software complete; v1 `SYNTHETIC_READY` rejected; v2
-> `passed_pending_user_review`; `SYNTHETIC_READY` remains unset; P9 blocked**. Original
+> `passed_pending_user_review`; `SYNTHETIC_READY` remains unset; P9 remains blocked except for
+> the explicitly authorized MODIS D3 reader-contract subtask**. Original
 > design written 2026-07-07; synthetic-first pre-flight revision and implementation completed
 > 2026-07-10; frozen v1 acceptance executed 2026-07-10; frozen v2 recovery cycle completed
 > 2026-07-11.
 > Authors: Claude Fable 5 (original planning session with D. Fillmore); Codex (pre-flight review).
+
+On 2026-07-17 the user explicitly authorized the P9 MODIS D3 reader-contract subtask and approved
+its test design: daily cadence, canonical `aod_550nm`, QA/support semantics, raw HDF4 and staged
+NetCDF parity, and a pipeline-level preprocessing test. This narrow authorization does not set
+`SYNTHETIC_READY`, authorize real-data tuning/evaluation, or unblock the remainder of P9/P10.
 
 ## Synthetic acceptance checkpoint (2026-07-10)
 

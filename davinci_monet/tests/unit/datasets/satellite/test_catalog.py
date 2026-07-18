@@ -28,6 +28,7 @@ def test_product_entry_resolves_variable_by_display_and_sds():
         geometry="GRID",
         file_format="HDF4",
         time_parse="A%Y%j",
+        cadence="monthly",
         dim_aliases={"XDim": "lon", "YDim": "lat"},
         variables=[
             VariableEntry(
@@ -53,6 +54,24 @@ def test_catalog_resolves_known_products():
     aod = terra.variable_by_display("aod_550nm")
     assert aod is not None
     assert aod.wavelength_nm == 550
+
+
+def test_catalog_resolves_daily_modis_d3_contract():
+    cat = get_catalog()
+    terra = cat.resolve("MOD08_D3")
+    aqua = cat.resolve("MYD08_D3")
+
+    assert terra.cadence == "daily"
+    assert aqua.cadence == "daily"
+    assert terra.platform == "Terra"
+    assert aqua.platform == "Aqua"
+    for product in (terra, aqua):
+        aod = product.variable_by_display("aod_550nm")
+        assert aod is not None
+        assert aod.sds_name == "AOD_550_Dark_Target_Deep_Blue_Combined_Mean"
+        assert aod.valid_min == 0.0
+        assert aod.valid_max == 5.0
+        assert aod.qa_screening == "level2_usefulness_flag"
 
 
 def test_catalog_unknown_product_suggests_matches():

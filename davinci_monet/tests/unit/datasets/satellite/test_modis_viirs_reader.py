@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,6 +10,8 @@ import xarray as xr
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.datasets.satellite.catalog import UnknownProductError
 from davinci_monet.datasets.satellite.modis_viirs import MODISVIIRSReader
+
+_D3_AOD = "AOD_550_Dark_Target_Deep_Blue_Combined_Mean"
 
 
 def _write_mod08_like(path, fname):
@@ -48,6 +51,147 @@ def test_reader_concatenates_months_sorted(tmp_path):
     ds = reader.open([f2, f1], variables=["aod_550nm"], product="MOD08_M3")
     months = [str(t)[:7] for t in ds["time"].values]
     assert months == ["2024-02", "2024-03"]  # sorted ascending
+
+
+def test_monthly_reader_still_snaps_midmonth_token_to_month_start(tmp_path):
+    f = _write_mod08_like(tmp_path, "MOD08_M3.A2024045.061.0000.nc")
+
+    ds = MODISVIIRSReader().open([f], variables=["aod_550nm"], product="MOD08_M3")
+
+    assert ds["time"].values[0] == np.datetime64("2024-02-01T00:00:00.000000000")
+
+
+def _write_d3_subset(
+    path: Path,
+    fname: str,
+    timestamp: str,
+    *,
+    source_product: str = "MYD08_D3",
+    values: np.ndarray | None = None,
+) -> str:
+    lat = np.array([-0.5, 0.5], dtype=np.float32)
+    lon = np.array([-1.5, -0.5, 0.5], dtype=np.float32)
+    if values is None:
+        values = np.array([[0.1, 0.2, np.nan], [0.3, 0.4, 0.5]], dtype=np.float32)
+    ds = xr.Dataset(
+        {_D3_AOD: (("time", "lat", "lon"), values[np.newaxis, ...])},
+        coords={
+            "time": np.array([timestamp], dtype="datetime64[ns]"),
+            "lat": lat,
+            "lon": lon,
+        },
+        attrs={"source_product": source_product},
+    )
+    ds[_D3_AOD].attrs.update(units="1", valid_min=0.0, valid_max=5.0)
+    fpath = path / fname
+    ds.to_netcdf(fpath)
+    return str(fpath)
+
+
+def _write_d3_hdf4(path: Path, fname: str, *, qa_screened: bool = True) -> str:
+    hdf_api = pytest.importorskip("pyhdf.SD", reason="pyhdf required for MODIS D3 HDF4 tests")
+    SD, SDC = hdf_api.SD, hdf_api.SDC
+    fpath = path / fname
+    hdf = SD(str(fpath), SDC.WRITE | SDC.CREATE)
+
+    lon = hdf.create("XDim", SDC.FLOAT32, 3)
+    lon.dim(0).setname("XDim:mod08")
+    lon[:] = np.array([-1.5, -0.5, 0.5], dtype=np.float32)
+    lon.endaccess()
+    lat = hdf.create("YDim", SDC.FLOAT32, 2)
+    lat.dim(0).setname("YDim:mod08")
+    lat[:] = np.array([0.5, -0.5], dtype=np.float32)
+    lat.endaccess()
+
+    aod = hdf.create(_D3_AOD, SDC.INT16, (2, 3))
+    aod.dim(0).setname("YDim:mod08")
+    aod.dim(1).setname("XDim:mod08")
+    aod[:] = np.array([[100, 200, -9999], [300, 5001, 500]], dtype=np.int16)
+    aod.attr("_FillValue").set(SDC.INT16, -9999)
+    aod.attr("valid_range").set(SDC.INT16, [0, 5000])
+    aod.attr("scale_factor").set(SDC.FLOAT32, 0.001)
+    aod.attr("add_offset").set(SDC.FLOAT32, 0.0)
+    if qa_screened:
+        aod.attr("Masked_With_QA_Usefulness_Flag").set(SDC.CHAR, "True")
+    aod.endaccess()
+    hdf.end()
+    return str(fpath)
+
+
+def test_daily_d3_hdf4_returns_canonical_qa_screened_aod(tmp_path):
+    f = _write_d3_hdf4(tmp_path, "MYD08_D3.A2008184.061.0000.hdf")
+
+    ds = MODISVIIRSReader().open([f], variables=["aod_550nm"], product="MYD08_D3")
+
+    assert ds["time"].values[0] == np.datetime64("2008-07-02T00:00:00.000000000")
+    assert ds.attrs["cadence"] == "daily"
+    assert ds["aod_550nm"].dims == ("time", "lat", "lon")
+    np.testing.assert_allclose(ds["aod_550nm"].isel(time=0, lat=0, lon=0), 0.1)
+    assert int(ds["aod_550nm"].isnull().sum()) == 2
+    assert ds["aod_550nm"].attrs["qa_screening"] == "level2_usefulness_flag"
+    assert "finite cells" in ds["aod_550nm"].attrs["support_definition"]
+
+
+def test_daily_d3_hdf4_rejects_unverified_qa_contract(tmp_path):
+    f = _write_d3_hdf4(
+        tmp_path,
+        "MYD08_D3.A2008184.061.0000.hdf",
+        qa_screened=False,
+    )
+
+    with pytest.raises(ValueError, match="QA usefulness screening"):
+        MODISVIIRSReader().open([f], variables=["aod_550nm"], product="MYD08_D3")
+
+
+def test_daily_d3_staged_netcdf_preserves_days_and_masks_range(tmp_path):
+    values = np.array([[-0.1, 0.2, np.nan], [0.3, 5.1, 0.5]], dtype=np.float32)
+    f2 = _write_d3_subset(
+        tmp_path,
+        "MYD08_D3.A2008184.061.0000.AOD550.nc4",
+        "2008-07-02T12:00:00",
+        values=values,
+    )
+    f1 = _write_d3_subset(
+        tmp_path,
+        "MYD08_D3.A2008183.061.0000.AOD550.nc4",
+        "2008-07-01T12:00:00",
+    )
+
+    ds = MODISVIIRSReader().open([f2, f1], variables=["aod_550nm"], product="MYD08_D3")
+
+    np.testing.assert_array_equal(
+        ds["time"].values,
+        np.array(["2008-07-01", "2008-07-02"], dtype="datetime64[ns]"),
+    )
+    assert ds["aod_550nm"].shape == (2, 2, 3)
+    assert int(ds["aod_550nm"].isel(time=1).isnull().sum()) == 3
+
+
+def test_daily_d3_rejects_filename_time_mismatch(tmp_path):
+    f = _write_d3_subset(
+        tmp_path,
+        "MYD08_D3.A2008183.061.0000.AOD550.nc4",
+        "2008-07-02T12:00:00",
+    )
+
+    with pytest.raises(ValueError, match="does not match filename date"):
+        MODISVIIRSReader().open([f], variables=["aod_550nm"], product="MYD08_D3")
+
+
+def test_daily_d3_rejects_duplicate_calendar_days(tmp_path):
+    f1 = _write_d3_subset(
+        tmp_path,
+        "MYD08_D3.A2008183.061.0001.AOD550.nc4",
+        "2008-07-01T12:00:00",
+    )
+    f2 = _write_d3_subset(
+        tmp_path,
+        "MYD08_D3.A2008183.061.0002.AOD550.nc4",
+        "2008-07-01T12:00:00",
+    )
+
+    with pytest.raises(ValueError, match="duplicate daily timestamps"):
+        MODISVIIRSReader().open([f1, f2], variables=["aod_550nm"], product="MYD08_D3")
 
 
 def _write_mod08_hdf4_like(path, fname):
@@ -132,7 +276,7 @@ def test_reader_is_registered_via_package_import():
 # ---------------------------------------------------------------------------
 
 
-def _write_mod08_with_junk_vars(path: "Path", fname: str) -> str:  # type: ignore[name-defined]
+def _write_mod08_with_junk_vars(path: Path, fname: str) -> str:
     """Write a MOD08-like .nc fixture with the AOD SDS + XDim/YDim + junk variables.
 
     Some junk variables use the duplicate-dimension pattern (same dim name on

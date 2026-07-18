@@ -1,7 +1,7 @@
 """Catalog-driven MODIS/VIIRS reader (L3 grid slice).
 
 Initial vertical slice of the modis_viirs catalog reader design: Level-3
-regular-grid atmosphere products (MOD08_M3 / MYD08_M3). See
+regular-grid atmosphere products (MOD08/MYD08 monthly M3 and daily D3). See
 docs/superpowers/specs/2026-06-01-modis-viirs-catalog-readers-design.md.
 """
 
@@ -105,6 +105,12 @@ class MODISVIIRSReader:
             )
 
         ds = xr.concat(valid, dim="time").sortby("time")
+        if entry.cadence == "daily":
+            time = pd.DatetimeIndex(ds["time"].values)
+            duplicate = time[time.duplicated()].unique()
+            if len(duplicate):
+                labels = ", ".join(stamp.strftime("%Y-%m-%d") for stamp in duplicate)
+                raise ValueError(f"{entry.product_id}: duplicate daily timestamps: {labels}")
         self.geometry = DataGeometry.GRID
         set_geometry_attr(ds, DataGeometry.GRID)
         ds.attrs.update(
@@ -114,6 +120,7 @@ class MODISVIIRSReader:
             level=entry.level,
             daac=entry.daac,
             collection=entry.collection,
+            cadence=entry.cadence,
         )
         return ds
 
@@ -281,22 +288,88 @@ class MODISVIIRSReader:
         fpath: Path,
     ) -> xr.Dataset:
         """Rename SDS→display name, attach metadata, standardize grid, add time."""
+        self._validate_qa_contract(ds, keep, entry, fpath)
+
         # Rename SDS -> display name and attach variable metadata.
         ds = ds.rename({sds: v.display_name for sds, v in keep.items()})
         for v in keep.values():
-            attrs = ds[v.display_name].attrs
+            field = ds[v.display_name]
+            attrs = dict(field.attrs)
+            if v.valid_min is not None:
+                field = field.where(field >= v.valid_min)
+                attrs["valid_min"] = v.valid_min
+            if v.valid_max is not None:
+                field = field.where(field <= v.valid_max)
+                attrs["valid_max"] = v.valid_max
             attrs["units"] = v.units
             if v.wavelength_nm is not None:
                 attrs["wavelength_nm"] = v.wavelength_nm
             if v.long_name:
                 attrs["long_name"] = v.long_name
+            if v.qa_screening is not None:
+                attrs["qa_screening"] = v.qa_screening
+                attrs["qa_screened"] = "true"
+                attrs["support_definition"] = (
+                    "finite cells after source QA usefulness and valid-range screening"
+                )
+            field.attrs = attrs
+            ds[v.display_name] = field
 
         # Standardize grid coords: dim_aliases maps file dim/coord names -> lon/lat.
         ds = self._standardize_grid(ds, entry)
 
-        # Parse the month from the filename and assign a time coordinate.
-        ds = ds.expand_dims(time=[self._parse_time(fpath.name, entry)])
-        return ds
+        parsed_time = self._parse_time(fpath.name, entry)
+        return self._standardize_time(ds, parsed_time, entry, fpath)
+
+    @staticmethod
+    def _validate_qa_contract(
+        ds: xr.Dataset,
+        keep: dict[str, Any],
+        entry: ProductEntry,
+        fpath: Path,
+    ) -> None:
+        """Require evidence that catalog-declared D3 QA screening was applied."""
+        for sds_name, variable in keep.items():
+            if variable.qa_screening != "level2_usefulness_flag":
+                continue
+            attrs = ds[sds_name].attrs
+            raw_flag = attrs.get("Masked_With_QA_Usefulness_Flag")
+            flag_is_true = str(raw_flag).strip().lower() in {"1", "true", "yes"}
+            canonical_flag = attrs.get("qa_screening") == variable.qa_screening
+            staged_product = ds.attrs.get("source_product") == entry.product_id
+            if not (flag_is_true or canonical_flag or staged_product):
+                raise ValueError(
+                    f"{fpath.name}: cannot verify Level-2 QA usefulness screening "
+                    f"for {sds_name}"
+                )
+
+    @staticmethod
+    def _standardize_time(
+        ds: xr.Dataset,
+        parsed_time: np.datetime64,
+        entry: ProductEntry,
+        fpath: Path,
+    ) -> xr.Dataset:
+        """Attach parsed cadence time and validate a staged singleton time axis."""
+        if "time" not in ds.dims:
+            return ds.expand_dims(time=[parsed_time])
+        if ds.sizes["time"] != 1:
+            raise ValueError(
+                f"{fpath.name}: expected one time sample per {entry.product_id} file; "
+                f"found {ds.sizes['time']}"
+            )
+        if "time" in ds.coords:
+            observed = pd.Timestamp(ds["time"].values[0])
+            expected = pd.Timestamp(parsed_time)
+            if entry.cadence == "monthly":
+                matches = observed.to_period("M") == expected.to_period("M")
+            else:
+                matches = observed.normalize() == expected.normalize()
+            if not matches:
+                raise ValueError(
+                    f"{fpath.name}: time {observed} does not match filename date {expected}"
+                )
+        return ds.assign_coords(time=[parsed_time])
 
     @staticmethod
     def _standardize_grid(ds: xr.Dataset, entry: ProductEntry) -> xr.Dataset:
@@ -332,5 +405,7 @@ class MODISVIIRSReader:
         if not m:
             raise ValueError(f"Cannot parse date token from filename: {filename}")
         dt = datetime.strptime("A" + m.group(1), entry.time_parse)
-        # Monthly products: snap to first-of-month for clean monthly alignment.
-        return np.datetime64(pd.Timestamp(dt).to_period("M").to_timestamp(), "ns")
+        stamp = pd.Timestamp(dt)
+        if entry.cadence == "monthly":
+            stamp = stamp.to_period("M").to_timestamp()
+        return np.datetime64(stamp, "ns")

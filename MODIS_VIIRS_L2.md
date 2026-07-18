@@ -166,7 +166,8 @@ each granule.
 
 - The repo already has a working MODIS L2 AOD path for `MOD04_L2` and
   `MYD04_L2` through `modis_l2_aod`.
-- The catalog-driven `modis_viirs` reader currently covers MODIS monthly L3 AOD
-  (`MOD08_M3` / `MYD08_M3`), not these L2 products.
+- The catalog-driven `modis_viirs` reader covers MODIS monthly L3 AOD
+  (`MOD08_M3` / `MYD08_M3`) and QA-screened daily L3 AOD
+  (`MOD08_D3` / `MYD08_D3`), not these L2 products.
 - MODIS cloud and VIIRS L2 cloud/aerosol products will need reader/catalog work
   or an adapter before they are first-class DAVINCI pipeline sources.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -9,6 +11,9 @@ class VariableEntry(BaseModel, extra="forbid"):
     units: str = "1"
     wavelength_nm: float | None = None
     long_name: str | None = None
+    valid_min: float | None = None
+    valid_max: float | None = None
+    qa_screening: Literal["level2_usefulness_flag"] | None = None
 
 
 class ProductEntry(BaseModel, extra="forbid"):
@@ -21,6 +26,7 @@ class ProductEntry(BaseModel, extra="forbid"):
     geometry: str
     file_format: str
     time_parse: str  # strptime pattern applied to the filename "A%Y%j" token
+    cadence: Literal["daily", "monthly", "granule"]
     dim_aliases: dict[str, str] = Field(default_factory=dict)
     aliases: list[str] = Field(default_factory=list)
     variables: list[VariableEntry] = Field(default_factory=list)
