@@ -1,0 +1,105 @@
+# MERRA-2 / MODIS Aqua 2008 daily-AOD preprocessing and EOF fit.
+#
+# This is the first real-data FABLE configuration. It deliberately stops before
+# EOF projection, wavelet filtering, and scaling: MYD08_D3 does not yet have an
+# approved shifted-log observation-error model for the projection covariance.
+#
+# Required environment variables:
+#   FABLE_2008_DATA  Raw staging root containing GMAO/ and MODIS/
+#   FABLE_2008_RUN   Run root containing output/ and logs/
+#
+# Current Derecho staging root:
+#   /glade/derecho/scratch/fillmore/DAVINCI-AOD/raw
+#
+# Example:
+#   export FABLE_2008_DATA=/glade/derecho/scratch/fillmore/DAVINCI-AOD/raw
+#   export FABLE_2008_RUN=/glade/derecho/scratch/fillmore/DAVINCI-AOD/runs/fable-2008
+#   davinci-monet validate "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml" --strict
+#   davinci-monet run "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml"
+
+analysis:
+  workflow: standard
+  start_time: "2008-01-01 00:00:00"
+  end_time: "2008-12-31 23:59:59"
+  output_dir: ${FABLE_2008_RUN}/output
+  log_dir: ${FABLE_2008_RUN}/logs
+  debug: false
+  style:
+    theme: ncar
+    context: default
+
+sources:
+  merra2_hourly:
+    type: merra2
+    files:
+      - ${FABLE_2008_DATA}/GMAO/MERRA2/2007/12/MERRA2_*.tavg1_2d_aer_Nx.20071231.nc4
+      - ${FABLE_2008_DATA}/GMAO/MERRA2/2008/*/MERRA2_*.tavg1_2d_aer_Nx.*.nc4
+      - ${FABLE_2008_DATA}/GMAO/MERRA2/2009/01/MERRA2_*.tavg1_2d_aer_Nx.20090101.nc4
+    variables:
+      TOTEXTTAU:
+        units: "1"
+        valid_min: 0.0
+    time_padding: "1D"
+
+  aqua_d3:
+    type: modis_viirs
+    product: MYD08_D3
+    level: L3
+    files: ${FABLE_2008_DATA}/MODIS/Aqua/C61/2008/*/MYD08_D3.A2008*.061.*.hdf
+    variables:
+      aod_550nm:
+        units: "1"
+        valid_min: 0.0
+        valid_max: 5.0
+
+analyses:
+  model_daily:
+    type: aod_preprocess
+    source: merra2_hourly
+    variable: TOTEXTTAU
+    sample_local_time: 13.5
+    day_anchor_hour: 12.0
+    target_grid: 1.0
+    log_epsilon: 0.01
+    required: true
+
+  aqua_daily:
+    type: aod_preprocess
+    source: aqua_d3
+    variable: aod_550nm
+    day_anchor_hour: 12.0
+    target_grid_from: model_daily
+    log_epsilon: 0.01
+    required: true
+
+  aod_basis:
+    type: eof
+    source: model_daily
+    variable: log_aod
+    n_modes: 50
+    remove_seasonal_cycle: true
+    standardize: false
+    rotation: none
+    solver: randomized
+    solver_seed: 0
+    solver_oversampling: 10
+    solver_iterations: 2
+    fit_window:
+      start: "2008-01-01 00:00:00"
+      end: "2008-12-31 23:59:59"
+    required: true
+
+plots:
+  basis_maps:
+    type: eof_pattern
+    source: aod_basis
+    variable: eofs
+  basis_scree:
+    type: eof_scree
+    source: aod_basis
+    variable: explained_variance
+  pc1:
+    type: timeseries
+    source: aod_basis
+    variable: pc
+    mode: 1

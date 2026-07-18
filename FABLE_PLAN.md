@@ -3,7 +3,7 @@
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
 > Status: **P0-P8 software complete; v1 `SYNTHETIC_READY` rejected; v2
 > `passed_pending_user_review`; `SYNTHETIC_READY` remains unset; P9 remains blocked except for
-> the explicitly authorized MODIS D3 reader-contract subtask**. Original
+> the explicitly authorized MODIS D3 reader contract and real 2008 EOF preflight**. Original
 > design written 2026-07-07; synthetic-first pre-flight revision and implementation completed
 > 2026-07-10; frozen v1 acceptance executed 2026-07-10; frozen v2 recovery cycle completed
 > 2026-07-11.
@@ -13,6 +13,15 @@ On 2026-07-17 the user explicitly authorized the P9 MODIS D3 reader-contract sub
 its test design: daily cadence, canonical `aod_550nm`, QA/support semantics, raw HDF4 and staged
 NetCDF parity, and a pipeline-level preprocessing test. This narrow authorization does not set
 `SYNTHETIC_READY`, authorize real-data tuning/evaluation, or unblock the remainder of P9/P10.
+
+Later on 2026-07-17 the user explicitly authorized a real Aqua-first 2008 configuration and
+bounded preflight. The resulting config covers hourly MERRA-2 local-time preprocessing, daily
+`MYD08_D3` preprocessing, and a randomized MERRA-2 EOF fit. A 2008-07-01 through 2008-07-07
+pipeline preflight passed with the required one-day MERRA-2 padding, aligned seven-day 1-degree
+outputs, a finalized five-mode EOF artifact, and all configured plots. Projection, wavelet
+filtering, scaling, and MMR writing remain excluded until a reviewed shifted-log MODIS
+observation-error contract exists. This authorization and successful preflight do not set
+`SYNTHETIC_READY` or authorize the full P10 tuning run.
 
 ## Synthetic acceptance checkpoint (2026-07-10)
 
