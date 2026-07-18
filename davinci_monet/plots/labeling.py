@@ -72,10 +72,6 @@ _SOURCE_ACRONYMS = {
     "cmaq": "CMAQ",
     "ebaf": "EBAF",
     "ssf": "SSF",
-    # NASA POWER (Prediction Of Worldwide Energy Resources). Without this it
-    # title-cases to "Power", and a key like `power_grid` renders "Power Grid"
-    # -- which reads as electrical infrastructure rather than the NASA product.
-    "power": "POWER",
 }
 
 

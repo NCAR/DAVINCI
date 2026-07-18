@@ -8,7 +8,6 @@ from davinci_monet.datasets.cmaq import CMAQReader
 from davinci_monet.datasets.generic import GenericReader
 from davinci_monet.datasets.lightning import lma as _lma  # noqa: F401
 from davinci_monet.datasets.merra2 import MERRA2Reader
-from davinci_monet.datasets.power import POWERReader
 from davinci_monet.datasets.satellite import ceres_l3 as _ceres_l3
 from davinci_monet.datasets.satellite import ceres_ssf as _ceres_ssf
 from davinci_monet.datasets.satellite import generic_l2 as _generic_l2
@@ -36,7 +35,6 @@ __all__ = [
     "CMAQReader",
     "GenericReader",
     "MERRA2Reader",
-    "POWERReader",
     "RRFSReader",
     "UFSReader",
     "WRFChemReader",
