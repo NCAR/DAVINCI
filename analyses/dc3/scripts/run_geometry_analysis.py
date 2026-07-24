@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Run DC3 dataset-only analysis pipeline.
 
-Uses DAVINCI-MONET's geometry-only pipeline mode to generate flight track maps,
+Uses DAVINCI's geometry-only pipeline mode to generate flight track maps,
 vertical profiles, time series, histograms, and summary statistics from
 DC3 aircraft merge data.
 

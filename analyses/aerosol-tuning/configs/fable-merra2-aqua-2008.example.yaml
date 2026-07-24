@@ -14,8 +14,8 @@
 # Example:
 #   export FABLE_2008_DATA=/glade/derecho/scratch/fillmore/DAVINCI-AOD/raw
 #   export FABLE_2008_RUN=/glade/derecho/scratch/fillmore/DAVINCI-AOD/runs/fable-2008
-#   davinci-monet validate "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml" --strict
-#   davinci-monet run "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml"
+#   davinci validate "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml" --strict
+#   davinci run "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml"
 
 analysis:
   workflow: standard

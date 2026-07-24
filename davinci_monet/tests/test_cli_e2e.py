@@ -132,7 +132,7 @@ def synthetic_data(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 
 @pytest.mark.integration
 class TestCLIRunE2E:
-    """End-to-end tests for `davinci-monet run <config.yaml>`."""
+    """End-to-end tests for `davinci run <config.yaml>`."""
 
     def test_cli_run_happy_path(self, synthetic_data: tuple) -> None:
         """Full pipeline through CLI with YAML config file."""

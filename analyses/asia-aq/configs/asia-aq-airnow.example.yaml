@@ -10,7 +10,7 @@
 # Usage:
 #   export ASIA_AQ_DATA=~/Data/ASIA-AQ
 #   export ASIA_AQ_ANALYSIS=$(pwd)
-#   davinci-monet run analyses/asia-aq/configs/asia-aq-airnow.example.yaml
+#   davinci run analyses/asia-aq/configs/asia-aq-airnow.example.yaml
 
 analysis:
   start_time: "2024-02-01"

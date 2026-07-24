@@ -104,7 +104,7 @@ python scripts/download_observations.py
 
 # Or individual sources
 python scripts/download_airnow.py
-davinci-monet get aeronet -s 2024-02-01 -e 2024-02-29 -d data
+davinci get aeronet -s 2024-02-01 -e 2024-02-29 -d data
 ```
 
 **Run the evaluation pipeline:**
@@ -114,7 +114,7 @@ python scripts/run_evaluation.py
 
 Or via CLI:
 ```bash
-davinci-monet run configs/asia-aq-airnow.example.yaml
+davinci run configs/asia-aq-airnow.example.yaml
 ```
 
 ## Results (February 1-29, 2024)

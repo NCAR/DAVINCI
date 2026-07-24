@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Custom statistics example using DAVINCI-MONET stats module.
+"""Custom statistics example using DAVINCI stats module.
 
 This script demonstrates using the statistics module directly for
 custom analysis workflows.
@@ -12,7 +12,7 @@ import xarray as xr
 
 def main():
     """Demonstrate statistics module usage."""
-    print("DAVINCI-MONET Statistics Module Example")
+    print("DAVINCI Statistics Module Example")
     print("=" * 45)
 
     # =========================================================================

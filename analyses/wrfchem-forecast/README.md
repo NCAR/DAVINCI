@@ -9,7 +9,7 @@ surface datasets, replacing the current `melodies-scripts/wrfchem.yaml` +
 1. `fetch_airnow.sh` downloads the previous UTC day's AirNow datasets into
    `/glade/work/fillmore/Data/AirNow/AirNow_YYYYMMDD.nc`.
 2. `qsub_wrfchem_daily.sh` exports `YYYY/MM/DD` (yesterday by default), submits
-   `davinci-monet run` to PBS on Casper. The pipeline pairs the dated WRF-Chem
+   `davinci run` to PBS on Casper. The pipeline pairs the dated WRF-Chem
    forecast with that day's AirNow + AERONET files and writes CONUS scatter,
    timeseries, and spatial bias plots for PM2.5 / OZONE / AOD to
    `/glade/campaign/acom/acom-da/fillmore/DAVINCI/WRF-Chem/YYYY/MM/DD/`.
@@ -55,7 +55,7 @@ any all-zero PM2.5 step it sees as a defense-in-depth backstop.
 | `configs/wrfchem-forecast.example.yaml` | Pipeline config (env-var dates) |
 | `scripts/fetch_airnow.sh` | Download yesterday's AirNow file |
 | `scripts/qsub_fetch_airnow.sh` | PBS wrapper around `fetch_airnow.sh` |
-| `scripts/qsub_wrfchem_daily.sh` | PBS wrapper around `davinci-monet run` |
+| `scripts/qsub_wrfchem_daily.sh` | PBS wrapper around `davinci run` |
 
 ## Usage
 
@@ -73,7 +73,7 @@ analyses/wrfchem-forecast/scripts/qsub_wrfchem_daily.sh
 ```bash
 export YYYY=2025 MM=08 DD=01
 export PREV_YYYYMMDD=20250731     # previous-day cycle for hour-0 file
-davinci-monet run analyses/wrfchem-forecast/configs/wrfchem-forecast.example.yaml
+davinci run analyses/wrfchem-forecast/configs/wrfchem-forecast.example.yaml
 ```
 
 ## Cron setup (cron.hpc.ucar.edu)
@@ -89,8 +89,8 @@ crontab -e
 Two entries replace the current `airnow.sh` + `wrfchem.yaml` chain:
 
 ```
-20 08 * * * /glade/work/fillmore/DAVINCI-MONET/analyses/wrfchem-forecast/scripts/qsub_fetch_airnow.sh
-30 09 * * * /glade/work/fillmore/DAVINCI-MONET/analyses/wrfchem-forecast/scripts/qsub_wrfchem_daily.sh
+20 08 * * * /glade/work/fillmore/DAVINCI/analyses/wrfchem-forecast/scripts/qsub_fetch_airnow.sh
+30 09 * * * /glade/work/fillmore/DAVINCI/analyses/wrfchem-forecast/scripts/qsub_wrfchem_daily.sh
 ```
 
 The cron server's environment is intentionally sparse (no modules, 1 GB
@@ -99,13 +99,13 @@ user memory cap), so the scripts:
 - use fully-qualified queue names (`-q casper@casper-pbs`), as required
   when submitting from the cron server to Casper PBS
 - run a small `activate_env.sh` to source conda and activate the
-  `davinci-monet` env before invoking the CLI on the compute node, so
+  `davinci` env before invoking the CLI on the compute node, so
   nothing depends on the user's interactive shell init
 
 Override env paths if needed:
 ```bash
 export DAVINCI_CONDA_BASE=/path/to/miniforge3   # default: /glade/work/fillmore/miniforge3
-export DAVINCI_CONDA_ENV=davinci-monet
+export DAVINCI_CONDA_ENV=davinci
 ```
 
 Geometry: [NCAR HPC Documentation — Cron services](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/additional-resources/cron/).

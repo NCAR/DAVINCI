@@ -276,13 +276,13 @@ def _version_callback(value: bool) -> None:
     from davinci_monet import __version__
 
     if value:
-        typer.echo(f"davinci-monet {__version__}")
+        typer.echo(f"davinci {__version__}")
         raise typer.Exit()
 
 
 # Create the main application
 app = typer.Typer(
-    name="davinci-monet",
+    name="davinci",
     help="DAVINCI: Data Analysis and Visual Intelligence for Climate/Chemistry",
     add_completion=False,
 )

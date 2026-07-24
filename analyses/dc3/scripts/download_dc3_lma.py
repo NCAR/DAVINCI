@@ -124,7 +124,7 @@ def main() -> None:
     print(f"  Primary dataset: {DATA_URL}")
     print()
     print("After downloading, run the analysis with:")
-    print("  davinci-monet run analyses/dc3/configs/dc3-geometry-lma-gemini.yaml")
+    print("  davinci run analyses/dc3/configs/dc3-geometry-lma-gemini.yaml")
 
 
 if __name__ == "__main__":

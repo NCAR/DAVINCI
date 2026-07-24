@@ -13,7 +13,7 @@ Or make it executable:
     ./scripts/run_analysis.py path/to/config.yaml
 
 You can also use the CLI:
-    davinci-monet run path/to/config.yaml
+    davinci run path/to/config.yaml
 """
 
 from __future__ import annotations

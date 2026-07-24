@@ -8,7 +8,7 @@ Usage:
     python run_evaluation.py
 
 Or use the CLI directly:
-    davinci-monet run ../configs/modis-aod-cam6-gemini.yaml
+    davinci run ../configs/modis-aod-cam6-gemini.yaml
 """
 
 from pathlib import Path

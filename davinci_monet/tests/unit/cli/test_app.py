@@ -42,7 +42,7 @@ class TestCLIApp:
 
         # Should exit successfully and show version
         assert result.exit_code == 0
-        assert "davinci-monet" in result.stdout
+        assert "davinci" in result.stdout
 
     def test_help_command(self) -> None:
         """Test the help output."""
@@ -52,7 +52,7 @@ class TestCLIApp:
         result = runner.invoke(app, ["--help"])
 
         assert result.exit_code == 0
-        assert "DAVINCI" in result.stdout or "davinci-monet" in result.stdout
+        assert "DAVINCI" in result.stdout
 
 
 # =============================================================================
@@ -435,7 +435,7 @@ class TestGetDataCommands:
     def test_airnow_dataframe_to_xarray_produces_current_shape(self) -> None:
         """`_dataframe_to_xarray` must produce the current (time, y=1, x) layout
         with units attrs and `time_local`, so AirNow files written by
-        `davinci-monet get airnow` remain readable by existing pipelines."""
+        `davinci get airnow` remain readable by existing pipelines."""
         import numpy as np
         import pandas as pd
 

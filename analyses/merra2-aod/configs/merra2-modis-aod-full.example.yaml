@@ -15,7 +15,7 @@
 #   export MERRA2_DATA=/Volumes/Io/MERRA2_tavgM
 #   export MODIS_DATA=/Volumes/Io
 #   export MERRA2_AOD_ANALYSIS=$(pwd)
-#   HDF5_USE_FILE_LOCKING=FALSE davinci-monet run analyses/merra2-aod/configs/merra2-modis-aod-full.example.yaml
+#   HDF5_USE_FILE_LOCKING=FALSE davinci run analyses/merra2-aod/configs/merra2-modis-aod-full.example.yaml
 #
 # Note: the readers open every globbed file before time-slicing, so the full
 # archive (~900 files, ~600 of them HDF4) takes several minutes to load.

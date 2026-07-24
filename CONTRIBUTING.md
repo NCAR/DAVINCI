@@ -1,4 +1,4 @@
-# Contributing to DAVINCI-MONET
+# Contributing to DAVINCI
 
 Thank you for your interest in contributing. This guide covers the essentials
 for getting started.
@@ -10,7 +10,9 @@ for getting started.
    ```bash
    conda env create -f environment.yml
    conda activate davinci
-   pip install -e ".[dev]"
+   python -m pip install --no-deps pycwt==0.4.0b0
+   python -m pip install --no-deps -e ".[dev]"
+   davinci --version
    ```
 
 2. Verify your setup:

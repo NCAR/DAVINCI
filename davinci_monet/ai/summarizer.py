@@ -184,7 +184,7 @@ def _build_client(cfg: Any) -> Any:
         import anthropic
     except ImportError as exc:  # pragma: no cover - exercised via stage tests
         raise SummaryError(
-            "anthropic package not installed; install with: pip install 'davinci-monet[ai]'"
+            "anthropic package not installed; install with: pip install 'davinci[ai]'"
         ) from exc
 
     key = resolve_api_key(cfg)

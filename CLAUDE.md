@@ -82,8 +82,13 @@ These are standing directives for any agent or contributor running this project:
   conda activate davinci
   python -m pip install --no-deps pycwt==0.4.0b0
   python -m pip install --no-deps -e .
+  davinci --version
   HDF5_USE_FILE_LOCKING=FALSE python -m pytest
   ```
+
+- **Use `davinci` consistently** for the conda environment, installed
+  distribution, and CLI command. Do not reintroduce legacy hyphenated names.
+  The internal Python import namespace remains `davinci_monet`.
 
 - **Send generated plots to the iCloud Claude folder.** All generated plots should land in:
   ```
@@ -135,7 +140,7 @@ else:
 
 ## Testing Rules
 
-1. **Integration tests must run through the pipeline.** Tests labeled as "integration" must exercise `PipelineRunner.run_from_config()` — the same code path a user takes with `davinci-monet run config.yaml`. Tests that call renderer APIs directly are **unit tests**, not integration tests. Do not label a test as integration if it bypasses the pipeline.
+1. **Integration tests must run through the pipeline.** Tests labeled as "integration" must exercise `PipelineRunner.run_from_config()` — the same code path a user takes with `davinci run config.yaml`. Tests that call renderer APIs directly are **unit tests**, not integration tests. Do not label a test as integration if it bypasses the pipeline.
 
 2. **Present test design before implementation.** Before writing tests, describe which code paths each test exercises and get approval. The list of assertions is not the design — the design is which entry points are called and what data flows through them.
 
@@ -153,6 +158,7 @@ conda activate davinci
 # the conda-forge scientific stack
 python -m pip install --no-deps pycwt==0.4.0b0
 python -m pip install --no-deps -e .
+davinci --version
 
 # Run tests
 pytest
@@ -278,7 +284,7 @@ if result.success:
 
 Or via CLI:
 ```bash
-davinci-monet run path/to/config.yaml
+davinci run path/to/config.yaml
 ```
 
 ### YAML Configuration Pattern
@@ -599,7 +605,7 @@ analyses/asia-aq/
 cd analyses/asia-aq
 export ASIA_AQ_DATA=~/Data/ASIA-AQ
 export ASIA_AQ_ANALYSIS=$(pwd)
-davinci-monet run configs/asia-aq-airnow.example.yaml
+davinci run configs/asia-aq-airnow.example.yaml
 ```
 
 ## Plot Styling (NCAR Branding)
@@ -720,11 +726,11 @@ Rules (enforced by `tests/unit/plots/test_labeling.py` + `test_labels_rendered.p
 
 8. **HDF5 thread safety segfaults**: If you see HDF5 errors mentioning "thread 1/thread 2" followed by a segmentation fault, this is an HDF5 thread safety issue. The segfault happens at the C level before Python can catch it, so retry logic won't help. Fix by disabling HDF5 file locking:
    ```bash
-   HDF5_USE_FILE_LOCKING=FALSE davinci-monet run config.yaml
+   HDF5_USE_FILE_LOCKING=FALSE davinci run config.yaml
    ```
    If it persists, also limit Dask workers:
    ```bash
-   DASK_NUM_WORKERS=1 HDF5_USE_FILE_LOCKING=FALSE davinci-monet run config.yaml
+   DASK_NUM_WORKERS=1 HDF5_USE_FILE_LOCKING=FALSE davinci run config.yaml
    ```
 
 9. **AI summary stage**: The `summary:` block enables an opt-in final stage that

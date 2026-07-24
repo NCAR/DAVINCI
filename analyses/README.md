@@ -43,7 +43,7 @@ python analyses/asia-aq/scripts/preprocess_pandora.py
 python analyses/asia-aq/scripts/compute_no2_column.py
 
 # Run the evaluation pipeline
-davinci-monet run analyses/asia-aq/configs/asia-aq-airnow.example.yaml
+davinci run analyses/asia-aq/configs/asia-aq-airnow.example.yaml
 ```
 
 ## Data Locations

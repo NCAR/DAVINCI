@@ -11,7 +11,7 @@
 #
 # Usage:
 #   export YYYY=2025 MM=08 DD=01     # or use scripts/qsub_wrfchem_daily.sh
-#   davinci-monet run analyses/wrfchem-forecast/configs/wrfchem-forecast.example.yaml
+#   davinci run analyses/wrfchem-forecast/configs/wrfchem-forecast.example.yaml
 
 analysis:
   start_time: "${YYYY}-${MM}-${DD}"

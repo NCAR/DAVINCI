@@ -11,7 +11,7 @@
 # Usage:
 #   export DC3_DATA=~/Data/DC3
 #   export DC3_ANALYSIS=$(pwd)
-#   davinci-monet run analyses/dc3/configs/dc3-geometry-dc8.example.yaml
+#   davinci run analyses/dc3/configs/dc3-geometry-dc8.example.yaml
 
 analysis:
   start_time: "2012-05-18"

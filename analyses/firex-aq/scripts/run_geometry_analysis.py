@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Run FIREX-AQ dataset-only analysis pipeline.
 
-Uses DAVINCI-MONET's geometry-only pipeline mode to generate flight track maps,
+Uses DAVINCI's geometry-only pipeline mode to generate flight track maps,
 vertical profiles, time series, histograms, and summary statistics from
 FIREX-AQ aircraft merge data.
 

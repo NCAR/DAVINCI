@@ -19,7 +19,7 @@ def test_version_is_consistent_across_sources() -> None:
     """``__version__``, pyproject ``version``, and the CHANGELOG top entry agree.
 
     Guards against the drift where ``__init__`` declared a stale version while
-    pyproject/CHANGELOG advanced, so ``davinci-monet --version`` printed the
+    pyproject/CHANGELOG advanced, so ``davinci --version`` printed the
     wrong number. ``importlib.metadata`` is intentionally not consulted: the
     calendar version ``"26.06"`` PEP 440-normalizes to ``"26.6"`` and editable
     installs can carry stale egg-info, so it is not a faithful display source.

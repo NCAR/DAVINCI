@@ -9,14 +9,14 @@ cd /Users/fillmore/EarthSystem/DAVINCI
 conda activate davinci
 
 # Test individual configs
-davinci-monet run tests/error_configs/01_malformed_yaml.yaml
-davinci-monet run tests/error_configs/02_bad_indentation.yaml
+davinci run tests/error_configs/01_malformed_yaml.yaml
+davinci run tests/error_configs/02_bad_indentation.yaml
 # ... etc
 
 # Or run them all and capture output
 for f in tests/error_configs/*.yaml; do
   echo "=== Testing: $f ==="
-  davinci-monet run "$f" 2>&1 | head -20
+  davinci run "$f" 2>&1 | head -20
   echo
 done
 ```

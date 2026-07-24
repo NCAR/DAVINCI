@@ -2,7 +2,7 @@
 
 Exercises PipelineRunner.run_from_config() with a ``type: merra2`` GRID source
 paired against a synthetic GRID geometry source, mirroring MERRA-2 AOD vs a gridded
-AOD geometry. This is the pipeline path a user takes with ``davinci-monet run``.
+AOD geometry. This is the pipeline path a user takes with ``davinci run``.
 """
 
 from __future__ import annotations

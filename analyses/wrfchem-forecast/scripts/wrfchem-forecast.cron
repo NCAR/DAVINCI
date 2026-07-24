@@ -6,14 +6,14 @@
 #   crontab -l          # verify
 #
 # Both wrappers submit to Casper PBS (`-q casper@casper-pbs`) and activate
-# the davinci-monet conda env via scripts/activate_env.sh on the compute
+# the davinci conda env via scripts/activate_env.sh on the compute
 # node, so cron's sparse environment doesn't matter.
 #
 # Output: /glade/campaign/acom/acom-da/fillmore/DAVINCI/WRF-Chem/YYYY/MM/DD/
 # Times are UTC.
 
 # Fetch yesterday's AirNow geometry (~30 min walltime)
-20 08 * * * /glade/work/fillmore/DAVINCI-MONET/analyses/wrfchem-forecast/scripts/qsub_fetch_airnow.sh
+20 08 * * * /glade/work/fillmore/DAVINCI/analyses/wrfchem-forecast/scripts/qsub_fetch_airnow.sh
 
 # Run the WRF-Chem vs AirNow + AERONET pipeline for yesterday (~2 h walltime)
-30 09 * * * /glade/work/fillmore/DAVINCI-MONET/analyses/wrfchem-forecast/scripts/qsub_wrfchem_daily.sh
+30 09 * * * /glade/work/fillmore/DAVINCI/analyses/wrfchem-forecast/scripts/qsub_wrfchem_daily.sh

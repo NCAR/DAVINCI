@@ -57,4 +57,5 @@ dependencies:
   # explicitly with --no-deps so pip cannot overlay the conda scientific stack:
   #   python -m pip install --no-deps pycwt==0.4.0b0
   #   python -m pip install --no-deps -e .
+  #   davinci --version
   - pip

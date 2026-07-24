@@ -6,9 +6,9 @@ downloading data, and validating configurations.
 Quick Start
 -----------
 >>> # From command line:
->>> davinci-monet run config.yaml
->>> davinci-monet validate config.yaml
->>> davinci-monet get aeronet -s 2024-01-01 -e 2024-01-31
+>>> davinci run config.yaml
+>>> davinci validate config.yaml
+>>> davinci get aeronet -s 2024-01-01 -e 2024-01-31
 
 Programmatic Usage
 ------------------

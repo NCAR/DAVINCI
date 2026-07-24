@@ -2,7 +2,7 @@
 
 Exercises PipelineRunner.run_from_config() with CERES EBAF (GRID), SYN1deg
 (GRID), and SSF (SWATH) sources against a synthetic gridded dataset — the same
-path a user takes with ``davinci-monet run``. EBAF and SYN1deg tests cover
+path a user takes with ``davinci run``. EBAF and SYN1deg tests cover
 gridded L3 reader paths; SSF tests cover swath reader paths.
 """
 

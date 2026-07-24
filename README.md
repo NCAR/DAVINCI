@@ -83,12 +83,13 @@ mamba env create -f environment.yml
 mamba activate davinci
 python -m pip install --no-deps pycwt==0.4.0b0
 python -m pip install --no-deps -e .
+davinci --version
 
 # Run analysis
-davinci-monet run config.yaml
+davinci run config.yaml
 
 # Validate config
-davinci-monet validate config.yaml
+davinci validate config.yaml
 ```
 
 ## Minimal Example

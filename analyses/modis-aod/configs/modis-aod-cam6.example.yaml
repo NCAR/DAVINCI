@@ -13,7 +13,7 @@
 #   export MODIS_DATA=~/Data/MODIS
 #   export CAM6_DATA=~/Data/CAM6
 #   export MODIS_ANALYSIS=$(pwd)
-#   davinci-monet run analyses/modis-aod/configs/modis-aod-cam6.example.yaml
+#   davinci run analyses/modis-aod/configs/modis-aod-cam6.example.yaml
 
 analysis:
   start_time: "2019-12-21"

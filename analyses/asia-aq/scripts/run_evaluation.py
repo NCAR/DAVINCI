@@ -13,7 +13,7 @@ Usage:
     python run_evaluation.py
 
 Or use the CLI directly:
-    davinci-monet run ../configs/asia-aq-airnow.example.yaml
+    davinci run ../configs/asia-aq-airnow.example.yaml
 """
 
 import os

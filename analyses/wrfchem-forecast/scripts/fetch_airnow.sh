@@ -29,7 +29,7 @@ next_date=$(date --date="${fetch_date} + 1 day" '+%Y%m%d')
 mkdir -p "${AIRNOW_DIR}"
 
 echo "Fetching AirNow ${fetch_date} -> ${next_date}"
-davinci-monet get airnow \
+davinci get airnow \
     --start-date "${fetch_date}" \
     --end-date   "${next_date}" \
     -o "${AIRNOW_DIR}/AirNow_${fetch_date}.nc"

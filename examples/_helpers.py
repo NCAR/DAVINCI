@@ -1,4 +1,4 @@
-"""Shared helper functions for DAVINCI-MONET examples.
+"""Shared helper functions for DAVINCI examples.
 
 This module provides common utilities used across all plot examples.
 """

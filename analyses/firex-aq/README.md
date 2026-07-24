@@ -32,7 +32,7 @@ Downloads DC-8 ICARTT merge files to `~/Data/FIREX-AQ/aircraft/merge/`.
 python scripts/run_geometry_analysis.py firex-aq-geometry-dc8
 
 # Or run directly via CLI
-davinci-monet run analyses/firex-aq/configs/firex-aq-geometry-dc8.example.yaml
+davinci run analyses/firex-aq/configs/firex-aq-geometry-dc8.example.yaml
 ```
 
 ## Directory Structure

@@ -5,13 +5,13 @@ campaign subsets.
 
 ## Access Method
 
-Downloads were made with the DAVINCI CLI in the `davinci-monet` conda
+Downloads were made with the DAVINCI CLI in the `davinci` conda
 environment:
 
 ```bash
-conda activate davinci-monet
-davinci-monet get aeronet ...
-davinci-monet get airnow ...
+conda activate davinci
+davinci get aeronet ...
+davinci get airnow ...
 ```
 
 The CLI uses `monetio` to fetch source data and writes DAVINCI-readable NetCDF

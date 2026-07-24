@@ -1,7 +1,7 @@
 """Integration: previously dead-pinned StatsConfig knobs are honored end-to-end.
 
 Exercises the real ``PipelineRunner.run_from_config()`` path (the same one a user
-hits with ``davinci-monet run config.yaml``) to prove that ``stats.min_samples``
+hits with ``davinci run config.yaml``) to prove that ``stats.min_samples``
 — a knob that StrictSchema used to reject and the stage used to read only as a
 hardcoded default — now flows config -> validated MonetConfig -> typed
 ``stats_config()`` -> StatisticsCalculator and changes the result.

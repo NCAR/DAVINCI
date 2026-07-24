@@ -95,7 +95,7 @@ def _validate_analysis_window(config: object) -> None:
 
 
 def _validate_control_file_semantics(config: object, config_path: Path) -> None:
-    """Run semantic checks expected from ``davinci-monet validate``."""
+    """Run semantic checks expected from ``davinci validate``."""
     _validate_analysis_window(config)
     _validate_registered_source_types(config)
     _validate_declared_source_paths(config, config_path.parent)
