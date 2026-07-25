@@ -12,6 +12,7 @@ from davinci_monet.datasets.satellite.catalog import UnknownProductError
 from davinci_monet.datasets.satellite.modis_viirs import MODISVIIRSReader
 
 _D3_AOD = "AOD_550_Dark_Target_Deep_Blue_Combined_Mean"
+_D3_AOD_STDDEV = "AOD_550_Dark_Target_Deep_Blue_Combined_Standard_Deviation"
 
 
 def _write_mod08_like(path, fname):
@@ -114,6 +115,18 @@ def _write_d3_hdf4(path: Path, fname: str, *, qa_screened: bool = True) -> str:
     if qa_screened:
         aod.attr("Masked_With_QA_Usefulness_Flag").set(SDC.CHAR, "True")
     aod.endaccess()
+
+    stddev = hdf.create(_D3_AOD_STDDEV, SDC.INT16, (2, 3))
+    stddev.dim(0).setname("YDim:mod08")
+    stddev.dim(1).setname("XDim:mod08")
+    stddev[:] = np.array([[20, 30, -9999], [40, 5001, 50]], dtype=np.int16)
+    stddev.attr("_FillValue").set(SDC.INT16, -9999)
+    stddev.attr("valid_range").set(SDC.INT16, [0, 5000])
+    stddev.attr("scale_factor").set(SDC.FLOAT32, 0.001)
+    stddev.attr("add_offset").set(SDC.FLOAT32, 0.0)
+    if qa_screened:
+        stddev.attr("Masked_With_QA_Usefulness_Flag").set(SDC.CHAR, "True")
+    stddev.endaccess()
     hdf.end()
     return str(fpath)
 
@@ -121,13 +134,19 @@ def _write_d3_hdf4(path: Path, fname: str, *, qa_screened: bool = True) -> str:
 def test_daily_d3_hdf4_returns_canonical_qa_screened_aod(tmp_path):
     f = _write_d3_hdf4(tmp_path, "MYD08_D3.A2008184.061.0000.hdf")
 
-    ds = MODISVIIRSReader().open([f], variables=["aod_550nm"], product="MYD08_D3")
+    ds = MODISVIIRSReader().open(
+        [f],
+        variables=["aod_550nm", "aod_550nm_stddev"],
+        product="MYD08_D3",
+    )
 
     assert ds["time"].values[0] == np.datetime64("2008-07-02T00:00:00.000000000")
     assert ds.attrs["cadence"] == "daily"
     assert ds["aod_550nm"].dims == ("time", "lat", "lon")
     np.testing.assert_allclose(ds["aod_550nm"].isel(time=0, lat=0, lon=0), 0.1)
+    np.testing.assert_allclose(ds["aod_550nm_stddev"].isel(time=0, lat=0, lon=0), 0.02)
     assert int(ds["aod_550nm"].isnull().sum()) == 2
+    assert int(ds["aod_550nm_stddev"].isnull().sum()) == 2
     assert ds["aod_550nm"].attrs["qa_screening"] == "level2_usefulness_flag"
     assert "finite cells" in ds["aod_550nm"].attrs["support_definition"]
 

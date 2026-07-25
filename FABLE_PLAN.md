@@ -2,8 +2,9 @@
 
 > Tracked planning document (user-requested exception to the untracked-handoff convention).
 > Status: **P0-P8 software complete; v1 `SYNTHETIC_READY` rejected; v2
-> `passed_pending_user_review`; `SYNTHETIC_READY` remains unset; P9 remains blocked except for
-> the explicitly authorized MODIS D3 reader contract and real 2008 EOF preflight**. Original
+> `passed_pending_user_review`; `SYNTHETIC_READY` remains unset. P9/P10 remain blocked except for
+> the explicitly authorized MODIS D3 reader, real 2008 EOF preflight, and the 2026-07-25
+> EOF-projection/wavelet configuration remediation; resubmission is explicitly held**. Original
 > design written 2026-07-07; synthetic-first pre-flight revision and implementation completed
 > 2026-07-10; frozen v1 acceptance executed 2026-07-10; frozen v2 recovery cycle completed
 > 2026-07-11.
@@ -22,6 +23,17 @@ outputs, a finalized five-mode EOF artifact, and all configured plots. Projectio
 filtering, scaling, and MMR writing remain excluded until a reviewed shifted-log MODIS
 observation-error contract exists. This authorization and successful preflight do not set
 `SYNTHETIC_READY` or authorize the full P10 tuning run.
+
+On 2026-07-25, after an executable-path repair reran the EOF-only preflight under the mistaken
+label of an EOF/wavelet production run, the user authorized two remediations while explicitly
+withholding resubmission. The production control file now declares an exact execution contract
+through `eof_projection` and `wavelet_filter`, and MYD08_D3 exposes its QA-screened within-day AOD
+standard deviation. The observation-error contract combines that field in quadrature with separate
+`0.05` absolute and `0.15*AOD` relative terms, converts it to shifted-log space by the delta method,
+and explicitly assumes independent grid-cell errors. The former EOF-only control is preserved under
+an unambiguous preflight filename and its own smaller execution contract. This is code/configuration
+authorization only: no corrected MMR, scaling, new real-data result, or PBS resubmission is
+authorized by this checkpoint.
 
 ## Synthetic acceptance checkpoint (2026-07-10)
 

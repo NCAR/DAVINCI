@@ -344,6 +344,24 @@ summary:
   max_images: 8
 ```
 
+### Execution Contracts
+
+Production controls may declare the exact derived analyses that must be present:
+
+```yaml
+analysis:
+  execution_contract:
+    name: eof-wavelet-production-v1
+    required_analyses:
+      basis: eof
+      projection: eof_projection
+      filtered: wavelet_filter
+```
+
+Both `davinci validate` and `davinci run` reject a missing or mistyped required analysis before
+loading source data. Use this for scheduled production controls so a structurally valid preflight
+cannot be mistaken for a complete workflow.
+
 **Note**: The old pair shape (`sources: [a, b]` + `geometry:` + `variables:`) is rejected by validation. Use the nested `x:`/`y:` shape above.
 
 ### Config Naming Convention

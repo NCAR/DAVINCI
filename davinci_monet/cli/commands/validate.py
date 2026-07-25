@@ -150,6 +150,16 @@ def validate_config_command(
             for name, source_cfg in config.sources.items():
                 typer.echo(f"    - {name}: {source_cfg.type}")
 
+        if config.analyses:
+            typer.echo(f"  Derived analyses: {len(config.analyses)} defined")
+            for name, analysis_cfg in config.analyses.items():
+                typer.echo(f"    - {name}: {analysis_cfg.type}")
+
+        execution_contract = config.analysis.execution_contract
+        if execution_contract is not None:
+            typer.echo(f"  Execution contract: {execution_contract.name}")
+            typer.echo("    Required analyses: " + ", ".join(execution_contract.required_analyses))
+
         # Unified pairs
         if config.pairs:
             typer.echo(f"  Pairs: {len(config.pairs)} defined")

@@ -1,19 +1,25 @@
-# MERRA-2 / MODIS Aqua 2008 daily-AOD preprocessing and EOF fit.
+# MERRA-2 / MODIS Aqua 2008 production EOF projection and wavelet analysis.
 #
-# This is the first real-data FABLE configuration. It deliberately stops before
-# EOF projection, wavelet filtering, and scaling: MYD08_D3 does not yet have an
-# approved shifted-log observation-error model for the projection covariance.
+# Observation-error contract:
+#   - native QA-screened MYD08_D3 within-day AOD standard deviation;
+#   - root-sum-square 0.05 absolute and 0.15 * AOD retrieval floors;
+#   - delta-method conversion to shifted-log space using epsilon=0.01;
+#   - independent grid-cell covariance.
+#
+# The contract is explicit in aqua_daily, and its name and numeric parameters
+# are persisted in the derived dataset. This control file ends after wavelet
+# filtering; it does not apply AOD scaling or write corrected MMR files.
 #
 # Required environment variables:
 #   FABLE_2008_DATA  Raw staging root containing GMAO/ and MODIS/
-#   FABLE_2008_RUN   Run root containing output/ and logs/
+#   FABLE_2008_RUN   A unique, empty run root containing output/ and logs/
 #
 # Current Derecho staging root:
 #   /glade/derecho/scratch/fillmore/DAVINCI-AOD/raw
 #
 # Example:
 #   export FABLE_2008_DATA=/glade/derecho/scratch/fillmore/DAVINCI-AOD/raw
-#   export FABLE_2008_RUN=/glade/derecho/scratch/fillmore/DAVINCI-AOD/runs/fable-2008
+#   export FABLE_2008_RUN=/glade/derecho/scratch/fillmore/DAVINCI-AOD/runs/fable-2008-eof-wavelet-v1
 #   davinci validate "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml" --strict
 #   davinci run "$PWD/analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml"
 
@@ -24,6 +30,14 @@ analysis:
   output_dir: ${FABLE_2008_RUN}/output
   log_dir: ${FABLE_2008_RUN}/logs
   debug: false
+  execution_contract:
+    name: fable-merra2-aqua-2008-eof-wavelet-v1
+    required_analyses:
+      model_daily: aod_preprocess
+      aqua_daily: aod_preprocess
+      aod_basis: eof
+      obs_pcs: eof_projection
+      filtered_pcs: wavelet_filter
   style:
     theme: ncar
     context: default
@@ -51,6 +65,10 @@ sources:
         units: "1"
         valid_min: 0.0
         valid_max: 5.0
+      aod_550nm_stddev:
+        units: "1"
+        valid_min: 0.0
+        valid_max: 5.0
 
 analyses:
   model_daily:
@@ -70,6 +88,15 @@ analyses:
     day_anchor_hour: 12.0
     target_grid_from: model_daily
     log_epsilon: 0.01
+    uncertainty_model:
+      type: linear_aod_rss
+      name: myd08-d3-c61-daily-aod-rss-v1
+      source_variable: aod_550nm_stddev
+      absolute_floor: 0.05
+      relative_fraction: 0.15
+      combination: root_sum_square
+      transform: delta_method
+      covariance: independent
     required: true
 
   aod_basis:
@@ -89,17 +116,69 @@ analyses:
       end: "2008-12-31 23:59:59"
     required: true
 
+  obs_pcs:
+    type: eof_projection
+    basis: aod_basis
+    model: model_daily
+    model_variable: log_aod
+    obs:
+      - source: aqua_daily
+        variable: log_aod
+        error_variable: obs_error_std
+    ridge: 1.0
+    bias_fit_window:
+      start: "2008-01-01 00:00:00"
+      end: "2008-12-31 23:59:59"
+    bias_fit_method: joint_seasonal
+    sensor_offset_method: overlap_zero_sum
+    joint_bias_laplacian_strength: 1.0
+    joint_bias_tolerance: 1.0e-6
+    joint_bias_max_iterations: 20
+    clim_bias: true
+    spatial_support: monthly_taper
+    support_min_fraction: 0.2
+    support_full_fraction: 0.5
+    support_smoothing_passes: 2
+    delta_bounds: [-1.6094379, 1.6094379]
+    min_resolution: 0.3
+    time_chunk_size: 31
+    required: true
+
+  filtered_pcs:
+    type: wavelet_filter
+    source: obs_pcs
+    variable: pc
+    resolution_variable: resolution
+    min_resolution: 0.3
+    keep_significant: false
+    significance_level: 0.95
+    band:
+      min: 4
+      max: 180
+      units: days
+    max_bridge_days: 7
+    min_segment_days: 360
+    omega0: 6.0
+    dj: 0.25
+    required: true
+
 plots:
-  basis_maps:
-    type: eof_pattern
-    source: aod_basis
-    variable: eofs
   basis_scree:
     type: eof_scree
     source: aod_basis
     variable: explained_variance
-  pc1:
+  projected_pc1:
     type: timeseries
-    source: aod_basis
+    source: obs_pcs
     variable: pc
+    mode: 1
+  filtered_pc1:
+    type: timeseries
+    source: filtered_pcs
+    variable: pc
+    mode: 1
+  filtered_pc1_scalogram:
+    type: wavelet_scalogram
+    source: filtered_pcs
+    variable: power
     mode: 1

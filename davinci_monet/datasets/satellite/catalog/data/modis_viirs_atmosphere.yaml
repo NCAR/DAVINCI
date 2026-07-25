@@ -53,6 +53,14 @@ products:
         valid_min: 0.0
         valid_max: 5.0
         qa_screening: level2_usefulness_flag
+      - display_name: aod_550nm_stddev
+        sds_name: AOD_550_Dark_Target_Deep_Blue_Combined_Standard_Deviation
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Within-day standard deviation of combined Dark Target and Deep Blue AOD"
+        valid_min: 0.0
+        valid_max: 5.0
+        qa_screening: level2_usefulness_flag
   - product_id: MYD08_D3
     instrument: MODIS
     platform: Aqua
@@ -70,6 +78,14 @@ products:
         units: "1"
         wavelength_nm: 550
         long_name: "Combined Dark Target and Deep Blue AOD at 0.55um, daily mean"
+        valid_min: 0.0
+        valid_max: 5.0
+        qa_screening: level2_usefulness_flag
+      - display_name: aod_550nm_stddev
+        sds_name: AOD_550_Dark_Target_Deep_Blue_Combined_Standard_Deviation
+        units: "1"
+        wavelength_nm: 550
+        long_name: "Within-day standard deviation of combined Dark Target and Deep Blue AOD"
         valid_min: 0.0
         valid_max: 5.0
         qa_screening: level2_usefulness_flag

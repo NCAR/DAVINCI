@@ -82,6 +82,39 @@ class TestAnalysisConfig:
         assert config.style.theme == "ncar"  # type: ignore[union-attr]
         assert config.style.context == "publication"  # type: ignore[union-attr]
 
+    def test_execution_contract_requires_named_analysis_types(self) -> None:
+        raw: dict[str, Any] = {
+            "analysis": {
+                "execution_contract": {
+                    "name": "eof-wavelet-production-v1",
+                    "required_analyses": {
+                        "basis": "eof",
+                        "filtered": "wavelet_filter",
+                    },
+                }
+            },
+            "sources": {"model": {"type": "generic"}},
+            "analyses": {
+                "basis": {
+                    "type": "eof",
+                    "source": "model",
+                    "variable": "aod",
+                }
+            },
+        }
+
+        with pytest.raises(ValueError, match="requires analyses.filtered"):
+            validate_schema(MonetConfig, raw)
+
+        raw["analyses"]["filtered"] = {
+            "type": "wavelet",
+            "source": "basis",
+            "variable": "pc",
+            "mode": 1,
+        }
+        with pytest.raises(ValueError, match="requires analyses.filtered.type='wavelet_filter'"):
+            validate_schema(MonetConfig, raw)
+
 
 class TestPlotStyleConfig:
     """Tests for PlotStyleConfig."""

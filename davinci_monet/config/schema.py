@@ -73,6 +73,36 @@ class PlotStyleConfig(StrictSchema):
 # =============================================================================
 
 
+AnalysisTypeName = Literal[
+    "eof",
+    "wavelet",
+    "aod_preprocess",
+    "eof_projection",
+    "wavelet_filter",
+    "aod_scaling",
+    "mmr_writer",
+    "known_truth",
+    "fable_v2_diagnostics",
+    "gridded_analysis",
+]
+
+
+class AnalysisExecutionContract(StrictSchema):
+    """Named declaration of analyses that must exist before a run may start."""
+
+    name: str = Field(min_length=1)
+    required_analyses: dict[str, AnalysisTypeName] = Field(min_length=1)
+
+    @field_validator("required_analyses")
+    @classmethod
+    def _validate_required_analysis_names(
+        cls, value: dict[str, AnalysisTypeName]
+    ) -> dict[str, AnalysisTypeName]:
+        if any(not str(name).strip() for name in value):
+            raise ValueError("execution contract analysis names must not be blank")
+        return value
+
+
 class AnalysisConfig(StrictSchema):
     """Configuration for the analysis section.
 
@@ -108,6 +138,7 @@ class AnalysisConfig(StrictSchema):
     city_labels: dict[str, list[float]] | None = None
     domain: str | None = None
     workflow: Literal["standard", "synthetic_fit", "synthetic_evaluation"] = "standard"
+    execution_contract: AnalysisExecutionContract | None = None
 
     @field_validator("style", mode="before")
     @classmethod
@@ -838,6 +869,26 @@ class WaveletSpec(AnalysisSpecBase):
         return value
 
 
+class LinearAODUncertaintySpec(StrictSchema):
+    """Explicit linear-AOD uncertainty model transformed for projection."""
+
+    type: Literal["linear_aod_rss"]
+    name: str = Field(min_length=1)
+    source_variable: str = Field(min_length=1)
+    absolute_floor: float = Field(gt=0.0)
+    relative_fraction: float = Field(default=0.0, ge=0.0)
+    combination: Literal["root_sum_square"] = "root_sum_square"
+    transform: Literal["delta_method"] = "delta_method"
+    covariance: Literal["independent"] = "independent"
+
+    @field_validator("absolute_floor", "relative_fraction")
+    @classmethod
+    def _validate_finite_uncertainty_controls(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("uncertainty model controls must be finite")
+        return value
+
+
 class AODPreprocessSpec(AnalysisSpecBase):
     """Screen, daily-sample, regrid, and shifted-log transform one AOD field."""
 
@@ -852,6 +903,7 @@ class AODPreprocessSpec(AnalysisSpecBase):
     log_epsilon: float = Field(default=0.01, gt=0.0)
     uncertainty_variable: str | None = None
     uncertainty_covariance: Literal["independent"] | None = None
+    uncertainty_model: LinearAODUncertaintySpec | None = None
     common_factor_variables: list[str] = Field(default_factory=list)
 
     def input_refs(self) -> dict[str, str]:
@@ -900,6 +952,15 @@ class AODPreprocessSpec(AnalysisSpecBase):
     def _validate_target_grid(self) -> "AODPreprocessSpec":
         if self.target_grid is not None and self.target_grid_from is not None:
             raise ValueError("target_grid and target_grid_from are mutually exclusive")
+        if self.uncertainty_model is not None and (
+            self.uncertainty_variable is not None or self.uncertainty_covariance is not None
+        ):
+            raise ValueError(
+                "uncertainty_model is mutually exclusive with uncertainty_variable "
+                "and uncertainty_covariance"
+            )
+        if self.uncertainty_covariance is not None and self.uncertainty_variable is None:
+            raise ValueError("uncertainty_covariance requires uncertainty_variable")
         if self.target_grid is not None:
             latitude_cells = 180.0 / self.target_grid
             longitude_cells = 360.0 / self.target_grid
@@ -1492,6 +1553,22 @@ class MonetConfig(StrictSchema):
             if isinstance(spec, (MMRWriterSpec, KnownTruthSpec, FableV2DiagnosticsSpec))
         }
         errors: list[str] = []
+
+        execution_contract = self.analysis.execution_contract
+        if execution_contract is not None:
+            for required_name, required_type in execution_contract.required_analyses.items():
+                declared = self.analyses.get(required_name)
+                if declared is None:
+                    errors.append(
+                        f"analysis.execution_contract {execution_contract.name!r} requires "
+                        f"analyses.{required_name} with type {required_type!r}"
+                    )
+                elif declared.type != required_type:
+                    errors.append(
+                        f"analysis.execution_contract {execution_contract.name!r} requires "
+                        f"analyses.{required_name}.type={required_type!r}, "
+                        f"got {declared.type!r}"
+                    )
 
         fit_types = {
             "aod_preprocess",

@@ -72,6 +72,11 @@ def test_catalog_resolves_daily_modis_d3_contract():
         assert aod.valid_min == 0.0
         assert aod.valid_max == 5.0
         assert aod.qa_screening == "level2_usefulness_flag"
+        stddev = product.variable_by_display("aod_550nm_stddev")
+        assert stddev is not None
+        assert stddev.sds_name == "AOD_550_Dark_Target_Deep_Blue_Combined_Standard_Deviation"
+        assert stddev.valid_min == 0.0
+        assert stddev.qa_screening == "level2_usefulness_flag"
 
 
 def test_catalog_unknown_product_suggests_matches():

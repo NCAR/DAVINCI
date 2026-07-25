@@ -43,8 +43,14 @@ def preprocess_aod(
     raw_valid = cast(xr.DataArray, np.isfinite(aod)) & (aod >= 0.0)
     fields: dict[str, xr.DataArray] = {"aod": aod.where(raw_valid)}
 
-    if spec.uncertainty_variable is not None:
-        fields["obs_error_std"] = _source_field(source, spec.uncertainty_variable, raw_valid)
+    uncertainty_model = spec.uncertainty_model
+    uncertainty_variable = (
+        uncertainty_model.source_variable
+        if uncertainty_model is not None
+        else spec.uncertainty_variable
+    )
+    if uncertainty_variable is not None:
+        fields["obs_error_std"] = _source_field(source, uncertainty_variable, raw_valid)
     for factor_name in spec.common_factor_variables:
         fields[f"factor:{factor_name}"] = _source_field(source, factor_name, raw_valid)
 
@@ -77,11 +83,17 @@ def preprocess_aod(
 
     source_valid = cast(xr.DataArray, np.isfinite(fields["aod"]))
     if "obs_error_std" in fields:
-        invalid_error = source_valid & (
-            ~cast(xr.DataArray, np.isfinite(fields["obs_error_std"]))
-            | (fields["obs_error_std"] <= 0.0)
+        invalid_error = source_valid & ~cast(xr.DataArray, np.isfinite(fields["obs_error_std"]))
+        invalid_error |= source_valid & (
+            fields["obs_error_std"] < 0.0
+            if uncertainty_model is not None
+            else fields["obs_error_std"] <= 0.0
         )
         if _any(invalid_error):
+            if uncertainty_model is not None:
+                raise ValueError(
+                    "source uncertainty must be finite and non-negative " "for every valid AOD cell"
+                )
             raise ValueError("obs_error_std must be finite and positive at every valid AOD cell")
     for name, field in fields.items():
         if name.startswith("factor:") and _any(
@@ -106,7 +118,12 @@ def preprocess_aod(
             target_lon=target_lon,
         )
         if "obs_error_std" in fields:
-            if spec.uncertainty_covariance != "independent":
+            covariance = (
+                uncertainty_model.covariance
+                if uncertainty_model is not None
+                else spec.uncertainty_covariance
+            )
+            if covariance != "independent":
                 raise ValueError(
                     "coarsening uncertainty requires uncertainty_covariance='independent'"
                 )
@@ -143,12 +160,19 @@ def preprocess_aod(
         "valid": valid,
     }
     if "obs_error_std" in fields:
-        error = (
-            fields.pop("obs_error_std")
-            .transpose("time", "lat", "lon")
-            .where(valid)
-            .rename("obs_error_std")
-        )
+        source_error = fields.pop("obs_error_std").transpose("time", "lat", "lon").where(valid)
+        if uncertainty_model is not None:
+            linear_variance = (
+                source_error**2
+                + float(uncertainty_model.absolute_floor) ** 2
+                + (float(uncertainty_model.relative_fraction) * processed_aod) ** 2
+            )
+            transformed_error = cast(xr.DataArray, np.sqrt(linear_variance)) / (
+                processed_aod + float(spec.log_epsilon)
+            )
+            error = transformed_error.rename("obs_error_std")
+        else:
+            error = source_error.rename("obs_error_std")
         missing_error = valid & (~cast(xr.DataArray, np.isfinite(error)) | (error <= 0.0))
         if _any(missing_error):
             raise ValueError("obs_error_std must be finite and positive at every valid AOD cell")
@@ -157,6 +181,17 @@ def preprocess_aod(
             long_name="Observation error standard deviation in shifted-log space",
             space="shifted_log",
         )
+        if uncertainty_model is not None:
+            error.attrs.update(
+                uncertainty_contract=uncertainty_model.name,
+                uncertainty_model=uncertainty_model.type,
+                uncertainty_source_variable=uncertainty_model.source_variable,
+                uncertainty_combination=uncertainty_model.combination,
+                uncertainty_transform=uncertainty_model.transform,
+                uncertainty_covariance=uncertainty_model.covariance,
+                uncertainty_absolute_floor=float(uncertainty_model.absolute_floor),
+                uncertainty_relative_fraction=float(uncertainty_model.relative_fraction),
+            )
         output_fields["obs_error_std"] = error
 
     common_factors = _combine_common_factors(fields, valid)
@@ -183,6 +218,17 @@ def preprocess_aod(
         output.attrs["target_grid_degrees"] = float(spec.target_grid)
     elif spec.target_grid_from is not None:
         output.attrs["target_grid_from"] = spec.target_grid_from
+    if uncertainty_model is not None:
+        output.attrs.update(
+            uncertainty_contract=uncertainty_model.name,
+            uncertainty_model=uncertainty_model.type,
+            uncertainty_source_variable=uncertainty_model.source_variable,
+            uncertainty_combination=uncertainty_model.combination,
+            uncertainty_transform=uncertainty_model.transform,
+            uncertainty_covariance=uncertainty_model.covariance,
+            uncertainty_absolute_floor=float(uncertainty_model.absolute_floor),
+            uncertainty_relative_fraction=float(uncertainty_model.relative_fraction),
+        )
     return output
 
 

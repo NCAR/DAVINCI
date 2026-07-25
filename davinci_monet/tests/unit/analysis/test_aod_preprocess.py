@@ -12,7 +12,7 @@ import xarray as xr
 from davinci_monet.analysis.aod_preprocess import preprocess_aod
 from davinci_monet.analysis.artifacts import ArtifactService
 from davinci_monet.analysis.base import AnalysisRuntime
-from davinci_monet.config.schema import AODPreprocessSpec
+from davinci_monet.config.schema import AODPreprocessSpec, LinearAODUncertaintySpec
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.pipeline.stages.analyses import AnalysesStage
 from davinci_monet.pipeline.stages.base import PipelineContext, SourceData, StageStatus
@@ -130,6 +130,51 @@ def test_exact_target_grid_preserves_uncertainty_and_common_factor(tmp_path: Pat
         output["common_error_factor"].isel(common_mode=0), source["shared"]
     )
     assert output["common_error_factor"]["common_mode"].item() == "shared"
+
+
+def test_linear_aod_uncertainty_contract_transforms_and_records_provenance(
+    tmp_path: Path,
+) -> None:
+    aod = np.array([[[0.0, 0.2]]])
+    source_stddev = np.array([[[0.0, 0.04]]])
+    source = xr.Dataset(
+        {
+            "aod": (("time", "lat", "lon"), aod),
+            "aod_stddev": (("time", "lat", "lon"), source_stddev),
+        },
+        coords={
+            "time": np.array(["2001-01-01"], dtype="datetime64[D]"),
+            "lat": [0.0],
+            "lon": [-0.5, 0.5],
+        },
+    )
+    spec = AODPreprocessSpec(
+        type="aod_preprocess",
+        source="sensor",
+        variable="aod",
+        log_epsilon=0.01,
+        uncertainty_model=LinearAODUncertaintySpec(
+            type="linear_aod_rss",
+            name="test-aod-error-v1",
+            source_variable="aod_stddev",
+            absolute_floor=0.05,
+            relative_fraction=0.15,
+            covariance="independent",
+        ),
+    )
+
+    output = preprocess_aod(
+        source,
+        spec,
+        _runtime(tmp_path, end=datetime(2001, 1, 1, 23, 59, 59)),
+    )
+
+    expected = np.sqrt(source_stddev**2 + 0.05**2 + (0.15 * aod) ** 2) / (aod + 0.01)
+    np.testing.assert_allclose(output["obs_error_std"], expected)
+    assert output["obs_error_std"].attrs["space"] == "shifted_log"
+    assert output.attrs["uncertainty_contract"] == "test-aod-error-v1"
+    assert output.attrs["uncertainty_transform"] == "delta_method"
+    assert output.attrs["uncertainty_covariance"] == "independent"
 
 
 @pytest.mark.parametrize(
