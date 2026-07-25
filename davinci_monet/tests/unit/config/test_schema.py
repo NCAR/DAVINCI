@@ -104,8 +104,17 @@ class TestAnalysisConfig:
                 },
             },
             "analysis": {
-                "output_dir": "/run/output",
-                "log_dir": "/run/logs",
+                "output_dir": "/run/a001/output",
+                "log_dir": "/run/a001/logs",
+            },
+            "execution": {
+                "attempt_root": "/run/a001",
+                "checkpoints": {
+                    "mode": "required",
+                    "granularity": "item",
+                    "loaded_sources": True,
+                    "retain": "all",
+                },
             },
             "sources": {"model": {"type": "generic"}},
             "analyses": {
@@ -164,8 +173,17 @@ class TestAnalysisConfig:
                 },
             },
             "analysis": {
-                "output_dir": "/run/output",
-                "log_dir": "/run/logs",
+                "output_dir": "/run/a001/output",
+                "log_dir": "/run/a001/logs",
+            },
+            "execution": {
+                "attempt_root": "/run/a001",
+                "checkpoints": {
+                    "mode": "required",
+                    "granularity": "item",
+                    "loaded_sources": True,
+                    "retain": "all",
+                },
             },
             "sources": {"model": {"type": "generic"}},
             "analyses": {
@@ -289,6 +307,138 @@ class TestAnalysisConfig:
 
         with pytest.raises(ValueError, match="analysis.execution_contract"):
             validate_schema(MonetConfig, raw)
+
+    def test_production_run_requires_checkpoint_execution_policy(self) -> None:
+        raw = self._minimal_production_config()
+        raw.pop("execution")
+
+        with pytest.raises(ValueError, match="production runs require execution"):
+            validate_schema(MonetConfig, raw)
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("mode", "best_effort", "checkpoint mode"),
+            ("granularity", "stage", "checkpoint granularity"),
+            ("loaded_sources", False, "loaded-source checkpoints"),
+            ("retain", "failed", "checkpoint retention"),
+        ],
+    )
+    def test_production_run_rejects_incomplete_checkpoint_policy(
+        self,
+        field: str,
+        value: Any,
+        message: str,
+    ) -> None:
+        raw = self._minimal_production_config()
+        raw["execution"]["checkpoints"][field] = value
+
+        with pytest.raises(ValueError, match=message):
+            validate_schema(MonetConfig, raw)
+
+    def test_execution_attempt_root_must_own_output_and_logs(self) -> None:
+        raw = self._minimal_production_config()
+        raw["execution"]["attempt_root"] = "/different/a001"
+
+        with pytest.raises(ValueError, match="attempt_root must be the common parent"):
+            validate_schema(MonetConfig, raw)
+
+    def test_execution_attempt_root_requires_attempt_notation(self) -> None:
+        raw = self._minimal_production_config()
+        raw["analysis"]["output_dir"] = "/run/current/output"
+        raw["analysis"]["log_dir"] = "/run/current/logs"
+        raw["execution"]["attempt_root"] = "/run/current"
+
+        with pytest.raises(ValueError, match="aNNN notation"):
+            validate_schema(MonetConfig, raw)
+
+    def test_preflight_accepts_best_effort_item_checkpoints(self) -> None:
+        config = validate_schema(
+            MonetConfig,
+            {
+                "run": {
+                    "id": "aod-model-sensor-preflight",
+                    "kind": "preflight",
+                },
+                "analysis": {
+                    "output_dir": "/run/a001/output",
+                    "log_dir": "/run/a001/logs",
+                },
+                "execution": {
+                    "attempt_root": "/run/a001",
+                    "checkpoints": {
+                        "mode": "best_effort",
+                        "granularity": "item",
+                        "loaded_sources": True,
+                        "retain": "all",
+                    },
+                },
+                "sources": {"model": {"type": "generic"}},
+            },
+        )
+
+        assert config.execution is not None
+        assert config.execution.checkpoints.mode == "best_effort"
+
+    @pytest.mark.parametrize("legacy_key", ["checkpoint_dir", "resume_from"])
+    def test_execution_rejects_unknown_or_legacy_keys(self, legacy_key: str) -> None:
+        raw = self._minimal_production_config()
+        raw["execution"][legacy_key] = "/legacy"
+
+        with pytest.raises(ValueError, match=legacy_key):
+            validate_schema(MonetConfig, raw)
+
+    @staticmethod
+    def _minimal_production_config() -> dict[str, Any]:
+        return {
+            "run": {
+                "id": "aod-model-sensor-2008-eof-r01",
+                "kind": "production",
+                "completion": {
+                    "required_analyses": {"basis": "eof"},
+                    "required_artifacts": [{"analysis": "basis", "role": "basis_fit"}],
+                    "required_plots": ["basis_scree"],
+                    "inspection": {
+                        "required": True,
+                        "presets": ["eof_wavelet"],
+                    },
+                },
+            },
+            "analysis": {
+                "output_dir": "/run/a001/output",
+                "log_dir": "/run/a001/logs",
+            },
+            "execution": {
+                "attempt_root": "/run/a001",
+                "checkpoints": {
+                    "mode": "required",
+                    "granularity": "item",
+                    "loaded_sources": True,
+                    "retain": "all",
+                },
+            },
+            "sources": {"model": {"type": "generic"}},
+            "analyses": {
+                "basis": {
+                    "type": "eof",
+                    "source": "model",
+                    "variable": "aod",
+                    "required": True,
+                }
+            },
+            "plots": {
+                "basis_scree": {
+                    "type": "eof_scree",
+                    "source": "basis",
+                    "variable": "explained_variance",
+                }
+            },
+            "inspection": {
+                "enabled": True,
+                "required": True,
+                "presets": ["eof_wavelet"],
+            },
+        }
 
 
 class TestPlotStyleConfig:

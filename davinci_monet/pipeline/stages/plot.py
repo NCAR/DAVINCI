@@ -11,6 +11,10 @@ from typing import Any
 from davinci_monet.core.base import iter_paired_variable_xy, paired_canonical_name
 from davinci_monet.core.exceptions import PlottingError
 from davinci_monet.core.schema_utils import dump_schema, is_schema_object
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -703,6 +707,32 @@ class PlottingStage(BaseStage):
         for plot_name, plot_spec in plot_config.items():
             try:
                 plot_number += 1
+                manager = item_checkpoint_manager(context)
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item=str(plot_name),
+                    config={
+                        "plot": plot_spec,
+                        "style": analysis_config.get("style"),
+                        "plot_suites": config.get("plot_suites", {}),
+                    },
+                    dependencies=tuple(context.checkpoint_dependencies),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    restored_paths = manager.restore_files(lookup.receipt)
+                    plots_generated.extend(restored_paths)
+                    plot_products[str(plot_name)] = restored_paths
+                    increment = int(
+                        lookup.receipt.context_delta.get(
+                            "file_index_increment",
+                            max(1, len(restored_paths)),
+                        )
+                    )
+                    file_index += increment
+                    plot_count += increment
+                    context.log_progress(f"    Restored plot checkpoint: {plot_name}")
+                    continue
                 plot_type = plot_spec.get("type", "scatter")
                 plot_pairs = plot_spec.get("pairs", [])
                 title = _title_text(plot_spec.get("title", plot_name))
@@ -775,6 +805,15 @@ class PlottingStage(BaseStage):
                 new_paths = plots_generated[path_count_before:]
                 if new_paths:
                     plot_products.setdefault(plot_name, []).extend(new_paths)
+                    if manager is not None:
+                        manager.capture_files(
+                            request,
+                            new_paths,
+                            context_delta={
+                                "logical_plot": plot_name,
+                                "file_index_increment": file_index - file_index_before,
+                            },
+                        )
 
             except Exception as e:
                 context.metadata.setdefault("plot_errors", []).append(f"{plot_name}: {e}")

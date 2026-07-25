@@ -6,6 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -225,8 +226,71 @@ pairs:
             "show_progress": True,
             "show_plots": True,
             "preview_format": "png",
+            "resume": False,
+            "resume_plan": False,
+            "restart_from": None,
         }
         assert "Analysis complete" in result.stdout
+
+    def test_run_help_documents_resume_controls(self) -> None:
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(app, ["run", "--help"])
+
+        assert result.exit_code == 0
+        assert "--resume" in result.stdout
+        assert "--resume-plan" in result.stdout
+        assert "--restart-from" in result.stdout
+
+    @pytest.mark.parametrize(
+        ("options", "message"),
+        [
+            (["--resume", "--resume-plan"], "mutually exclusive"),
+            (["--restart-from", "analysis"], "requires --resume"),
+            (["--resume-plan", "--show-plots"], "cannot be combined"),
+        ],
+    )
+    def test_run_rejects_invalid_resume_option_combinations(
+        self,
+        sample_config: Path,
+        options: list[str],
+        message: str,
+    ) -> None:
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(app, ["run", *options, str(sample_config)])
+
+        assert result.exit_code == 2
+        assert message in result.stdout
+
+    def test_run_forwards_resume_options(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from typer.testing import CliRunner
+
+        import davinci_monet.pipeline.runner as runner_module
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("analysis: {}\nsources: {}\n")
+        captured: dict[str, Any] = {}
+
+        def fake_pipeline_run(config_path: str, **kwargs: Any) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                success=True,
+                total_duration_seconds=0.1,
+                completed_stages=[],
+            )
+
+        monkeypatch.setattr(runner_module, "run_analysis", fake_pipeline_run)
+        result = CliRunner().invoke(
+            app,
+            ["run", "--resume", "--restart-from", "analyses:eof", str(config_file)],
+        )
+
+        assert result.exit_code == 0
+        assert captured["resume"] is True
+        assert captured["restart_from"] == "analyses:eof"
 
 
 # =============================================================================
@@ -417,8 +481,15 @@ run:
 analysis:
   start_time: 2024-01-01
   end_time: 2024-01-02
-  output_dir: {tmp_path / "run" / "output"}
-  log_dir: {tmp_path / "run" / "logs"}
+  output_dir: {tmp_path / "a001" / "output"}
+  log_dir: {tmp_path / "a001" / "logs"}
+execution:
+  attempt_root: {tmp_path / "a001"}
+  checkpoints:
+    mode: required
+    granularity: item
+    loaded_sources: true
+    retain: all
 sources:
   model:
     type: generic
@@ -480,7 +551,7 @@ inspection:
         from typer.testing import CliRunner
 
         config_file = self._production_config(tmp_path)
-        output_dir = tmp_path / "run" / "output"
+        output_dir = tmp_path / "a001" / "output"
         output_dir.mkdir(parents=True)
         (output_dir / "manifest.json").write_text(
             '{"status": "completed"}\n',
@@ -494,6 +565,43 @@ inspection:
 
         assert result.exit_code == 1
         assert "output directory is not empty" in result.stdout
+
+    def test_resume_readiness_accepts_incomplete_exact_attempt(self, tmp_path: Path) -> None:
+        from davinci_monet.config import load_config
+        from davinci_monet.pipeline.checkpoints.manager import CheckpointManager
+        from davinci_monet.pipeline.checkpoints.models import ExecutionStatus
+        from davinci_monet.validation import evaluate_run_readiness
+
+        config_file = self._production_config(tmp_path)
+        config = load_config(config_file, strict=True)
+        manager = CheckpointManager.create(config, config_path=config_file)
+        assert manager is not None
+        manager.begin_execution()
+        manager.finish_execution(ExecutionStatus.FAILED, error="interrupted fixture")
+
+        report = evaluate_run_readiness(config, config_file, mode="resume")
+
+        assert report.ready
+        assert report.mode == "resume"
+
+    def test_resume_readiness_rejects_completed_attempt(self, tmp_path: Path) -> None:
+        from davinci_monet.config import load_config
+        from davinci_monet.pipeline.checkpoints.manager import CheckpointManager
+        from davinci_monet.pipeline.checkpoints.models import ExecutionStatus
+        from davinci_monet.validation import evaluate_run_readiness
+
+        config_file = self._production_config(tmp_path)
+        config = load_config(config_file, strict=True)
+        manager = CheckpointManager.create(config, config_path=config_file)
+        assert manager is not None
+        manager.begin_execution()
+        manager.finish_execution(ExecutionStatus.COMPLETED)
+
+        report = evaluate_run_readiness(config, config_file, mode="resume")
+
+        assert not report.ready
+        attempt = next(check for check in report.checks if check.name == "attempt_paths")
+        assert "already completed" in attempt.detail
 
 
 # =============================================================================

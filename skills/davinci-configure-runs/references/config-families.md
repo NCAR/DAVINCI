@@ -47,8 +47,10 @@ Before readiness validation, confirm:
 5. Inspection is enabled, required, and uses registered presets.
 6. `analysis.output_dir` and `analysis.log_dir` are sibling `output/` and `logs/` paths under one
    unique, empty attempt root.
-7. Source environment variables resolve and source globs match files.
-8. The job path is noninteractive and contains no approval gate.
+7. `execution.checkpoints` sets `mode: required`, `granularity: item`,
+   `loaded_sources: true`, and `retain: all`.
+8. Source environment variables resolve and source globs match files.
+9. The job path is noninteractive and contains no approval gate.
 
 Run strict readiness after structural review. A skipped source-coverage check is an explicit
 limitation, not a pass.

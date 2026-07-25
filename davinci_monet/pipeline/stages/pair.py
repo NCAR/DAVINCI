@@ -14,6 +14,10 @@ import xarray as xr
 from davinci_monet.core.base import PairedData, iter_paired_variable_xy
 from davinci_monet.core.exceptions import PipelineError
 from davinci_monet.core.protocols import DataGeometry
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -78,11 +82,45 @@ class PairingStage(BaseStage):
                 count=0,
             )
 
+        manager = item_checkpoint_manager(context)
+        requests: dict[str, CheckpointRequest] = {}
+        pending_jobs: list[SourcePairJob] = []
+        pair_specs = config.get("pairs", {})
+        analysis_names = set(context.analyses_config())
+        for job in source_jobs:
+            request = CheckpointRequest(
+                stage=self.name,
+                item=job.pair_key,
+                config={
+                    "pair": pair_specs.get(job.pair_key, {}),
+                    "pairing": pairing_config_dict,
+                },
+                dependencies=tuple(
+                    (("analyses", source) if source in analysis_names else ("load_sources", source))
+                    for source in (job.x_source, job.y_source)
+                ),
+            )
+            requests[job.pair_key] = request
+            lookup = manager.lookup(request) if manager is not None else None
+            if manager is not None and lookup is not None and lookup.receipt is not None:
+                context.paired[job.pair_key] = manager.restore_paired(lookup.receipt)
+                context.log_progress(f"    Restored pair checkpoint: {job.pair_key}")
+            else:
+                pending_jobs.append(job)
+        if not pending_jobs:
+            return self._create_result(
+                StageStatus.COMPLETED,
+                data={"paired_keys": list(context.paired.keys())},
+                duration=time.time() - start,
+                count=len(context.paired),
+            )
+
         return self._execute_source_pair_jobs(
             context,
-            source_jobs,
+            pending_jobs,
             pairing_config_dict,
             start,
+            checkpoint_requests=requests,
         )
 
     def _build_source_pair_jobs(
@@ -445,6 +483,7 @@ class PairingStage(BaseStage):
         jobs: list[SourcePairJob],
         pairing_config_dict: dict[str, Any],
         start: float,
+        checkpoint_requests: dict[str, CheckpointRequest] | None = None,
     ) -> StageResult:
         """Execute source-pair jobs through the pairing engine.
 
@@ -479,7 +518,7 @@ class PairingStage(BaseStage):
 
         config = context.config_dict()
         debug = config.get("analysis", {}).get("debug", False)
-        paired_count = 0
+        paired_count = len(context.paired)
         execution_errors: list[str] = []
         context.log_progress(f"    parallel_start: {len(jobs)}")
 
@@ -513,6 +552,9 @@ class PairingStage(BaseStage):
                 return
             paired_data = paired_obj.data
             context.paired[job.pair_key] = paired_obj
+            manager = item_checkpoint_manager(context)
+            if manager is not None and checkpoint_requests is not None:
+                manager.capture_paired(checkpoint_requests[job.pair_key], paired_obj)
             paired_count += 1
             n_vars = len(iter_paired_variable_xy(paired_data))
             n_points = paired_data.sizes.get("time", paired_data.sizes.get("x", 0))
@@ -574,6 +616,15 @@ class PairingStage(BaseStage):
                         _record(j, paired_obj, error, pair_start)
 
         context.log_progress("    parallel_end")
+        configured_order = list(config.get("pairs", {}))
+        context.paired = {
+            key: context.paired[key]
+            for key in (
+                *configured_order,
+                *(key for key in context.paired if key not in configured_order),
+            )
+            if key in context.paired
+        }
         if execution_errors:
             context.metadata.setdefault("pairing_errors", []).extend(execution_errors)
             if paired_count == 0:

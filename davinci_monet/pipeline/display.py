@@ -448,7 +448,13 @@ class ProgressFormatter:
             self._live.start()
             self._start_animation_loop()
 
-    def stage_end(self, name: str, success: bool, duration: float) -> None:
+    def stage_end(
+        self,
+        name: str,
+        success: bool,
+        duration: float,
+        disposition: str | None = None,
+    ) -> None:
         """Print stage end with status and summary of items processed."""
         # Stop the live animation
         if self._live is not None:
@@ -469,10 +475,13 @@ class ProgressFormatter:
             style = f"bold {self.NCAR_RED}"
             status = "FAILED"
 
-        self._log(f"  {icon} {status} ({duration:.1f}s)")
+        disposition_text = f" [{disposition}]" if disposition else ""
+        self._log(f"  {icon} {status}{disposition_text} ({duration:.1f}s)")
 
         # Show stage completion
-        self._print(f"  [{style}]{icon} {name}[/{style}] [dim]({duration:.1f}s)[/dim]")
+        self._print(
+            f"  [{style}]{icon} {name}[/{style}]" f"{disposition_text} [dim]({duration:.1f}s)[/dim]"
+        )
 
         # Show summary of items processed in this stage (exclude plots - shown in preview)
         if self._stage_items and success:

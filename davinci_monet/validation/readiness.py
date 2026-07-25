@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
@@ -36,6 +37,7 @@ class ReadinessReport:
     ready: bool
     run_id: str | None
     run_kind: str | None
+    mode: Literal["fresh", "resume"]
     config_path: str
     checks: tuple[ReadinessCheck, ...]
 
@@ -44,6 +46,7 @@ class ReadinessReport:
             "ready": self.ready,
             "run_id": self.run_id,
             "run_kind": self.run_kind,
+            "mode": self.mode,
             "config_path": self.config_path,
             "checks": [asdict(check) for check in self.checks],
         }
@@ -164,14 +167,25 @@ def _inspection_check(config: MonetConfig) -> ReadinessCheck:
     )
 
 
-def _attempt_paths_check(config: MonetConfig) -> ReadinessCheck:
-    run = config.run
-    if run is None or run.kind != "production":
+def _nearest_existing_parent(path: Path) -> Path:
+    candidate = path
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+def _attempt_paths_check(
+    config: MonetConfig,
+    mode: Literal["fresh", "resume"],
+) -> ReadinessCheck:
+    execution = config.execution
+    if execution is None:
         return ReadinessCheck(
             "attempt_paths",
             "skipped",
-            "immutable attempt paths are required only for production",
+            "run does not enable durable attempts",
         )
+    attempt_root = execution.attempt_root.expanduser().resolve()
     output_dir = Path(str(config.analysis.output_dir))
     log_dir = Path(str(config.analysis.log_dir))
     problems: list[str] = []
@@ -179,15 +193,63 @@ def _attempt_paths_check(config: MonetConfig) -> ReadinessCheck:
         problems.append("analysis output_dir/log_dir must end in output and logs")
     if output_dir.parent != log_dir.parent:
         problems.append("analysis output_dir and log_dir must share one attempt root")
-    if not _directory_is_empty(output_dir):
-        problems.append(f"output directory is not empty: {output_dir}")
-    if not _directory_is_empty(log_dir):
-        problems.append(f"log directory is not empty: {log_dir}")
+    writable_parent = _nearest_existing_parent(attempt_root)
+    if not writable_parent.is_dir() or not os.access(writable_parent, os.W_OK | os.X_OK):
+        problems.append(f"attempt root is not writable: {attempt_root}")
+    if mode == "fresh":
+        if not _directory_is_empty(output_dir):
+            problems.append(f"output directory is not empty: {output_dir}")
+        if not _directory_is_empty(log_dir):
+            problems.append(f"log directory is not empty: {log_dir}")
+        if not _directory_is_empty(attempt_root):
+            problems.append(f"fresh attempt root is not empty: {attempt_root}")
+    else:
+        try:
+            from davinci_monet.pipeline.checkpoints.manager import CheckpointManager
+
+            manager = CheckpointManager.create(
+                config,
+                resume=True,
+                read_only=True,
+            )
+            if manager is not None and manager.blocked_reasons:
+                raise ValueError(", ".join(manager.blocked_reasons))
+        except Exception as exc:
+            problems.append(f"attempt is not resumable: {exc}")
     return _check(
         "attempt_paths",
         not problems,
-        f"attempt root is unused: {output_dir.parent}",
+        (
+            f"attempt root is unused: {attempt_root}"
+            if mode == "fresh"
+            else f"attempt is initialized and incomplete: {attempt_root}"
+        ),
         "; ".join(problems),
+    )
+
+
+def _checkpoint_policy_check(config: MonetConfig) -> ReadinessCheck:
+    execution = config.execution
+    if execution is None:
+        return ReadinessCheck(
+            "checkpoint_policy",
+            "skipped",
+            "run does not enable checkpoints",
+        )
+    checkpoints = execution.checkpoints
+    supported = (
+        checkpoints.mode in {"required", "best_effort"}
+        and checkpoints.granularity in {"item", "stage"}
+        and checkpoints.retain in {"all", "failed", "none"}
+    )
+    return _check(
+        "checkpoint_policy",
+        supported,
+        (
+            f"{checkpoints.mode} checkpointing uses {checkpoints.granularity} "
+            "granularity and supported dataset/JSON/file codecs"
+        ),
+        "checkpoint policy disables or requests unsupported durable codecs",
     )
 
 
@@ -207,7 +269,12 @@ def _noninteractive_execution_check() -> ReadinessCheck:
     )
 
 
-def evaluate_run_readiness(config: MonetConfig, config_path: str | Path) -> ReadinessReport:
+def evaluate_run_readiness(
+    config: MonetConfig,
+    config_path: str | Path,
+    *,
+    mode: Literal["fresh", "resume"] = "fresh",
+) -> ReadinessReport:
     """Evaluate a parsed config without creating files or changing scheduler state."""
     path = Path(config_path).resolve()
     checks = (
@@ -215,7 +282,8 @@ def evaluate_run_readiness(config: MonetConfig, config_path: str | Path) -> Read
         _identity_check(config),
         _artifact_contract_check(config),
         _inspection_check(config),
-        _attempt_paths_check(config),
+        _attempt_paths_check(config, mode),
+        _checkpoint_policy_check(config),
         ReadinessCheck(
             "source_time_coverage",
             "skipped",
@@ -229,6 +297,7 @@ def evaluate_run_readiness(config: MonetConfig, config_path: str | Path) -> Read
         ready=ready,
         run_id=run.id if run is not None else None,
         run_kind=run.kind if run is not None else None,
+        mode=mode,
         config_path=str(path),
         checks=checks,
     )

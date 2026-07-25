@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,8 @@ import numpy as np
 import xarray as xr
 
 from davinci_monet.analysis.base import ArtifactDeclaration
+from davinci_monet.core.identity import canonical_sha256 as _canonical_sha256
+from davinci_monet.core.identity import code_tree_sha256 as _source_tree_sha256
 
 _HASH_BATCH_ELEMENTS = 1_000_000
 
@@ -35,11 +36,6 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _canonical_sha256(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _update_digest(digest: Any, payload: bytes) -> None:
@@ -114,21 +110,6 @@ def scientific_dataset_sha256(dataset: xr.Dataset) -> str:
             ).encode("utf-8"),
         )
         _update_variable_values(digest, variable)
-    return digest.hexdigest()
-
-
-@lru_cache(maxsize=1)
-def _source_tree_sha256(root: Path) -> str:
-    """Hash the production Python tree, including numerical companion modules."""
-    digest = hashlib.sha256()
-    paths = sorted(
-        path
-        for path in root.rglob("*.py")
-        if "__pycache__" not in path.parts and "tests" not in path.relative_to(root).parts
-    )
-    for path in paths:
-        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
-        digest.update(path.read_bytes())
     return digest.hexdigest()
 
 

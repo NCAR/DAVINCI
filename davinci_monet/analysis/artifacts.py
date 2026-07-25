@@ -19,6 +19,7 @@ from davinci_monet.analysis.artifact_manifest import (
 )
 from davinci_monet.analysis.base import ArtifactDeclaration
 from davinci_monet.analysis.gridded_reductions import product_summary
+from davinci_monet.core.identity import canonical_sha256
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,16 @@ class ArtifactService:
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", Path(self.output_dir))
 
+    def has_finalized_candidate(self, analysis_name: str) -> bool:
+        """Return whether an artifact path exists for pre-computation adoption."""
+        return any(
+            root.exists()
+            for root in (
+                self.output_dir / "products" / analysis_name,
+                self.output_dir / "artifacts" / analysis_name,
+            )
+        )
+
     def materialize(
         self,
         analysis_name: str,
@@ -76,7 +87,14 @@ class ArtifactService:
         manifest_entries: list[Mapping[str, Any]] = []
 
         for declaration in declarations:
-            identity = _artifact_identity(dataset, declaration)
+            identity = {
+                **_artifact_identity(dataset, declaration),
+                "artifact_declaration": {
+                    "kind": declaration.kind,
+                    "role": declaration.role,
+                    "reload": declaration.reload,
+                },
+            }
             if declaration.kind == "product":
                 artifact = write_product_artifacts(
                     self.output_dir, analysis_name, current, identity=identity
@@ -139,6 +157,97 @@ class ArtifactService:
             source_config=source_config,
             product_metadata=product_metadata,
             manifest_entries=tuple(manifest_entries),
+        )
+
+    def restore_finalized(
+        self,
+        analysis_name: str,
+        expected_declared_identity: Mapping[str, Any],
+    ) -> ArtifactMaterialization | None:
+        """Adopt one exact finalized artifact after a receipt-window interruption."""
+        candidates = [
+            ("product", self.output_dir / "products" / analysis_name),
+            ("netcdf_collection", self.output_dir / "artifacts" / analysis_name),
+        ]
+        existing = [(kind, root) for kind, root in candidates if root.exists()]
+        if not existing:
+            return None
+        if len(existing) != 1:
+            raise FileExistsError(
+                f"multiple unregistered artifacts cannot be adopted safely: {analysis_name}"
+            )
+
+        kind, root = existing[0]
+        summary_path = root / "summary.json"
+        summary = _read_summary(summary_path, "analysis artifact")
+        identity = summary.get("identity")
+        if not isinstance(identity, dict):
+            raise FileExistsError(f"existing analysis artifact has no identity: {root}")
+        declared = identity.get("declared")
+        if canonical_sha256(declared) != canonical_sha256(expected_declared_identity):
+            raise FileExistsError(f"existing analysis artifact identity does not match: {root}")
+        declaration = identity.get("artifact_declaration")
+        if (
+            not isinstance(declaration, dict)
+            or declaration.get("kind") != kind
+            or not isinstance(declaration.get("role"), str)
+        ):
+            raise FileExistsError(f"existing analysis artifact has no adoption declaration: {root}")
+
+        source_config: dict[str, Any]
+        product_metadata: dict[str, Any] | None = None
+        if kind == "product":
+            artifact = _reuse_product(root, analysis_name, identity)
+            dataset = load_product_dataset(artifact.analysis_path)
+            source_config = {
+                "artifact_path": str(artifact.analysis_path),
+                "summary_path": str(artifact.summary_path),
+            }
+            product_metadata = dict(source_config)
+            checksums: Mapping[str, Any] = {
+                "analysis_sha256": artifact.analysis_checksum,
+                "summary_sha256": artifact.summary_checksum,
+            }
+        else:
+            time_chunk_size = summary.get("time_chunk_size")
+            if not isinstance(time_chunk_size, int):
+                raise FileExistsError(f"existing analysis artifact has no chunk contract: {root}")
+            collection = _reuse_collection(
+                root,
+                analysis_name,
+                identity,
+                time_chunk_size,
+            )
+            dataset = load_dataset_collection(collection.paths)
+            source_config = {
+                "artifact_dir": str(collection.root),
+                "artifact_glob": str(collection.root / "chunk-*.nc"),
+                "summary_path": str(collection.summary_path),
+            }
+            checksums = {
+                "files": dict(collection.checksums),
+                "summary_sha256": collection.summary_checksum,
+                "collection_sha256": collection.collection_checksum,
+            }
+
+        metadata = dict(source_config)
+        entry = {
+            "analysis": analysis_name,
+            "role": str(declaration["role"]),
+            "kind": kind,
+            "status": "finalized",
+            "publication": "adopted",
+            **metadata,
+            "checksums": checksums,
+            "identity": identity,
+            "dimensions": {str(name): int(size) for name, size in dataset.sizes.items()},
+            "chunks": _dataset_chunks(dataset),
+        }
+        return ArtifactMaterialization(
+            dataset=dataset,
+            source_config=source_config,
+            product_metadata=product_metadata,
+            manifest_entries=(entry,),
         )
 
 
@@ -296,13 +405,16 @@ def write_dataset_collection(
     *,
     time_chunk_size: int = 31,
     identity: Mapping[str, Any] | None = None,
+    artifact_parent: str | Path | None = None,
 ) -> CollectionArtifactResult:
     """Atomically persist a dataset as bounded NetCDF time chunks."""
     if not analysis_name or Path(analysis_name).name != analysis_name:
         raise ValueError("analysis_name must be one safe path component")
     if time_chunk_size < 1:
         raise ValueError("time_chunk_size must be positive")
-    parent = Path(output_dir) / "artifacts"
+    parent = (
+        Path(artifact_parent) if artifact_parent is not None else Path(output_dir) / "artifacts"
+    )
     parent.mkdir(parents=True, exist_ok=True)
     destination = parent / analysis_name
     resolved_identity = dict(identity or _artifact_identity(ds))

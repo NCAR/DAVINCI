@@ -1,0 +1,4 @@
+interface:
+  display_name: "DAVINCI Execute Runs"
+  short_description: "Run and resume checkpointed DAVINCI attempts"
+  default_prompt: "Use $davinci-execute-runs to prepare and monitor a checkpointed DAVINCI production attempt."

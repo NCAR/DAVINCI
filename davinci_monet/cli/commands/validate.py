@@ -107,6 +107,7 @@ def validate_config_command(
     show_config: bool = False,
     readiness: bool = False,
     json_output: bool = False,
+    resume: bool = False,
 ) -> None:
     """Validate a DAVINCI configuration file.
 
@@ -122,6 +123,8 @@ def validate_config_command(
         If True, evaluate scheduled-run readiness after semantic validation.
     json_output
         If True, print only the machine-readable readiness report.
+    resume
+        If True, validate resumption of an existing incomplete attempt.
     """
     p = Path(control_path)
     if not p.is_file():
@@ -153,7 +156,11 @@ def validate_config_command(
         if readiness:
             from davinci_monet.validation import evaluate_run_readiness
 
-            readiness_report = evaluate_run_readiness(config, p)
+            readiness_report = evaluate_run_readiness(
+                config,
+                p,
+                mode="resume" if resume else "fresh",
+            )
 
         if json_output:
             import json

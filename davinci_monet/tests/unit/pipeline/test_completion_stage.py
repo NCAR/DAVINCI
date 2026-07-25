@@ -39,6 +39,15 @@ def _production_config(output_dir: Path) -> MonetConfig:
                 "output_dir": str(output_dir),
                 "log_dir": str(output_dir.parent / "logs"),
             },
+            "execution": {
+                "attempt_root": str(output_dir.parent),
+                "checkpoints": {
+                    "mode": "required",
+                    "granularity": "item",
+                    "loaded_sources": True,
+                    "retain": "all",
+                },
+            },
             "sources": {"model": {"type": "generic"}},
             "analyses": {
                 "basis": {
@@ -66,7 +75,7 @@ def _production_config(output_dir: Path) -> MonetConfig:
 
 
 def _completed_context(tmp_path: Path) -> PipelineContext:
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / "a001" / "output"
     context = PipelineContext(config=_production_config(output_dir))
     dataset = xr.Dataset(
         {"explained_variance": ("mode", [0.75, 0.25])},

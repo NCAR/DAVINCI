@@ -18,7 +18,8 @@ read bundled references, inspect inputs, or change state. Return only these brie
 - Select and minimally adapt the nearest tracked YAML config family.
 - Assign scientific run IDs, revisions, filenames, and output-root conventions.
 - Build and audit production completion contracts and durable outputs.
-- Run strict readiness validation and stop before PBS submission.
+- Add exact checkpoint policy and `aNNN` attempt paths.
+- Run strict fresh/resume readiness validation and stop before PBS submission.
 
 ## Workflow
 
@@ -32,9 +33,11 @@ read bundled references, inspect inputs, or change state. Return only these brie
    smallest YAML change that satisfies the intended science and run class.
 5. For production, enumerate every required analysis, durable artifact role, saved logical file,
    logical plot, and inspection preset in `run.completion`. Require all named analyses.
-6. Run `scripts/audit_config.py <config>` from the `davinci` environment. Use `--json` when a
-   machine-readable readiness record is requested.
-7. Report the run kind and ID, config path, readiness failures or skips, and the exact next safe
+6. Add `execution.attempt_root` and the required item/source-retaining checkpoint policy. Keep
+   output and logs beneath that exact `aNNN`.
+7. Run `scripts/audit_config.py <config>` from the `davinci` environment. Use `--resume` only for
+   an initialized incomplete attempt and `--json` for machine-readable evidence.
+8. Report the run kind and ID, config path, readiness failures or skips, and the exact next safe
    action. Stop before allocating an attempt, rendering PBS, calling `qsub`, or resubmitting.
 
 ## Guardrails
@@ -42,7 +45,7 @@ read bundled references, inspect inputs, or change state. Return only these brie
 - Keep this skill in the repository at `skills/davinci-configure-runs/`; the tracked repository is
   the source of truth.
 - Treat `run.completion` as operational output evidence, not scientific acceptance.
-- Do not restore `davinci-monet`, obsolete production `fable` names, or
+- Do not add environment aliases, obsolete production `fable` names, or
   `analysis.execution_contract` compatibility.
 - Do not claim source time coverage passed when the reader lacks a common pre-open coverage check.
 - Do not reuse a nonempty production attempt root or overwrite completed output.

@@ -65,3 +65,20 @@ def test_report_captures_item_errors() -> None:
     assert "no temporal overlap" in markdown
     assert "all-NaN slice" in markdown
     assert "irregular data" in markdown
+
+
+def test_report_distinguishes_restored_stage_from_computation() -> None:
+    collector = LogCollector()
+    collector.start_pipeline()
+    collector.start_stage("load_sources")
+    collector.end_stage(
+        "load_sources",
+        "completed",
+        0.0,
+        disposition="restored",
+    )
+    collector.end_pipeline(success=True)
+
+    markdown = collector.to_markdown()
+
+    assert "| load_sources | ✓ Completed | restored | 0.0s |" in markdown

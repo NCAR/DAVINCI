@@ -12,6 +12,10 @@ import xarray as xr
 
 from davinci_monet.config.schema import StatsConfig
 from davinci_monet.core.base import iter_paired_variable_xy
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -87,6 +91,21 @@ class StatisticsStage(BaseStage):
         all_stats: dict[str, dict[str, dict[str, float]]] = {}
         source_items = sources if sources is not None else _descriptive_sources(context)[0]
         for source_label, _source_obj, ds in source_items:
+            manager = item_checkpoint_manager(context)
+            source_stage = (
+                "analyses" if source_label in context.analyses_config() else "load_sources"
+            )
+            request = CheckpointRequest(
+                stage=self.name,
+                item=source_label,
+                config={"kind": "descriptive", "stats": context.stats_config()},
+                dependencies=((source_stage, source_label),),
+            )
+            lookup = manager.lookup(request) if manager is not None else None
+            if manager is not None and lookup is not None and lookup.receipt is not None:
+                all_stats[source_label] = manager.restore_json(lookup.receipt)
+                context.log_progress(f"    Restored statistics checkpoint: {source_label}")
+                continue
             source_stats: dict[str, dict[str, float]] = {}
             for var_name in ds.data_vars:
                 var_key = str(var_name)
@@ -111,6 +130,12 @@ class StatisticsStage(BaseStage):
                     "p90": float(np.percentile(values, 90)),
                 }
             all_stats[source_label] = source_stats
+            if manager is not None:
+                manager.capture_json(
+                    request,
+                    source_stats,
+                    context_delta={"statistics_kind": "descriptive"},
+                )
         return self._create_result(
             StageStatus.COMPLETED,
             data=all_stats,
@@ -166,6 +191,18 @@ class StatisticsStage(BaseStage):
             try:
                 pair_count += 1
                 context.log_progress(f"    Stats: {pair_key} ({pair_count}/{total_pairs})")
+                manager = item_checkpoint_manager(context)
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item=pair_key,
+                    config={"kind": "comparison", "stats": effective_cfg},
+                    dependencies=(("pairing", pair_key),),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    stats_results[pair_key] = manager.restore_json(lookup.receipt)
+                    context.log_progress(f"    Restored statistics checkpoint: {pair_key}")
+                    continue
                 context.log_progress("step: Computing metrics...")
 
                 # Handle PairedData objects
@@ -183,6 +220,12 @@ class StatisticsStage(BaseStage):
                 # Calculate basic statistics
                 pair_stats = self._calculate_stats(paired_data, effective_cfg)
                 stats_results[pair_key] = pair_stats
+                if manager is not None:
+                    manager.capture_json(
+                        request,
+                        pair_stats,
+                        context_delta={"statistics_kind": "comparison"},
+                    )
 
                 # Summary
                 n_metrics = sum(len(v) for v in pair_stats.values())

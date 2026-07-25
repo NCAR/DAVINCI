@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from davinci_monet.config.schema import MonetConfig, RequiredArtifactSpec
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -156,6 +160,21 @@ class CompletionStage(BaseStage):
                 duration=time.time() - start,
             )
 
+        manager = item_checkpoint_manager(context)
+        request = CheckpointRequest(
+            stage=self.name,
+            item="contract",
+            config=completion,
+            dependencies=tuple(context.checkpoint_dependencies),
+        )
+        lookup = manager.lookup(request) if manager is not None else None
+        if manager is not None and lookup is not None and lookup.receipt is not None:
+            return self._create_result(
+                StageStatus.COMPLETED,
+                data=manager.restore_json(lookup.receipt),
+                duration=time.time() - start,
+            )
+
         errors: list[str] = []
         checks: list[dict[str, Any]] = []
 
@@ -262,6 +281,8 @@ class CompletionStage(BaseStage):
                 error="; ".join(errors),
                 duration=time.time() - start,
             )
+        if manager is not None:
+            manager.capture_json(request, data)
         return self._create_result(
             StageStatus.COMPLETED,
             data=data,

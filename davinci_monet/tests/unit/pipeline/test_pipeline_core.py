@@ -1387,8 +1387,17 @@ class TestPipelineRunner:
                     },
                 },
                 "analysis": {
-                    "output_dir": str(tmp_path),
-                    "log_dir": str(tmp_path / "logs"),
+                    "output_dir": str(tmp_path / "a001" / "output"),
+                    "log_dir": str(tmp_path / "a001" / "logs"),
+                },
+                "execution": {
+                    "attempt_root": str(tmp_path / "a001"),
+                    "checkpoints": {
+                        "mode": "required",
+                        "granularity": "item",
+                        "loaded_sources": True,
+                        "retain": "all",
+                    },
                 },
                 "sources": {"model": {"type": "generic"}},
                 "analyses": {
@@ -1434,7 +1443,7 @@ class TestPipelineRunner:
             "manifest",
         ]
         assert ctx.results["completion"].status is StageStatus.FAILED
-        data = json.loads((tmp_path / "manifest.json").read_text())
+        data = json.loads((tmp_path / "a001" / "output" / "manifest.json").read_text())
         assert data["status"] == "failed"
         assert data["failed_stages"] == ["fail", "completion"]
         assert data["completion"]["passed"] is False

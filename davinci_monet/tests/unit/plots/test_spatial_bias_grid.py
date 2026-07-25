@@ -15,6 +15,8 @@ rather than relying on the ``x_``/``y_`` name-prefix fallback.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -139,7 +141,7 @@ def test_regional_data_on_a_global_grid_fits_to_the_data() -> None:
     ds = _global_grid_pair(finite_bbox=(-125.0, -100.0, 30.0, 50.0))
     fig = SpatialBiasPlotter().render(build_series(ds, "airnow_grid_o3", "cesm_o3"))
     ax = fig.axes[0]
-    x0, x1, y0, y1 = ax.get_extent(crs=ccrs.PlateCarree())
+    x0, x1, y0, y1 = cast(Any, ax).get_extent(crs=ccrs.PlateCarree())
     # Fits the finite CONUS box (small margin), not the -180..180 grid.
     assert -135 <= x0 <= -120 and -105 <= x1 <= -90, (x0, x1)
     assert 22 <= y0 <= 32 and 48 <= y1 <= 58, (y0, y1)
@@ -158,6 +160,6 @@ def test_globally_finite_data_stays_global() -> None:
     ds = _global_grid_pair(finite_bbox=None)
     fig = SpatialBiasPlotter().render(build_series(ds, "airnow_grid_o3", "cesm_o3"))
     ax = fig.axes[0]
-    x0, x1, _, _ = ax.get_extent(crs=ccrs.PlateCarree())
+    x0, x1, _, _ = cast(Any, ax).get_extent(crs=ccrs.PlateCarree())
     assert (x1 - x0) > 300, "global-coverage bias map must stay ~global"
     plt.close(fig)

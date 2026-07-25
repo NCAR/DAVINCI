@@ -344,8 +344,28 @@ def run(
         "-p",
         help="Format for plot preview: 'pdf' (opens in system viewer) or 'png' (matplotlib window).",
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Resume this incomplete attempt using exact-identity checkpoints.",
+    ),
+    resume_plan: bool = typer.Option(
+        False,
+        "--resume-plan",
+        help="Print a read-only checkpoint reuse plan without running stages.",
+    ),
+    restart_from: str | None = typer.Option(
+        None,
+        "--restart-from",
+        metavar="STAGE[:ITEM]",
+        help="On resume, recompute this stage/item and its downstream dependents.",
+    ),
 ) -> None:
-    """Run DAVINCI analysis as described in the control file."""
+    """Run a fresh DAVINCI attempt, resume one, or inspect its resume plan.
+
+    Examples: ``davinci run CONTROL.yaml``; ``davinci run CONTROL.yaml
+    --resume``; ``davinci run CONTROL.yaml --resume-plan``.
+    """
     from davinci_monet.cli.commands.run import run_analysis
     from davinci_monet.logging import configure_logging
 
@@ -358,7 +378,15 @@ def run(
     log_level = "DEBUG" if debug else "INFO"
     configure_logging(level=log_level, propagate=True)
 
-    run_analysis(control, debug=debug, show_plots=show_plots, preview_format=preview_format)
+    run_analysis(
+        control,
+        debug=debug,
+        show_plots=show_plots,
+        preview_format=preview_format,
+        resume=resume,
+        resume_plan=resume_plan,
+        restart_from=restart_from,
+    )
 
 
 @app.command()
@@ -388,6 +416,11 @@ def validate(
         "--json",
         help="Print only the machine-readable readiness report (requires --readiness).",
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="With --readiness, validate an existing incomplete attempt for resume.",
+    ),
 ) -> None:
     """Validate a DAVINCI configuration file."""
     from davinci_monet.cli.commands.validate import validate_config_command
@@ -398,6 +431,7 @@ def validate(
         show_config=show_config,
         readiness=readiness,
         json_output=json_output,
+        resume=resume,
     )
 
 

@@ -19,6 +19,10 @@ from davinci_monet.analysis.base import (
     ArtifactDeclaration,
 )
 from davinci_monet.core.registry import analysis_registry
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -172,10 +176,95 @@ class AnalysesStage(BaseStage):
                     fatal_errors.append(message)
                 continue
 
+            manager = item_checkpoint_manager(context)
+            input_refs = tuple(dict.fromkeys(resolver.input_refs(key).values()))
+            request = CheckpointRequest(
+                stage=self.name,
+                item=key,
+                config=spec,
+                dependencies=tuple(
+                    ((self.name, ref) if ref in specs else ("load_sources", ref))
+                    for ref in input_refs
+                ),
+            )
+            lookup = manager.lookup(request) if manager is not None else None
+            if manager is not None and lookup is not None and lookup.receipt is not None:
+                restored = manager.restore_source(lookup.receipt)
+                context.sources[key] = restored
+                delta = lookup.receipt.context_delta
+                summary[key] = dict(delta.get("summary", {}))
+                artifacts = delta.get("analysis_artifacts")
+                if isinstance(artifacts, list) and artifacts:
+                    context.metadata.setdefault("analysis_artifacts", []).extend(artifacts)
+                product = delta.get("product_artifact")
+                if isinstance(product, dict):
+                    context.metadata.setdefault("product_artifacts", {})[key] = product
+                states[key] = "completed"
+                success_count += 1
+                context.log_progress(f"    Restored analysis checkpoint: {key}")
+                continue
+
             try:
                 context.log_progress(f"    Analysis: {key} ({spec.type})")
                 inputs = resolver.resolve(key, context.sources)
                 analysis = analysis_registry.get(spec.type)()
+                adopted = None
+                if (
+                    manager is not None
+                    and manager.resume
+                    and artifact_service.has_finalized_candidate(key)
+                ):
+                    adopted = artifact_service.restore_finalized(
+                        key,
+                        build_analysis_artifact_identity(spec, inputs, analysis),
+                    )
+                if adopted is not None:
+                    out_ds = adopted.dataset
+                    geometry = analysis.output_geometry
+                    out_ds.attrs["geometry"] = geometry.name.lower()
+                    out_ds.attrs["derived"] = True
+                    out_ds.attrs.setdefault("source_label", key)
+                    context.metadata.setdefault("analysis_artifacts", []).extend(
+                        adopted.manifest_entries
+                    )
+                    if adopted.product_metadata is not None:
+                        context.metadata.setdefault("product_artifacts", {})[key] = dict(
+                            adopted.product_metadata
+                        )
+                    context.sources[key] = SourceData(
+                        data=out_ds,
+                        label=key,
+                        source_type=spec.type,
+                        geometry=geometry,
+                        variables={},
+                        config={
+                            **spec.model_dump(),
+                            **dict(adopted.source_config),
+                        },
+                    )
+                    summary[key] = {
+                        "type": spec.type,
+                        "geometry": geometry.name.lower(),
+                        "variables": list(out_ds.data_vars),
+                    }
+                    states[key] = "completed"
+                    success_count += 1
+                    if manager is not None:
+                        manager.capture_source(
+                            request,
+                            context.sources[key],
+                            context_delta={
+                                "summary": summary[key],
+                                "analysis_artifacts": [
+                                    dict(entry) for entry in adopted.manifest_entries
+                                ],
+                                "product_artifact": adopted.product_metadata,
+                            },
+                        )
+                    context.log_progress(
+                        f"    Adopted finalized analysis artifact checkpoint: {key}"
+                    )
+                    continue
                 result = AnalysisResult.adapt(analysis.analyze_inputs(inputs, spec, runtime))
                 out_ds = result.dataset
 
@@ -265,6 +354,22 @@ class AnalysesStage(BaseStage):
             }
             states[key] = "completed"
             success_count += 1
+            if manager is not None:
+                analysis_artifacts = [
+                    dict(entry)
+                    for entry in context.metadata.get("analysis_artifacts", [])
+                    if isinstance(entry, Mapping) and entry.get("analysis") == key
+                ]
+                product_artifact = context.metadata.get("product_artifacts", {}).get(key)
+                manager.capture_source(
+                    request,
+                    context.sources[key],
+                    context_delta={
+                        "summary": summary[key],
+                        "analysis_artifacts": analysis_artifacts,
+                        "product_artifact": product_artifact,
+                    },
+                )
 
         context.metadata["analysis_status"] = states
         if fatal_errors:

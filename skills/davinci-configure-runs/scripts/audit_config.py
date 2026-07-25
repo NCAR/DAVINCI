@@ -24,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit only the machine-readable readiness report.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Audit resumption of an existing incomplete attempt.",
+    )
     return parser
 
 
@@ -47,6 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     if args.json:
         command.append("--json")
+    if args.resume:
+        command.append("--resume")
     return subprocess.run(command, cwd=repository_root, check=False).returncode
 
 

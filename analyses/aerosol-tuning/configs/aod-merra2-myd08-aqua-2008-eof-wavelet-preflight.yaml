@@ -12,6 +12,14 @@ run:
   id: aod-merra2-myd08-aqua-2008-eof-wavelet-preflight
   kind: preflight
 
+execution:
+  attempt_root: ${DAVINCI_RUN_ROOT}
+  checkpoints:
+    mode: best_effort
+    granularity: item
+    loaded_sources: true
+    retain: all
+
 analysis:
   workflow: standard
   start_time: "2008-01-01 00:00:00"

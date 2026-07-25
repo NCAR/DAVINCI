@@ -165,6 +165,29 @@ class RunConfig(StrictSchema):
         return self
 
 
+class CheckpointConfig(StrictSchema):
+    """Operational checkpoint policy for one pipeline attempt."""
+
+    mode: Literal["required", "best_effort", "off"]
+    granularity: Literal["item", "stage"]
+    loaded_sources: bool
+    retain: Literal["all", "failed", "none"]
+
+
+class ExecutionConfig(StrictSchema):
+    """Operational execution paths and checkpoint policy."""
+
+    attempt_root: Path
+    checkpoints: CheckpointConfig
+
+    @field_validator("attempt_root")
+    @classmethod
+    def _validate_attempt_root_name(cls, value: Path) -> Path:
+        if re.fullmatch(r"a\d{3,}", value.name) is None:
+            raise ValueError("execution.attempt_root must end in aNNN notation")
+        return value
+
+
 class AnalysisConfig(StrictSchema):
     """Configuration for the analysis section.
 
@@ -1516,6 +1539,7 @@ class MonetConfig(StrictSchema):
     """
 
     run: RunConfig | None = None
+    execution: ExecutionConfig | None = None
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     # Data sources keyed by dataset label.
     sources: dict[str, SourceConfig] = Field(default_factory=dict)
@@ -1617,6 +1641,35 @@ class MonetConfig(StrictSchema):
         errors: list[str] = []
 
         completion = self.run.completion if self.run is not None else None
+        if self.run is not None and self.run.kind == "production":
+            if self.execution is None:
+                errors.append("production runs require execution checkpoint policy")
+            else:
+                checkpoints = self.execution.checkpoints
+                if checkpoints.mode != "required":
+                    errors.append("production checkpoint mode must be 'required'")
+                if checkpoints.granularity != "item":
+                    errors.append("production checkpoint granularity must be 'item'")
+                if not checkpoints.loaded_sources:
+                    errors.append("production requires loaded-source checkpoints")
+                if checkpoints.retain != "all":
+                    errors.append("production checkpoint retention must be 'all'")
+
+        if self.execution is not None:
+            output_dir = self.analysis.output_dir
+            log_dir = self.analysis.log_dir
+            if output_dir is None or log_dir is None:
+                errors.append("execution requires analysis.output_dir and analysis.log_dir")
+            else:
+                attempt_root = self.execution.attempt_root.expanduser().resolve()
+                output_parent = Path(output_dir).expanduser().resolve().parent
+                log_parent = Path(log_dir).expanduser().resolve().parent
+                if attempt_root != output_parent or attempt_root != log_parent:
+                    errors.append(
+                        "execution.attempt_root must be the common parent of "
+                        "analysis.output_dir and analysis.log_dir"
+                    )
+
         if completion is not None:
             if self.analysis.output_dir is None:
                 errors.append("production runs require analysis.output_dir")

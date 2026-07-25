@@ -7,6 +7,10 @@ from pathlib import Path
 
 from davinci_monet.config.schema import InspectionConfig, MonetConfig
 from davinci_monet.inspection import inspect_run_directory
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -32,6 +36,20 @@ class InspectionStage(BaseStage):
             )
 
         output_dir = Path(context.analysis_config().output_dir or ".")
+        manager = item_checkpoint_manager(context)
+        request = CheckpointRequest(
+            stage=self.name,
+            item="report",
+            config=cfg,
+            dependencies=tuple(context.checkpoint_dependencies),
+        )
+        lookup = manager.lookup(request) if manager is not None else None
+        if lookup is not None and lookup.receipt is not None:
+            return self._create_result(
+                StageStatus.COMPLETED,
+                data=dict(lookup.receipt.context_delta["result"]),
+                duration=time.time() - start,
+            )
         plot_paths = None
         plotting = context.results.get("plotting")
         if plotting and isinstance(plotting.data, dict) and "plots_generated" in plotting.data:
@@ -49,6 +67,16 @@ class InspectionStage(BaseStage):
             "inspection_markdown": str(result.markdown_path),
             "inspection_previews": [str(path) for path in result.preview_paths],
         }
+        if result.passed and manager is not None:
+            manager.capture_files(
+                request,
+                (
+                    result.json_path,
+                    result.markdown_path,
+                    *result.preview_paths,
+                ),
+                context_delta={"result": data},
+            )
         if result.passed:
             return self._create_result(
                 StageStatus.COMPLETED,

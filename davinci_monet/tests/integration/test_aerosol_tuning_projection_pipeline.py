@@ -10,8 +10,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from davinci_monet.analysis.artifact_manifest import scientific_dataset_sha256
 from davinci_monet.analysis.base import AnalysisResult
 from davinci_monet.analysis.wavelet_filter import WaveletFilterAnalysis
+from davinci_monet.pipeline.checkpoints.manager import CheckpointManager
+from davinci_monet.pipeline.checkpoints.models import ExecutionStatus
 from davinci_monet.pipeline.runner import PipelineResult, PipelineRunner
 from davinci_monet.pipeline.stages import StageStatus
 from davinci_monet.tests.synthetic.aerosol_tuning import (
@@ -144,8 +147,18 @@ def _production_eof_wavelet_config(
     spec: SyntheticTuningSpec,
 ) -> dict[str, Any]:
     config = _pipeline_inputs(input_root, spec)
-    config["analysis"]["output_dir"] = str(run_root / "output")
-    config["analysis"]["log_dir"] = str(run_root / "logs")
+    attempt_root = run_root / "a001"
+    config["analysis"]["output_dir"] = str(attempt_root / "output")
+    config["analysis"]["log_dir"] = str(attempt_root / "logs")
+    config["execution"] = {
+        "attempt_root": str(attempt_root),
+        "checkpoints": {
+            "mode": "required",
+            "granularity": "item",
+            "loaded_sources": True,
+            "retain": "all",
+        },
+    }
     start = f"{spec.time_config.start} 00:00:00"
     end = f"{spec.time_config.end} 23:59:59"
     config["analyses"]["aod_basis"] = {
@@ -236,6 +249,22 @@ def _production_eof_wavelet_config(
     return config
 
 
+@pytest.fixture(scope="module")
+def production_resume_reference(
+    tmp_path_factory: pytest.TempPathFactory,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+) -> dict[str, str]:
+    input_root, spec = production_eof_wavelet_inputs
+    root = tmp_path_factory.mktemp("production_resume_reference")
+    result = _run(_production_eof_wavelet_config(input_root, root, spec))
+    assert result.success
+    assert result.context is not None
+    return {
+        name: scientific_dataset_sha256(result.context.sources[name].data)
+        for name in ("aod_basis", "obs_pcs", "filtered_pcs")
+    }
+
+
 def _assert_failed_production_manifest(result: PipelineResult, output_dir: Path) -> dict[str, Any]:
     completion = result.get_stage_result("completion")
     assert result.success is False
@@ -302,7 +331,7 @@ def test_production_eof_wavelet_pipeline_lands_complete_outputs(
     assert completion is not None
     assert completion.status is StageStatus.COMPLETED
     assert completion.data["passed"] is True
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / "a001" / "output"
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert manifest["completion"]["passed"] is True
@@ -331,6 +360,83 @@ def test_production_eof_wavelet_pipeline_lands_complete_outputs(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "interrupt_stage",
+    [
+        "load_sources",
+        "analyses",
+        "plot_suites",
+        "pairing",
+        "statistics",
+        "save_results",
+        "plotting",
+        "summary",
+        "inspection",
+        "completion",
+        "manifest",
+    ],
+)
+def test_production_eof_projection_wavelet_resumes_from_every_stage_boundary(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+    production_resume_reference: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    interrupt_stage: str,
+) -> None:
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+    original_capture = CheckpointManager.capture_stage
+    interrupted = False
+
+    def interrupt_after_stage(self, request, context, result, **kwargs):  # noqa: ANN001
+        nonlocal interrupted
+        receipt = original_capture(self, request, context, result, **kwargs)
+        if request.stage == interrupt_stage and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+        return receipt
+
+    monkeypatch.setattr(CheckpointManager, "capture_stage", interrupt_after_stage)
+    with pytest.raises(KeyboardInterrupt):
+        _run(config)
+
+    resumed = PipelineRunner(
+        show_progress=False,
+        close_datasets_after_run=False,
+    ).run_from_config(config, resume=True)
+
+    assert resumed.success
+    assert resumed.context is not None
+    actual = {
+        name: scientific_dataset_sha256(resumed.context.sources[name].data)
+        for name in production_resume_reference
+    }
+    assert actual == production_resume_reference
+    completion = resumed.context.results["completion"]
+    assert completion.status is StageStatus.COMPLETED
+    assert completion.data["passed"] is True
+    manager = resumed.context.checkpoint_manager
+    assert manager is not None
+    assert [record.status for record in manager.store.list_executions()] == [
+        ExecutionStatus.INTERRUPTED,
+        ExecutionStatus.COMPLETED,
+    ]
+    manifest_path = tmp_path / "a001" / "output" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["checkpointing"]["attempt"]["status"] == "completed"
+    assert manifest["checkpointing"]["executions"][-1]["status"] == "completed"
+    assert manifest["checkpointing"]["current_execution_id"] == "e002"
+    assert manifest["checkpointing"]["disposition_totals"]["restored"] > 0
+    assert all(
+        Path(path).is_file() and Path(path).stat().st_size > 0
+        for paths in manifest["plot_products"].values()
+        for path in paths
+    )
+    assert "approval" not in manifest["stages"]
+
+
+@pytest.mark.integration
 def test_production_completion_rejects_missing_terminal_artifact(
     tmp_path: Path,
     production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
@@ -354,7 +460,7 @@ def test_production_completion_rejects_missing_terminal_artifact(
 
     result = _run(config)
 
-    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    manifest = _assert_failed_production_manifest(result, tmp_path / "a001" / "output")
     assert any(
         "filtered_pcs:wavelet_filter was not published" in error
         for error in manifest["completion"]["errors"]
@@ -373,7 +479,7 @@ def test_production_completion_rejects_required_plot_failure(
 
     result = _run(config)
 
-    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    manifest = _assert_failed_production_manifest(result, tmp_path / "a001" / "output")
     assert any(
         "required plot 'filtered_pc1' produced no outputs" in error
         for error in manifest["completion"]["errors"]
@@ -407,7 +513,7 @@ def test_production_completion_rejects_inspection_failure(
 
     result = _run(config)
 
-    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    manifest = _assert_failed_production_manifest(result, tmp_path / "a001" / "output")
     assert manifest["stages"]["inspection"] == "failed"
     assert "required inspection did not complete" in manifest["completion"]["errors"]
 
@@ -430,7 +536,7 @@ def test_production_completion_rejects_nonfatal_item_error(
 
     result = _run(config)
 
-    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    manifest = _assert_failed_production_manifest(result, tmp_path / "a001" / "output")
     assert all(
         "optional_broken_diagnostic" not in error
         for error in manifest["completion"]["errors"]

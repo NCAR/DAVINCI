@@ -270,7 +270,8 @@ The standard pipeline executes these stages in order (optional stages may skip):
 7. `plotting` - Generate configured plots
 8. `summary` - Generate optional AI summary output
 9. `inspection` - Inspect generated products when configured
-10. `manifest` - Write the run manifest
+10. `completion` - Enforce the production completion contract
+11. `manifest` - Write and refresh the terminal run manifest
 
 ### Running a Pipeline
 
@@ -286,6 +287,21 @@ Or via CLI:
 ```bash
 davinci run path/to/config.yaml
 ```
+
+Checkpointed scheduled controls also support:
+
+```bash
+davinci run path/to/config.yaml --resume-plan
+davinci run path/to/config.yaml --resume
+davinci run path/to/config.yaml --resume --restart-from STAGE[:ITEM]
+```
+
+Run identity uses immutable `rNN` scientific revisions, `aNNN` attempts, and
+automatic `eNNN` process/PBS executions. Fresh attempts require a missing or
+empty attempt root. Resume requires the same config, code, source inventory,
+numerical runtime, and an incomplete attempt. Production jobs are
+noninteractive and must run through completion, inspection, and the refreshed
+manifest.
 
 ### YAML Configuration Pattern
 
