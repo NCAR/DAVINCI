@@ -126,8 +126,10 @@ run:
     required_artifacts:
       - analysis: aod_basis
         role: basis_fit
+      - analysis: obs_pcs
+        role: projection_fit
       - analysis: filtered_pcs
-        role: filtered_pcs
+        role: wavelet_filter
     required_saved_files: []
     required_plots:
       - basis_scree

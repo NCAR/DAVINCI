@@ -670,6 +670,7 @@ class PlottingStage(BaseStage):
 
         start = time.time()
         plots_generated: list[str] = []
+        plot_products: dict[str, list[str]] = {}
 
         config = context.config_dict()
         plot_config = config.get("plots", {})
@@ -678,7 +679,11 @@ class PlottingStage(BaseStage):
         if not plot_config:
             return self._create_result(
                 StageStatus.SKIPPED,
-                data={"message": "No plot configuration found"},
+                data={
+                    "message": "No plot configuration found",
+                    "plots_generated": plots_generated,
+                    "plot_products": plot_products,
+                },
                 duration=time.time() - start,
             )
 
@@ -703,6 +708,7 @@ class PlottingStage(BaseStage):
                 title = _title_text(plot_spec.get("title", plot_name))
                 arity = plot_arity(plot_type)
                 file_index_before = file_index
+                path_count_before = len(plots_generated)
 
                 context.log_progress(f"    Plot: {plot_name} ({plot_number}/{total_plots})")
                 context.log_progress(f"step: Rendering {plot_type}...")
@@ -766,6 +772,9 @@ class PlottingStage(BaseStage):
                         )
 
                 plot_count += file_index - file_index_before
+                new_paths = plots_generated[path_count_before:]
+                if new_paths:
+                    plot_products.setdefault(plot_name, []).extend(new_paths)
 
             except Exception as e:
                 context.metadata.setdefault("plot_errors", []).append(f"{plot_name}: {e}")
@@ -776,20 +785,32 @@ class PlottingStage(BaseStage):
             if plot_count == 0:
                 return self._create_result(
                     StageStatus.FAILED,
-                    data={"plot_count": plot_count, "plots_generated": plots_generated},
+                    data={
+                        "plot_count": plot_count,
+                        "plots_generated": plots_generated,
+                        "plot_products": plot_products,
+                    },
                     error=f"all {len(errors)} plots failed",
                     duration=time.time() - start,
                     warnings=list(errors),
                 )
             return self._create_result(
                 StageStatus.COMPLETED,
-                data={"plot_count": plot_count, "plots_generated": plots_generated},
+                data={
+                    "plot_count": plot_count,
+                    "plots_generated": plots_generated,
+                    "plot_products": plot_products,
+                },
                 duration=time.time() - start,
                 warnings=list(errors),
             )
 
         return self._create_result(
             StageStatus.COMPLETED if plot_count > 0 else StageStatus.SKIPPED,
-            data={"plot_count": plot_count, "plots_generated": plots_generated},
+            data={
+                "plot_count": plot_count,
+                "plots_generated": plots_generated,
+                "plot_products": plot_products,
+            },
             duration=time.time() - start,
         )

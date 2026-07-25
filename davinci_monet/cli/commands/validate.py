@@ -102,7 +102,11 @@ def _validate_control_file_semantics(config: object, config_path: Path) -> None:
 
 
 def validate_config_command(
-    control_path: str, strict: bool = False, show_config: bool = False
+    control_path: str,
+    strict: bool = False,
+    show_config: bool = False,
+    readiness: bool = False,
+    json_output: bool = False,
 ) -> None:
     """Validate a DAVINCI configuration file.
 
@@ -114,16 +118,30 @@ def validate_config_command(
         If True, reject unknown fields in core config sections.
     show_config
         If True, print the parsed configuration.
+    readiness
+        If True, evaluate scheduled-run readiness after semantic validation.
+    json_output
+        If True, print only the machine-readable readiness report.
     """
     p = Path(control_path)
     if not p.is_file():
+        if json_output:
+            import json
+
+            typer.echo(json.dumps({"ready": False, "error": "control file does not exist"}))
+            raise typer.Exit(2)
         typer.secho(f"Error: control file {control_path!r} does not exist", fg=ERROR_COLOR)
         raise typer.Exit(2)
 
-    typer.secho(f"Validating: {control_path!r}", fg=INFO_COLOR)
-    typer.secho(f"Full path: {p.absolute().as_posix()}", fg=INFO_COLOR)
-    typer.secho(f"Mode: {'strict' if strict else 'flexible'}", fg=INFO_COLOR)
-    typer.echo()
+    if json_output and not readiness:
+        typer.echo('{"ready": false, "error": "--json requires --readiness"}')
+        raise typer.Exit(2)
+
+    if not json_output:
+        typer.secho(f"Validating: {control_path!r}", fg=INFO_COLOR)
+        typer.secho(f"Full path: {p.absolute().as_posix()}", fg=INFO_COLOR)
+        typer.secho(f"Mode: {'strict' if strict else 'flexible'}", fg=INFO_COLOR)
+        typer.echo()
 
     try:
         from davinci_monet.config import load_config
@@ -131,6 +149,20 @@ def validate_config_command(
         # Parse and validate.
         config = load_config(p, strict=strict)
         _validate_control_file_semantics(config, p)
+        readiness_report = None
+        if readiness:
+            from davinci_monet.validation import evaluate_run_readiness
+
+            readiness_report = evaluate_run_readiness(config, p)
+
+        if json_output:
+            import json
+
+            assert readiness_report is not None
+            typer.echo(json.dumps(readiness_report.to_dict(), indent=2, sort_keys=True))
+            if not readiness_report.ready:
+                raise typer.Exit(1)
+            return
 
         # Report what was found
         typer.echo()
@@ -155,10 +187,13 @@ def validate_config_command(
             for name, analysis_cfg in config.analyses.items():
                 typer.echo(f"    - {name}: {analysis_cfg.type}")
 
-        execution_contract = config.analysis.execution_contract
-        if execution_contract is not None:
-            typer.echo(f"  Execution contract: {execution_contract.name}")
-            typer.echo("    Required analyses: " + ", ".join(execution_contract.required_analyses))
+        if config.run is not None:
+            typer.echo(f"  Run: {config.run.id} ({config.run.kind})")
+            if config.run.completion is not None:
+                typer.echo(
+                    "    Required analyses: " + ", ".join(config.run.completion.required_analyses)
+                )
+                typer.echo("    Required plots: " + ", ".join(config.run.completion.required_plots))
 
         # Unified pairs
         if config.pairs:
@@ -183,6 +218,22 @@ def validate_config_command(
         typer.echo()
         typer.secho("Validation passed!", fg=SUCCESS_COLOR)
 
+        if readiness_report is not None:
+            typer.echo()
+            typer.secho("Readiness:", fg=INFO_COLOR)
+            for check in readiness_report.checks:
+                marker = {
+                    "passed": "PASS",
+                    "failed": "FAIL",
+                    "skipped": "SKIP",
+                }[check.status]
+                typer.echo(f"  {marker} {check.name}: {check.detail}")
+            if readiness_report.ready:
+                typer.secho("Run readiness passed!", fg=SUCCESS_COLOR)
+            else:
+                typer.secho("Run readiness failed!", fg=ERROR_COLOR)
+                raise typer.Exit(1)
+
         # Show full config if requested
         if show_config:
             typer.echo()
@@ -198,10 +249,22 @@ def validate_config_command(
             typer.echo(json.dumps(config_dict, indent=2, default=str))
 
     except ConfigurationError as e:
+        if json_output:
+            import json
+
+            typer.echo(json.dumps({"ready": False, "error": str(e)}, sort_keys=True))
+            raise typer.Exit(1)
         # Styled display for configuration/YAML errors
         display_error("Validation Error", str(e), config_path=control_path)
         raise typer.Exit(1)
+    except typer.Exit:
+        raise
     except Exception as e:
+        if json_output:
+            import json
+
+            typer.echo(json.dumps({"ready": False, "error": str(e)}, sort_keys=True))
+            raise typer.Exit(1)
         # Styled display for unexpected errors
         display_error("Error", str(e), config_path=control_path)
         raise typer.Exit(1)

@@ -27,7 +27,18 @@ def test_manifest_stage_writes_run_manifest(tmp_path) -> None:
     ctx.results["plotting"] = StageResult(
         "plotting",
         StageStatus.COMPLETED,
-        data={"plots_generated": [str(tmp_path / "plots" / "daily" / "aod.pdf")]},
+        data={
+            "plots_generated": [str(tmp_path / "plots" / "daily" / "aod.pdf")],
+            "plot_products": {"daily_aod": [str(tmp_path / "plots" / "daily" / "aod.pdf")]},
+        },
+    )
+    ctx.results["save_results"] = StageResult(
+        "save_results",
+        StageStatus.COMPLETED,
+        data={
+            "saved_files": [str(tmp_path / "statistics_summary.csv")],
+            "saved_products": {"statistics_summary": str(tmp_path / "statistics_summary.csv")},
+        },
     )
 
     result = ManifestStage().execute(ctx)
@@ -39,6 +50,8 @@ def test_manifest_stage_writes_run_manifest(tmp_path) -> None:
     assert data["status"] == "completed"
     assert "daily_aod" in data["products"]
     assert str(tmp_path / "plots" / "daily" / "aod.pdf") in data["plots"]
+    assert "daily_aod" in data["plot_products"]
+    assert "statistics_summary" in data["saved_products"]
     assert data["errors"] == {"analysis_errors": ["pc1_wavelet: irregular data"]}
     assert data["analysis_partial_failure"] == [{"analysis": "writer", "finalized_artifacts": 1}]
 

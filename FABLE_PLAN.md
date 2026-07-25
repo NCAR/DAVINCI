@@ -25,15 +25,18 @@ observation-error contract exists. This authorization and successful preflight d
 `SYNTHETIC_READY` or authorize the full P10 tuning run.
 
 On 2026-07-25, after an executable-path repair reran the EOF-only preflight under the mistaken
-label of an EOF/wavelet production run, the user authorized two remediations while explicitly
-withholding resubmission. The production control file now declares an exact execution contract
-through `eof_projection` and `wavelet_filter`, and MYD08_D3 exposes its QA-screened within-day AOD
-standard deviation. The observation-error contract combines that field in quadrature with separate
-`0.05` absolute and `0.15*AOD` relative terms, converts it to shifted-log space by the delta method,
-and explicitly assumes independent grid-cell errors. The former EOF-only control is preserved under
-an unambiguous preflight filename and its own smaller execution contract. This is code/configuration
-authorization only: no corrected MMR, scaling, new real-data result, or PBS resubmission is
-authorized by this checkpoint.
+label of an EOF/wavelet production run, the user authorized remediation while explicitly
+withholding resubmission. The production control is now
+`analyses/aerosol-tuning/configs/aod-merra2-myd08-aqua-2008-eof-wavelet-r01.yaml`; it declares a
+production completion contract through `eof_projection` and `wavelet_filter`, including durable
+basis, projection, and wavelet artifacts, logical plots, and required inspection. MYD08_D3 exposes
+its QA-screened within-day AOD standard deviation. The observation-error contract combines that
+field in quadrature with separate `0.05` absolute and `0.15*AOD` relative terms, converts it to
+shifted-log space by the delta method, and explicitly assumes independent grid-cell errors. The
+former EOF-only control is preserved as the unmistakably non-production
+`aod-merra2-myd08-aqua-2008-eof-wavelet-preflight.yaml`, without a production completion contract.
+This is code/configuration authorization only: no corrected MMR, scaling, new real-data result, or
+PBS resubmission is authorized by this checkpoint.
 
 ## Synthetic acceptance checkpoint (2026-07-10)
 

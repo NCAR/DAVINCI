@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -87,20 +88,81 @@ AnalysisTypeName = Literal[
 ]
 
 
-class AnalysisExecutionContract(StrictSchema):
-    """Named declaration of analyses that must exist before a run may start."""
+_RUN_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-    name: str = Field(min_length=1)
+
+class RequiredArtifactSpec(StrictSchema):
+    """One finalized analysis artifact required for production completion."""
+
+    analysis: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+
+
+class CompletionInspectionSpec(StrictSchema):
+    """Inspection evidence required before production completion."""
+
+    required: bool = True
+    presets: list[str] = Field(min_length=1)
+
+
+class RunCompletionSpec(StrictSchema):
+    """Exact outputs and error policy required for a completed production run."""
+
     required_analyses: dict[str, AnalysisTypeName] = Field(min_length=1)
+    required_artifacts: list[RequiredArtifactSpec] = Field(min_length=1)
+    required_saved_files: list[str] = Field(default_factory=list)
+    required_plots: list[str] = Field(min_length=1)
+    inspection: CompletionInspectionSpec
+    allow_item_errors: bool = False
 
-    @field_validator("required_analyses")
+    @field_validator(
+        "required_analyses",
+        "required_saved_files",
+        "required_plots",
+    )
     @classmethod
-    def _validate_required_analysis_names(
-        cls, value: dict[str, AnalysisTypeName]
-    ) -> dict[str, AnalysisTypeName]:
-        if any(not str(name).strip() for name in value):
-            raise ValueError("execution contract analysis names must not be blank")
+    def _validate_named_contract_items(cls, value: Any) -> Any:
+        names = value if isinstance(value, list) else value.keys()
+        if any(not str(name).strip() for name in names):
+            raise ValueError("completion contract names must not be blank")
+        if isinstance(value, list) and len(value) != len(set(value)):
+            raise ValueError("completion contract names must be unique")
         return value
+
+    @model_validator(mode="after")
+    def _validate_artifact_uniqueness(self) -> "RunCompletionSpec":
+        identities = [(artifact.analysis, artifact.role) for artifact in self.required_artifacts]
+        if len(identities) != len(set(identities)):
+            raise ValueError("required artifacts must be unique by analysis and role")
+        if not self.inspection.required:
+            raise ValueError("production completion inspection.required must be true")
+        return self
+
+
+class RunConfig(StrictSchema):
+    """Scheduled-run identity and optional production completion contract."""
+
+    id: str = Field(min_length=1)
+    kind: Literal["production", "preflight", "smoke", "example"]
+    completion: RunCompletionSpec | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _validate_run_id(cls, value: str) -> str:
+        if not _RUN_ID_PATTERN.fullmatch(value):
+            raise ValueError("run.id must use lowercase kebab-case")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_kind_contract(self) -> "RunConfig":
+        if self.kind == "production":
+            if self.completion is None:
+                raise ValueError("production runs require run.completion")
+            if re.search(r"-r\d{2}$", self.id) is None:
+                raise ValueError("production run.id must end in -rNN")
+        elif self.completion is not None:
+            raise ValueError("only production runs may declare completion")
+        return self
 
 
 class AnalysisConfig(StrictSchema):
@@ -138,7 +200,6 @@ class AnalysisConfig(StrictSchema):
     city_labels: dict[str, list[float]] | None = None
     domain: str | None = None
     workflow: Literal["standard", "synthetic_fit", "synthetic_evaluation"] = "standard"
-    execution_contract: AnalysisExecutionContract | None = None
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1454,6 +1515,7 @@ class MonetConfig(StrictSchema):
     datetime.datetime(2024, 1, 1, 0, 0)
     """
 
+    run: RunConfig | None = None
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     # Data sources keyed by dataset label.
     sources: dict[str, SourceConfig] = Field(default_factory=dict)
@@ -1554,21 +1616,46 @@ class MonetConfig(StrictSchema):
         }
         errors: list[str] = []
 
-        execution_contract = self.analysis.execution_contract
-        if execution_contract is not None:
-            for required_name, required_type in execution_contract.required_analyses.items():
+        completion = self.run.completion if self.run is not None else None
+        if completion is not None:
+            if self.analysis.output_dir is None:
+                errors.append("production runs require analysis.output_dir")
+            if self.analysis.log_dir is None:
+                errors.append("production runs require analysis.log_dir")
+            for required_name, required_type in completion.required_analyses.items():
                 declared = self.analyses.get(required_name)
                 if declared is None:
                     errors.append(
-                        f"analysis.execution_contract {execution_contract.name!r} requires "
+                        "run.completion requires "
                         f"analyses.{required_name} with type {required_type!r}"
                     )
                 elif declared.type != required_type:
                     errors.append(
-                        f"analysis.execution_contract {execution_contract.name!r} requires "
+                        "run.completion requires "
                         f"analyses.{required_name}.type={required_type!r}, "
                         f"got {declared.type!r}"
                     )
+                elif not declared.required:
+                    errors.append(f"run.completion requires analyses.{required_name}.required=true")
+            for artifact in completion.required_artifacts:
+                if artifact.analysis not in completion.required_analyses:
+                    errors.append(
+                        "run.completion.required_artifacts "
+                        f"references analysis '{artifact.analysis}' that is not required"
+                    )
+            for plot_name in completion.required_plots:
+                if plot_name not in self.plots:
+                    errors.append(
+                        f"run.completion.required_plots references unknown plot '{plot_name}'"
+                    )
+            if self.inspection is None or not self.inspection.enabled:
+                errors.append("production run completion requires inspection.enabled=true")
+            elif not self.inspection.required:
+                errors.append("production run completion requires inspection.required=true")
+            elif set(self.inspection.presets) != set(completion.inspection.presets):
+                errors.append(
+                    "inspection.presets must exactly match run.completion.inspection.presets"
+                )
 
         fit_types = {
             "aod_preprocess",

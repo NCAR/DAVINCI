@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,12 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
-from davinci_monet.analysis.base import DerivedAnalysis
+from davinci_monet.analysis.base import (
+    AnalysisResult,
+    AnalysisRuntime,
+    ArtifactDeclaration,
+    DerivedAnalysis,
+)
 from davinci_monet.analysis.cwt_core import (
     cwt_reconstruct,
     cwt_reconstruction_error,
@@ -411,6 +417,29 @@ class WaveletFilterAnalysis(DerivedAnalysis):
     name = "wavelet_filter"
     long_name = "Segment-aware Wavelet Filter"
     output_geometry = DataGeometry.SPECTRUM
+
+    def analyze_inputs(
+        self,
+        inputs: Mapping[str, xr.Dataset],
+        spec: WaveletFilterSpec,
+        runtime: AnalysisRuntime,
+    ) -> AnalysisResult:
+        del runtime
+        try:
+            source = inputs["source"]
+        except KeyError as exc:
+            raise ValueError("wavelet_filter requires a named 'source' input") from exc
+        return AnalysisResult(
+            dataset=filter_projected_coefficients(source, spec),
+            artifacts=(
+                ArtifactDeclaration(
+                    kind="netcdf_collection",
+                    role="wavelet_filter",
+                    reload=True,
+                    options={"time_chunk_size": 31},
+                ),
+            ),
+        )
 
     def analyze(self, data: xr.Dataset, spec: WaveletFilterSpec) -> xr.Dataset:
         return filter_projected_coefficients(data, spec)

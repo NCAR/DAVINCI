@@ -82,16 +82,30 @@ class TestAnalysisConfig:
         assert config.style.theme == "ncar"  # type: ignore[union-attr]
         assert config.style.context == "publication"  # type: ignore[union-attr]
 
-    def test_execution_contract_requires_named_analysis_types(self) -> None:
+    def test_production_run_requires_complete_cross_referenced_contract(self) -> None:
         raw: dict[str, Any] = {
-            "analysis": {
-                "execution_contract": {
-                    "name": "eof-wavelet-production-v1",
+            "run": {
+                "id": "aod-model-sensor-2008-eof-wavelet-r01",
+                "kind": "production",
+                "completion": {
                     "required_analyses": {
                         "basis": "eof",
                         "filtered": "wavelet_filter",
                     },
-                }
+                    "required_artifacts": [
+                        {"analysis": "basis", "role": "basis_fit"},
+                        {"analysis": "filtered", "role": "wavelet_filter"},
+                    ],
+                    "required_plots": ["filtered_pc1"],
+                    "inspection": {
+                        "required": True,
+                        "presets": ["eof_wavelet"],
+                    },
+                },
+            },
+            "analysis": {
+                "output_dir": "/run/output",
+                "log_dir": "/run/logs",
             },
             "sources": {"model": {"type": "generic"}},
             "analyses": {
@@ -99,7 +113,21 @@ class TestAnalysisConfig:
                     "type": "eof",
                     "source": "model",
                     "variable": "aod",
+                    "required": True,
                 }
+            },
+            "plots": {
+                "filtered_pc1": {
+                    "type": "timeseries",
+                    "source": "filtered",
+                    "variable": "pc",
+                    "mode": 1,
+                }
+            },
+            "inspection": {
+                "enabled": True,
+                "required": True,
+                "presets": ["eof_wavelet"],
             },
         }
 
@@ -107,12 +135,159 @@ class TestAnalysisConfig:
             validate_schema(MonetConfig, raw)
 
         raw["analyses"]["filtered"] = {
-            "type": "wavelet",
+            "type": "wavelet_filter",
             "source": "basis",
             "variable": "pc",
-            "mode": 1,
+            "band": {"min": 4.0, "max": 10.0, "units": "days"},
+            "min_segment_days": 20.0,
+            "required": True,
         }
-        with pytest.raises(ValueError, match="requires analyses.filtered.type='wavelet_filter'"):
+        config = validate_schema(MonetConfig, raw)
+        assert config.run is not None
+        assert config.run.kind == "production"
+        assert config.run.completion is not None
+        assert config.run.completion.required_plots == ["filtered_pc1"]
+
+    def test_production_run_rejects_optional_analysis_and_inspection(self) -> None:
+        raw: dict[str, Any] = {
+            "run": {
+                "id": "aod-model-sensor-2008-eof-r01",
+                "kind": "production",
+                "completion": {
+                    "required_analyses": {"basis": "eof"},
+                    "required_artifacts": [{"analysis": "basis", "role": "basis_fit"}],
+                    "required_plots": ["basis_scree"],
+                    "inspection": {
+                        "required": True,
+                        "presets": ["eof_wavelet"],
+                    },
+                },
+            },
+            "analysis": {
+                "output_dir": "/run/output",
+                "log_dir": "/run/logs",
+            },
+            "sources": {"model": {"type": "generic"}},
+            "analyses": {
+                "basis": {
+                    "type": "eof",
+                    "source": "model",
+                    "variable": "aod",
+                    "required": False,
+                }
+            },
+            "plots": {
+                "basis_scree": {
+                    "type": "eof_scree",
+                    "source": "basis",
+                    "variable": "explained_variance",
+                }
+            },
+            "inspection": {
+                "enabled": False,
+                "required": False,
+                "presets": ["eof_wavelet"],
+            },
+        }
+
+        with pytest.raises(ValueError, match="analyses.basis.required=true"):
+            validate_schema(MonetConfig, raw)
+
+        raw["analyses"]["basis"]["required"] = True
+        with pytest.raises(ValueError, match="inspection.enabled=true"):
+            validate_schema(MonetConfig, raw)
+
+    def test_nonproduction_run_must_not_declare_completion_contract(self) -> None:
+        raw: dict[str, Any] = {
+            "run": {
+                "id": "aod-model-sensor-2008-eof-preflight",
+                "kind": "preflight",
+                "completion": {
+                    "required_analyses": {"basis": "eof"},
+                    "required_artifacts": [{"analysis": "basis", "role": "basis_fit"}],
+                    "required_plots": ["basis_scree"],
+                    "inspection": {
+                        "required": True,
+                        "presets": ["eof_wavelet"],
+                    },
+                },
+            },
+            "sources": {"model": {"type": "generic"}},
+        }
+
+        with pytest.raises(ValueError, match="only production runs may declare completion"):
+            validate_schema(MonetConfig, raw)
+
+    @pytest.mark.parametrize(
+        ("kind", "run_id"),
+        [
+            ("example", "aod-model-sensor-template"),
+            ("smoke", "aod-model-sensor-smoke"),
+            ("preflight", "aod-model-sensor-preflight"),
+        ],
+    )
+    def test_nonproduction_run_kinds_parse_without_completion(
+        self,
+        kind: str,
+        run_id: str,
+    ) -> None:
+        config = validate_schema(
+            MonetConfig,
+            {
+                "run": {"id": run_id, "kind": kind},
+                "sources": {"model": {"type": "generic"}},
+            },
+        )
+
+        assert config.run is not None
+        assert config.run.kind == kind
+        assert config.run.completion is None
+
+    @pytest.mark.parametrize("run_id", ["AOD-production-r01", "aod_production_r01"])
+    def test_run_id_requires_lowercase_kebab_case(self, run_id: str) -> None:
+        with pytest.raises(ValueError, match="lowercase kebab-case"):
+            validate_schema(
+                MonetConfig,
+                {
+                    "run": {"id": run_id, "kind": "smoke"},
+                    "sources": {"model": {"type": "generic"}},
+                },
+            )
+
+    def test_production_run_id_requires_revision_suffix(self) -> None:
+        with pytest.raises(ValueError, match="must end in -rNN"):
+            validate_schema(
+                MonetConfig,
+                {
+                    "run": {
+                        "id": "aod-model-sensor-production",
+                        "kind": "production",
+                        "completion": {
+                            "required_analyses": {"basis": "eof"},
+                            "required_artifacts": [{"analysis": "basis", "role": "basis_fit"}],
+                            "required_plots": ["basis_scree"],
+                            "inspection": {
+                                "required": True,
+                                "presets": ["eof_wavelet"],
+                            },
+                        },
+                    },
+                    "sources": {"model": {"type": "generic"}},
+                },
+            )
+
+    def test_legacy_execution_contract_is_rejected(self) -> None:
+        raw: dict[str, Any] = {
+            "analysis": {
+                "execution_contract": {
+                    "name": "legacy",
+                    "required_analyses": {"basis": "eof"},
+                }
+            },
+            "sources": {"model": {"type": "generic"}},
+        }
+
+        with pytest.raises(ValueError, match="analysis.execution_contract"):
             validate_schema(MonetConfig, raw)
 
 

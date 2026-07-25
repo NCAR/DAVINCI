@@ -396,8 +396,12 @@ class PipelineRunner:
                     break
 
             if self._fail_fast and result.failed_stages:
+                finalization_stages = {"manifest"}
+                run_config = context.config.run if isinstance(context.config, MonetConfig) else None
+                if run_config is not None and run_config.kind == "production":
+                    finalization_stages.add("completion")
                 for stage in self._stages:
-                    if stage.name == "manifest" and stage.name not in context.results:
+                    if stage.name in finalization_stages and stage.name not in context.results:
                         run_stage(stage)
 
         finally:

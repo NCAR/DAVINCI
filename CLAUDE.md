@@ -344,29 +344,44 @@ summary:
   max_images: 8
 ```
 
-### Execution Contracts
+### Production Run Contracts
 
-Production controls may declare the exact derived analyses that must be present:
+Scheduled controls declare an explicit root `run:` identity. Production runs must use an immutable
+`-rNN` scientific/config revision and declare the analyses, durable artifacts, logical plots,
+saved files, and inspection evidence required for operational completion:
 
 ```yaml
-analysis:
-  execution_contract:
-    name: eof-wavelet-production-v1
+run:
+  id: aod-merra2-myd08-aqua-2008-eof-wavelet-r01
+  kind: production
+  completion:
     required_analyses:
       basis: eof
       projection: eof_projection
       filtered: wavelet_filter
+    required_artifacts:
+      - {analysis: basis, role: basis_fit}
+      - {analysis: projection, role: projection_fit}
+      - {analysis: filtered, role: wavelet_filter}
+    required_plots: [basis_scree, projected_pc1, filtered_pc1]
+    inspection:
+      required: true
+      presets: [eof_wavelet]
 ```
 
-Both `davinci validate` and `davinci run` reject a missing or mistyped required analysis before
-loading source data. Use this for scheduled production controls so a structurally valid preflight
-cannot be mistaken for a complete workflow.
+`davinci validate --strict --readiness` checks that a scheduled control is structured to complete.
+At runtime, the completion stage verifies the declared outputs before the manifest can report a
+completed production run. Preflight, smoke, and example controls cannot declare a production
+completion contract.
 
 **Note**: The old pair shape (`sources: [a, b]` + `geometry:` + `variables:`) is rejected by validation. Use the nested `x:`/`y:` shape above.
 
 ### Config Naming Convention
 
-Tracked configs use `{campaign}-{variant}.example.yaml` with environment variables for portability. Examples:
+Reusable templates use `{campaign}-{variant}.example.yaml` with environment variables for
+portability. Only controls with `run.kind: example` may use that suffix. Scheduled production,
+preflight, and smoke controls use `.yaml`; production filenames exactly match `<run.id>.yaml`, and
+production run IDs end in `-rNN`. Examples:
 - `asia-aq-airnow.example.yaml` — ASIA-AQ AirNow surface evaluation
 - `dc3-geometry-dc8.example.yaml` — DC3 geometry-only DC-8 analysis
 - `modis-aod-cam6.example.yaml` — MODIS AOD vs CAM6

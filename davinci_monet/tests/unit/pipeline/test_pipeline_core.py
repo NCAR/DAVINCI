@@ -1065,7 +1065,7 @@ class TestCreateStandardPipeline:
         """Test all standard stages are created."""
         stages = create_standard_pipeline()
 
-        assert len(stages) == 10
+        assert len(stages) == 11
 
         stage_names = [s.name for s in stages]
         assert stage_names == [
@@ -1078,6 +1078,7 @@ class TestCreateStandardPipeline:
             "plotting",
             "summary",
             "inspection",
+            "completion",
             "manifest",
         ]
 
@@ -1092,7 +1093,8 @@ class TestCreateStandardPipeline:
         assert stages[4].name == "statistics"
         assert stages[5].name == "save_results"
         assert stages[6].name == "plotting"
-        assert stages[-2].name == "inspection"
+        assert stages[-3].name == "inspection"
+        assert stages[-2].name == "completion"
         assert stages[-1].name == "manifest"
 
 
@@ -1110,8 +1112,8 @@ class TestPipelineRunner:
 
         # Unified pipeline (geometry/paired stage fork collapsed): load_sources,
         # analyses, plot_suites, pairing, statistics, save_results, plotting,
-        # summary, inspection, manifest.
-        assert len(runner.stages) == 10
+        # summary, inspection, completion, manifest.
+        assert len(runner.stages) == 11
 
     def test_custom_stages(self):
         """Test runner accepts custom stages."""
@@ -1351,6 +1353,91 @@ class TestPipelineRunner:
         assert data["status"] == "failed"
         assert data["failed_stages"] == ["fail"]
         assert data["stages"]["fail"] == "failed"
+
+    def test_production_fail_fast_runs_completion_before_manifest(self, tmp_path):
+        """Production failures retain contract evidence before final publication."""
+        import json
+
+        from davinci_monet.config.schema import MonetConfig
+        from davinci_monet.pipeline.stages import CompletionStage, ManifestStage
+
+        class FailStage(BaseStage):
+            def execute(self, context: PipelineContext) -> StageResult:
+                return self._create_result(StageStatus.FAILED, error="Failed")
+
+        class SuccessStage(BaseStage):
+            def execute(self, context: PipelineContext) -> StageResult:
+                return self._create_result(StageStatus.COMPLETED)
+
+        config = MonetConfig.model_validate(
+            {
+                "run": {
+                    "id": "aod-test-2008-eof-r01",
+                    "kind": "production",
+                    "completion": {
+                        "required_analyses": {"basis": "eof"},
+                        "required_artifacts": [
+                            {"analysis": "basis", "role": "basis_fit"},
+                        ],
+                        "required_plots": ["basis_scree"],
+                        "inspection": {
+                            "required": True,
+                            "presets": ["eof_wavelet"],
+                        },
+                    },
+                },
+                "analysis": {
+                    "output_dir": str(tmp_path),
+                    "log_dir": str(tmp_path / "logs"),
+                },
+                "sources": {"model": {"type": "generic"}},
+                "analyses": {
+                    "basis": {
+                        "type": "eof",
+                        "source": "model",
+                        "variable": "aod",
+                        "required": True,
+                    }
+                },
+                "plots": {
+                    "basis_scree": {
+                        "type": "eof_scree",
+                        "source": "basis",
+                        "variable": "explained_variance",
+                    }
+                },
+                "inspection": {
+                    "enabled": True,
+                    "required": True,
+                    "presets": ["eof_wavelet"],
+                },
+            }
+        )
+        ctx = PipelineContext(config=config)
+        runner = PipelineRunner(
+            stages=[
+                FailStage(name="fail"),
+                SuccessStage(name="success"),
+                CompletionStage(),
+                ManifestStage(),
+            ],
+            fail_fast=True,
+            show_progress=False,
+        )
+
+        result = runner.run(ctx)
+
+        assert result.success is False
+        assert [stage.stage_name for stage in result.stage_results] == [
+            "fail",
+            "completion",
+            "manifest",
+        ]
+        assert ctx.results["completion"].status is StageStatus.FAILED
+        data = json.loads((tmp_path / "manifest.json").read_text())
+        assert data["status"] == "failed"
+        assert data["failed_stages"] == ["fail", "completion"]
+        assert data["completion"]["passed"] is False
 
     def test_continue_on_failure(self):
         """Test pipeline continues when fail_fast is False."""

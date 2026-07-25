@@ -29,6 +29,24 @@ analyses/
 5. Create YAML configs for model-observation pairing
 6. Run analyses using CLI or Python scripts
 
+## Run Control Classes
+
+- `example` — reusable, intentionally incomplete template; filename ends in `.example.yaml`.
+- `smoke` — minimal environment/runtime wiring check; never scientific evidence.
+- `preflight` — bounded representative workflow; not a complete production result.
+- `production` — revisioned `.yaml` control with an exact `run.completion` contract.
+
+Scheduled controls declare `run.id` and `run.kind`. Production filenames exactly match
+`<run.id>.yaml`, production IDs end in `-rNN`, and execution attempts receive separate `aNNN`
+identities. Validate a scheduled control before execution:
+
+```bash
+davinci validate path/to/control.yaml --strict --readiness
+```
+
+Repository-local DAVINCI workflow skills are tracked under `skills/`. Use
+`$davinci-configure-runs` to construct or audit a control; it always stops before submission.
+
 ## Running Analyses
 
 ```bash

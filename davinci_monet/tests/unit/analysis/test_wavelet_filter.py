@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
+import davinci_monet.analysis.wavelet_filter as wavelet_filter_module
+from davinci_monet.analysis.artifacts import ArtifactService
+from davinci_monet.analysis.base import AnalysisResult, AnalysisRuntime
 from davinci_monet.analysis.wavelet_filter import (
+    WaveletFilterAnalysis,
     bridge_short_gaps,
     cosine_edge_taper,
     filter_projected_coefficients,
@@ -199,3 +205,33 @@ def test_dataset_filter_rejects_missing_projection_identity() -> None:
 
     with pytest.raises(ValueError, match="projection basis signature"):
         filter_projected_coefficients(data, spec)
+
+
+def test_pipeline_adapter_declares_durable_wavelet_filter_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = xr.Dataset({"pc": (("time", "mode"), [[1.0]])})
+    spec = WaveletFilterSpec(
+        type="wavelet_filter",
+        source="projection",
+        band=PeriodBandSpec(min=2.0, max=3.0),
+        min_segment_days=6.0,
+    )
+    monkeypatch.setattr(
+        wavelet_filter_module,
+        "filter_projected_coefficients",
+        lambda data, _spec: data,
+    )
+
+    result = WaveletFilterAnalysis().analyze_inputs(
+        {"source": dataset},
+        spec,
+        AnalysisRuntime(None, None, ArtifactService(tmp_path)),
+    )
+
+    assert isinstance(result, AnalysisResult)
+    assert len(result.artifacts) == 1
+    declaration = result.artifacts[0]
+    assert declaration.kind == "netcdf_collection"
+    assert declaration.role == "wavelet_filter"
+    assert declaration.options["time_chunk_size"] == 31

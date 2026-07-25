@@ -1,7 +1,7 @@
 # DAVINCI Production Run Workflows — Implementation Plan
 
 **Date:** 2026-07-25
-**Status:** Planned; implementation not started
+**Status:** Phase 1 implemented; Phase 2 and Phase 3 remain planned
 **Branch target:** `develop`
 **Design:** `docs/superpowers/specs/2026-07-25-davinci-production-run-workflows-design.md`
 
@@ -50,19 +50,19 @@ calls.
 
 ### Task 1: Inventory and migrate production-facing nomenclature
 
-- [ ] Inventory `fable`, `.example.yaml`, production, preflight, smoke, run-root, and environment
+- [x] Inventory `fable`, `.example.yaml`, production, preflight, smoke, run-root, and environment
   names across tracked configs, scripts, docs, and tests.
-- [ ] Classify every `fable` occurrence as:
+- [x] Classify every `fable` occurrence as:
   - genuinely tied to the Fable AI model or immutable historical evidence; or
   - generic aerosol/EOF/wavelet workflow nomenclature that must be renamed.
-- [ ] Rename the current scheduled controls:
+- [x] Rename the current scheduled controls:
   - `analyses/aerosol-tuning/configs/fable-merra2-aqua-2008.example.yaml`
     → `aod-merra2-myd08-aqua-2008-eof-wavelet-r01.yaml`;
   - `analyses/aerosol-tuning/configs/fable-merra2-aqua-2008-eof-preflight.example.yaml`
     → `aod-merra2-myd08-aqua-2008-eof-wavelet-preflight.yaml`.
-- [ ] Rename production-facing environment variables and run roots to DAVINCI/science names.
-- [ ] Update exact references in `FABLE_PLAN.md`, `CLAUDE.md`, tests, and relevant scripts.
-- [ ] Do not leave aliases, duplicate configs, or redirects for the obsolete production names.
+- [x] Rename production-facing environment variables and run roots to DAVINCI/science names.
+- [x] Update exact references in `FABLE_PLAN.md`, `CLAUDE.md`, tests, and relevant scripts.
+- [x] Do not leave aliases, duplicate configs, or redirects for the obsolete production names.
 
 ### Task 2: Add run and completion schemas
 
@@ -71,16 +71,16 @@ Modify:
 - `davinci_monet/config/schema.py`
 - `davinci_monet/tests/unit/config/test_schema.py`
 
-- [ ] Add strict schemas for `run.id`, `run.kind`, and `run.completion`.
-- [ ] Add typed required-artifact, required-file, required-plot, and inspection contracts.
-- [ ] Validate the kebab-case run-ID/revision grammar.
-- [ ] Require production analyses named in the contract to exist, match type, and set
+- [x] Add strict schemas for `run.id`, `run.kind`, and `run.completion`.
+- [x] Add typed required-artifact, required-file, required-plot, and inspection contracts.
+- [x] Validate the kebab-case run-ID/revision grammar.
+- [x] Require production analyses named in the contract to exist, match type, and set
   `required: true`.
-- [ ] Require production inspection to be enabled and required.
-- [ ] Require at least one durable output category for production.
-- [ ] Migrate scheduled configs from `analysis.execution_contract`.
-- [ ] Remove `AnalysisExecutionContract` and its parsing/validation without a compatibility alias.
-- [ ] Run:
+- [x] Require production inspection to be enabled and required.
+- [x] Require at least one durable output category for production.
+- [x] Migrate scheduled configs from `analysis.execution_contract`.
+- [x] Remove `AnalysisExecutionContract` and its parsing/validation without a compatibility alias.
+- [x] Run:
 
   ```bash
   conda run -n davinci pytest davinci_monet/tests/unit/config/test_schema.py
@@ -96,18 +96,18 @@ Modify:
 
 Add a focused validator module if `commands/validate.py` would otherwise become too large.
 
-- [ ] Add human-readable and JSON readiness reports.
-- [ ] Validate config filename against run kind and ID.
-- [ ] Reject `.example.yaml` for production, preflight, and smoke.
-- [ ] Reject `fable` in production identity unless an explicit Fable-model field establishes that
+- [x] Add human-readable and JSON readiness reports.
+- [x] Validate config filename against run kind and ID.
+- [x] Reject `.example.yaml` for production, preflight, and smoke.
+- [x] Reject `fable` in production identity unless an explicit Fable-model field establishes that
   it is scientifically part of the run.
-- [ ] Resolve required environment variables and source paths.
-- [ ] Reuse reader/source-coverage helpers where they exist; report unsupported coverage checks
+- [x] Resolve required environment variables and source paths.
+- [x] Reuse reader/source-coverage helpers where they exist; report unsupported coverage checks
   explicitly rather than claiming they passed.
-- [ ] Validate terminal analysis persistence, logical plot references, and inspection presets.
-- [ ] Reject an unsafe output target that would overwrite a completed attempt.
-- [ ] Keep readiness read-only.
-- [ ] Run focused CLI tests through Typer's command entry point.
+- [x] Validate terminal analysis persistence, logical plot references, and inspection presets.
+- [x] Reject an unsafe output target that would overwrite a completed attempt.
+- [x] Keep readiness read-only.
+- [x] Run focused CLI tests through Typer's command entry point.
 
 ### Task 4: Preserve logical output identities
 
@@ -118,11 +118,11 @@ Modify:
 - `davinci_monet/pipeline/stages/manifest.py`
 - corresponding unit tests
 
-- [ ] Keep `plots_generated` and add `plot_products: {plot_name: [paths...]}`.
-- [ ] Give saved result files stable logical identities rather than requiring basename guessing.
-- [ ] Carry analysis artifact roles, saved files, and logical plots into the manifest.
-- [ ] Verify paths exist and are nonempty before recording them as final products.
-- [ ] Preserve atomic manifest publication and completed-manifest protection.
+- [x] Keep `plots_generated` and add `plot_products: {plot_name: [paths...]}`.
+- [x] Give saved result files stable logical identities rather than requiring basename guessing.
+- [x] Carry analysis artifact roles, saved files, and logical plots into the manifest.
+- [x] Verify paths exist and are nonempty before recording them as final products.
+- [x] Preserve atomic manifest publication and completed-manifest protection.
 
 ### Task 5: Add runtime completion verification
 
@@ -138,14 +138,14 @@ Modify:
 - `davinci_monet/pipeline/stages/manifest.py`
 - pipeline integration tests
 
-- [ ] Insert `CompletionStage` after inspection and before manifest in both standard factories.
-- [ ] Skip cleanly when no production completion contract exists.
-- [ ] Verify required analysis status, artifact integrity, saved files, logical plots, inspection,
+- [x] Insert `CompletionStage` after inspection and before manifest in both standard factories.
+- [x] Skip cleanly when no production completion contract exists.
+- [x] Verify required analysis status, artifact integrity, saved files, logical plots, inspection,
   and item-error policy.
-- [ ] Return precise machine-readable failure reasons.
-- [ ] Ensure fail-fast still executes `ManifestStage`.
-- [ ] Make the manifest status reflect completion-stage failure.
-- [ ] Add the approved success and failure pipeline integration tests through
+- [x] Return precise machine-readable failure reasons.
+- [x] Ensure fail-fast still executes `ManifestStage`.
+- [x] Make the manifest status reflect completion-stage failure.
+- [x] Add the approved success and failure pipeline integration tests through
   `PipelineRunner.run_from_config()`.
 
 ### Task 6: Create `davinci-configure-runs`
@@ -163,26 +163,31 @@ skills/davinci-configure-runs/
     └── audit_config.py
 ```
 
-- [ ] Run `init_skill.py`; do not hand-create the initial skeleton.
-- [ ] Keep construction and review steps in `SKILL.md`.
-- [ ] Put detailed naming and config-family routing in references without duplicating it.
-- [ ] Make `audit_config.py` call DAVINCI's public validation interfaces rather than reimplementing
+- [x] Run `init_skill.py`; do not hand-create the initial skeleton.
+- [x] Keep construction and review steps in `SKILL.md`.
+- [x] Put detailed naming and config-family routing in references without duplicating it.
+- [x] Make `audit_config.py` call DAVINCI's public validation interfaces rather than reimplementing
   schema rules.
-- [ ] Implement fixed, read-only help mode for the skill.
-- [ ] Implement `audit_config.py --help`.
-- [ ] End the workflow before submission.
-- [ ] Generate `agents/openai.yaml` from the finished skill.
-- [ ] Run `quick_validate.py` and focused skill contract tests.
+- [x] Implement fixed, read-only help mode for the skill.
+- [x] Implement `audit_config.py --help`.
+- [x] End the workflow before submission.
+- [x] Generate `agents/openai.yaml` from the finished skill.
+- [x] Run `quick_validate.py` and focused skill contract tests.
 
 ### Phase 1 acceptance
 
-- [ ] The renamed EOF/wavelet production config passes strict readiness.
-- [ ] Its preflight config is unmistakably non-production.
-- [ ] The synthetic full pipeline lands every contracted artifact and passes completion.
-- [ ] Each injected missing/error case produces a failed manifest.
-- [ ] `$davinci-configure-runs help` is brief and non-mutating.
+- [x] The renamed EOF/wavelet production config passes strict readiness.
+- [x] Its preflight config is unmistakably non-production.
+- [x] The synthetic full pipeline lands every contracted artifact and passes completion.
+- [x] Each injected missing/error case produces a failed manifest.
+- [x] `$davinci-configure-runs help` is brief and non-mutating.
 - [ ] Full local code gates pass.
-- [ ] Stop for user review before Phase 2.
+- [x] Stop for user review before Phase 2.
+
+Validation note: `pytest` passed all 2,175 tests with 9 skips; Black, isort, diff checks, and mypy
+over every changed Python surface passed. The repository-wide mypy gate remains open only for the
+two pre-existing Cartopy `Axes.get_extent` errors in
+`davinci_monet/tests/unit/plots/test_spatial_bias_grid.py`.
 
 ## Phase 2 — `davinci-execute-runs`
 

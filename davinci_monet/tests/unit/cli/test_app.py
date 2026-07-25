@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -392,6 +393,107 @@ analysis:
         assert "Mode: strict" in result.stdout
         assert "Parsed configuration" in result.stdout
         assert '"mock_source"' in result.stdout
+
+    def _production_config(self, tmp_path: Path, *, filename: str | None = None) -> Path:
+        run_id = "aod-model-sensor-2008-eof-r01"
+        source = tmp_path / "source.nc"
+        source.touch()
+        config_file = tmp_path / (filename or f"{run_id}.yaml")
+        config_file.write_text(
+            f"""
+run:
+  id: {run_id}
+  kind: production
+  completion:
+    required_analyses:
+      basis: eof
+    required_artifacts:
+      - analysis: basis
+        role: basis_fit
+    required_plots: [basis_scree]
+    inspection:
+      required: true
+      presets: [eof_wavelet]
+analysis:
+  start_time: 2024-01-01
+  end_time: 2024-01-02
+  output_dir: {tmp_path / "run" / "output"}
+  log_dir: {tmp_path / "run" / "logs"}
+sources:
+  model:
+    type: generic
+    files: {source}
+analyses:
+  basis:
+    type: eof
+    source: model
+    variable: aod
+    required: true
+plots:
+  basis_scree:
+    type: eof_scree
+    source: basis
+    variable: explained_variance
+inspection:
+  enabled: true
+  required: true
+  presets: [eof_wavelet]
+  preview_format: png
+""",
+            encoding="utf-8",
+        )
+        return config_file
+
+    def test_validate_readiness_emits_machine_readable_report(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        config_file = self._production_config(tmp_path)
+
+        result = CliRunner().invoke(
+            app,
+            ["validate", str(config_file), "--strict", "--readiness", "--json"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        report = json.loads(result.stdout)
+        assert report["ready"] is True
+        assert report["run_id"] == "aod-model-sensor-2008-eof-r01"
+        assert any(check["name"] == "artifact_contracts" for check in report["checks"])
+
+    def test_validate_readiness_rejects_production_example_filename(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        config_file = self._production_config(
+            tmp_path,
+            filename="aod-model-sensor-2008-eof-r01.example.yaml",
+        )
+
+        result = CliRunner().invoke(
+            app,
+            ["validate", str(config_file), "--strict", "--readiness"],
+        )
+
+        assert result.exit_code == 1
+        assert "production config filename must be" in result.stdout
+
+    def test_validate_readiness_rejects_nonempty_attempt_output(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+
+        config_file = self._production_config(tmp_path)
+        output_dir = tmp_path / "run" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "manifest.json").write_text(
+            '{"status": "completed"}\n',
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            app,
+            ["validate", str(config_file), "--strict", "--readiness"],
+        )
+
+        assert result.exit_code == 1
+        assert "output directory is not empty" in result.stdout
 
 
 # =============================================================================

@@ -378,11 +378,27 @@ def validate(
         "--show",
         help="Print the parsed configuration.",
     ),
+    readiness: bool = typer.Option(
+        False,
+        "--readiness",
+        help="Check whether a scheduled run is structurally ready to execute.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Print only the machine-readable readiness report (requires --readiness).",
+    ),
 ) -> None:
     """Validate a DAVINCI configuration file."""
     from davinci_monet.cli.commands.validate import validate_config_command
 
-    validate_config_command(control, strict=strict, show_config=show_config)
+    validate_config_command(
+        control,
+        strict=strict,
+        show_config=show_config,
+        readiness=readiness,
+        json_output=json_output,
+    )
 
 
 @app.command()

@@ -1,27 +1,24 @@
 # MERRA-2 / MODIS Aqua 2008 daily-AOD preprocessing and EOF-only preflight.
 #
 # This control file intentionally does NOT perform observation projection or
-# wavelet filtering. Use fable-merra2-aqua-2008.example.yaml for that production
-# chain. The execution contract below prevents this preflight from silently
-# acquiring a different scope.
+# wavelet filtering. Use aod-merra2-myd08-aqua-2008-eof-wavelet-r01.yaml for
+# that production chain.
 #
 # Required environment variables:
-#   FABLE_2008_DATA  Raw staging root containing GMAO/ and MODIS/
-#   FABLE_2008_RUN   A unique run root containing output/ and logs/
+#   DAVINCI_AOD_2008_DATA  Raw staging root containing GMAO/ and MODIS/
+#   DAVINCI_RUN_ROOT       A unique preflight root containing output/ and logs/
+
+run:
+  id: aod-merra2-myd08-aqua-2008-eof-wavelet-preflight
+  kind: preflight
 
 analysis:
   workflow: standard
   start_time: "2008-01-01 00:00:00"
   end_time: "2008-12-31 23:59:59"
-  output_dir: ${FABLE_2008_RUN}/output
-  log_dir: ${FABLE_2008_RUN}/logs
+  output_dir: ${DAVINCI_RUN_ROOT}/output
+  log_dir: ${DAVINCI_RUN_ROOT}/logs
   debug: false
-  execution_contract:
-    name: fable-merra2-aqua-2008-eof-preflight-v1
-    required_analyses:
-      model_daily: aod_preprocess
-      aqua_daily: aod_preprocess
-      aod_basis: eof
   style:
     theme: ncar
     context: default
@@ -30,9 +27,9 @@ sources:
   merra2_hourly:
     type: merra2
     files:
-      - ${FABLE_2008_DATA}/GMAO/MERRA2/2007/12/MERRA2_*.tavg1_2d_aer_Nx.20071231.nc4
-      - ${FABLE_2008_DATA}/GMAO/MERRA2/2008/*/MERRA2_*.tavg1_2d_aer_Nx.*.nc4
-      - ${FABLE_2008_DATA}/GMAO/MERRA2/2009/01/MERRA2_*.tavg1_2d_aer_Nx.20090101.nc4
+      - ${DAVINCI_AOD_2008_DATA}/GMAO/MERRA2/2007/12/MERRA2_*.tavg1_2d_aer_Nx.20071231.nc4
+      - ${DAVINCI_AOD_2008_DATA}/GMAO/MERRA2/2008/*/MERRA2_*.tavg1_2d_aer_Nx.*.nc4
+      - ${DAVINCI_AOD_2008_DATA}/GMAO/MERRA2/2009/01/MERRA2_*.tavg1_2d_aer_Nx.20090101.nc4
     variables:
       TOTEXTTAU:
         units: "1"
@@ -43,7 +40,7 @@ sources:
     type: modis_viirs
     product: MYD08_D3
     level: L3
-    files: ${FABLE_2008_DATA}/MODIS/Aqua/C61/2008/*/MYD08_D3.A2008*.061.*.hdf
+    files: ${DAVINCI_AOD_2008_DATA}/MODIS/Aqua/C61/2008/*/MYD08_D3.A2008*.061.*.hdf
     variables:
       aod_550nm:
         units: "1"

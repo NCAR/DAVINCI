@@ -87,6 +87,10 @@ def test_plotting_stage_renders_pairwise_and_single_source_specs(tmp_path) -> No
     generated = result.data["plots_generated"]
     assert any("scatter_o3" in path for path in generated)
     assert any("obs_map" in path for path in generated)
+    products = result.data["plot_products"]
+    assert set(products) == {"scatter_o3", "obs_map"}
+    assert all("scatter_o3" in path for path in products["scatter_o3"])
+    assert all("obs_map" in path for path in products["obs_map"])
 
 
 def test_plotting_stage_honors_pairwise_plot_formats(tmp_path) -> None:
@@ -104,6 +108,9 @@ def test_plotting_stage_honors_pairwise_plot_formats(tmp_path) -> None:
     generated = result.data["plots_generated"]
     assert any(path.endswith("scatter.o3.pdf") for path in generated)
     assert not any(path.endswith("scatter.o3.png") for path in generated)
+    assert result.data["plot_products"] == {
+        "scatter.o3": [path for path in generated if path.endswith("scatter.o3.pdf")]
+    }
     assert not stale_png.exists()
     assert not (tmp_path / "obs" / "00_scatter.pdf").exists()
     assert list(tmp_path.rglob("*.png")) == []

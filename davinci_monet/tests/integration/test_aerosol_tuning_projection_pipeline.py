@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from davinci_monet.analysis.base import AnalysisResult
+from davinci_monet.analysis.wavelet_filter import WaveletFilterAnalysis
 from davinci_monet.pipeline.runner import PipelineResult, PipelineRunner
+from davinci_monet.pipeline.stages import StageStatus
 from davinci_monet.tests.synthetic.aerosol_tuning import (
     SyntheticTuningBundle,
     SyntheticTuningSpec,
@@ -123,6 +127,127 @@ def _run(config: dict[str, Any]) -> PipelineResult:
     ).run_from_config(config)
 
 
+@pytest.fixture(scope="module")
+def production_eof_wavelet_inputs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, SyntheticTuningSpec]:
+    """Write one immutable synthetic input bundle shared by production-path tests."""
+    root = tmp_path_factory.mktemp("production_eof_wavelet_inputs")
+    spec = SyntheticTuningSpec.multi_sensor_ci()
+    generate_aerosol_tuning_bundle(root, spec)
+    return root, spec
+
+
+def _production_eof_wavelet_config(
+    input_root: Path,
+    run_root: Path,
+    spec: SyntheticTuningSpec,
+) -> dict[str, Any]:
+    config = _pipeline_inputs(input_root, spec)
+    config["analysis"]["output_dir"] = str(run_root / "output")
+    config["analysis"]["log_dir"] = str(run_root / "logs")
+    start = f"{spec.time_config.start} 00:00:00"
+    end = f"{spec.time_config.end} 23:59:59"
+    config["analyses"]["aod_basis"] = {
+        "type": "eof",
+        "source": "model_daily",
+        "variable": "log_aod",
+        "n_modes": spec.n_modes,
+        "standardize": False,
+        "rotation": "none",
+        "solver": "full",
+        "fit_window": {"start": start, "end": end},
+        "required": True,
+    }
+    config["analyses"]["obs_pcs"] = _projection_spec(
+        ["sensor_a_daily", "sensor_b_daily"],
+        start,
+        end,
+    )
+    config["analyses"]["filtered_pcs"] = {
+        "type": "wavelet_filter",
+        "source": "obs_pcs",
+        "variable": "pc",
+        "resolution_variable": "resolution",
+        "min_resolution": 0.0,
+        "keep_significant": False,
+        "significance_level": 0.95,
+        "band": {"min": 4.0, "max": 16.0, "units": "days"},
+        "max_bridge_days": 3.0,
+        "min_segment_days": 32.0,
+        "omega0": 6.0,
+        "required": True,
+    }
+    config["plots"] = {
+        "basis_scree": {
+            "type": "eof_scree",
+            "source": "aod_basis",
+            "variable": "explained_variance",
+            "formats": ["pdf"],
+        },
+        "projected_pc1": {
+            "type": "timeseries",
+            "source": "obs_pcs",
+            "variable": "pc",
+            "mode": 1,
+            "formats": ["pdf"],
+        },
+        "filtered_pc1": {
+            "type": "timeseries",
+            "source": "filtered_pcs",
+            "variable": "pc",
+            "mode": 1,
+            "formats": ["pdf"],
+        },
+        "filtered_pc1_scalogram": {
+            "type": "wavelet_scalogram",
+            "source": "filtered_pcs",
+            "variable": "power",
+            "mode": 1,
+            "formats": ["pdf"],
+        },
+    }
+    required_analyses = {name: analysis["type"] for name, analysis in config["analyses"].items()}
+    config["run"] = {
+        "id": "aod-synthetic-multisensor-eof-wavelet-r01",
+        "kind": "production",
+        "completion": {
+            "required_analyses": required_analyses,
+            "required_artifacts": [
+                {"analysis": "aod_basis", "role": "basis_fit"},
+                {"analysis": "obs_pcs", "role": "projection_fit"},
+                {"analysis": "filtered_pcs", "role": "wavelet_filter"},
+            ],
+            "required_saved_files": [],
+            "required_plots": list(config["plots"]),
+            "inspection": {
+                "required": True,
+                "presets": ["eof_wavelet"],
+            },
+            "allow_item_errors": False,
+        },
+    }
+    config["inspection"] = {
+        "enabled": True,
+        "required": True,
+        "presets": ["eof_wavelet"],
+        "preview_format": "png",
+    }
+    return config
+
+
+def _assert_failed_production_manifest(result: PipelineResult, output_dir: Path) -> dict[str, Any]:
+    completion = result.get_stage_result("completion")
+    assert result.success is False
+    assert completion is not None
+    assert completion.status is StageStatus.FAILED
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert "completion" in manifest["failed_stages"]
+    assert manifest["completion"]["passed"] is False
+    return manifest
+
+
 def _analytic_projection(
     basis: xr.Dataset,
     model: xr.Dataset,
@@ -159,6 +284,161 @@ def _assert_qa_counts(context: Any, truth: xr.Dataset) -> None:
         daily = context.sources[f"{sensor}_daily"].data
         assert int((raw["QA"] == 3).sum()) == int(np.count_nonzero(valid[sensor_index]))
         np.testing.assert_array_equal(daily["valid"].values, valid[sensor_index])
+
+
+@pytest.mark.integration
+def test_production_eof_wavelet_pipeline_lands_complete_outputs(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+) -> None:
+    """The public pipeline entry point lands every production contract product."""
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+
+    result = _run(config)
+
+    assert result.success, result.stage_errors
+    completion = result.get_stage_result("completion")
+    assert completion is not None
+    assert completion.status is StageStatus.COMPLETED
+    assert completion.data["passed"] is True
+    output_dir = tmp_path / "output"
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["completion"]["passed"] is True
+    assert set(manifest["plot_products"]) == set(config["plots"])
+    for paths in manifest["plot_products"].values():
+        assert paths
+        assert all(Path(path).is_file() and Path(path).stat().st_size > 0 for path in paths)
+        assert all(Path(path).suffix == ".pdf" for path in paths)
+    roles = {
+        (entry["analysis"], entry["role"])
+        for entry in manifest["analysis_artifacts"]
+        if entry.get("status") == "finalized"
+    }
+    assert roles.issuperset(
+        {
+            ("aod_basis", "basis_fit"),
+            ("obs_pcs", "projection_fit"),
+            ("filtered_pcs", "wavelet_filter"),
+        }
+    )
+    assert manifest["inspection"]["passed"] is True
+    assert all(
+        Path(path).is_file() and Path(path).stat().st_size > 0
+        for path in manifest["inspection"]["inspection_previews"]
+    )
+
+
+@pytest.mark.integration
+def test_production_completion_rejects_missing_terminal_artifact(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A memory-only terminal result cannot satisfy production completion."""
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+    original = WaveletFilterAnalysis.analyze_inputs
+
+    def without_artifact(
+        self: WaveletFilterAnalysis,
+        inputs: Any,
+        analysis_spec: Any,
+        runtime: Any,
+    ) -> AnalysisResult:
+        result = original(self, inputs, analysis_spec, runtime)
+        return AnalysisResult(dataset=result.dataset)
+
+    monkeypatch.setattr(WaveletFilterAnalysis, "analyze_inputs", without_artifact)
+
+    result = _run(config)
+
+    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    assert any(
+        "filtered_pcs:wavelet_filter was not published" in error
+        for error in manifest["completion"]["errors"]
+    )
+
+
+@pytest.mark.integration
+def test_production_completion_rejects_required_plot_failure(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+) -> None:
+    """A required logical plot failure is visible in completion and the manifest."""
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+    config["plots"]["filtered_pc1"]["variable"] = "missing_pc"
+
+    result = _run(config)
+
+    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    assert any(
+        "required plot 'filtered_pc1' produced no outputs" in error
+        for error in manifest["completion"]["errors"]
+    )
+    assert manifest["errors"]["plot_errors"]
+
+
+@pytest.mark.integration
+def test_production_completion_rejects_inspection_failure(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed required inspection still reaches completion and final publication."""
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+
+    def failed_previews(root: Path, plots_dir: Path, pdfs: list[Path]) -> dict[str, Any]:
+        del root, plots_dir, pdfs
+        return {
+            "passed": False,
+            "paths": [],
+            "errors": ["injected preview failure"],
+            "detail": "0 previews written",
+        }
+
+    monkeypatch.setattr(
+        "davinci_monet.inspection.core._write_png_previews",
+        failed_previews,
+    )
+
+    result = _run(config)
+
+    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    assert manifest["stages"]["inspection"] == "failed"
+    assert "required inspection did not complete" in manifest["completion"]["errors"]
+
+
+@pytest.mark.integration
+def test_production_completion_rejects_nonfatal_item_error(
+    tmp_path: Path,
+    production_eof_wavelet_inputs: tuple[Path, SyntheticTuningSpec],
+) -> None:
+    """A surviving optional plot does not hide its per-item production error."""
+    input_root, spec = production_eof_wavelet_inputs
+    config = _production_eof_wavelet_config(input_root, tmp_path, spec)
+    config["plots"]["optional_broken_diagnostic"] = {
+        "type": "timeseries",
+        "source": "filtered_pcs",
+        "variable": "missing_pc",
+        "mode": 1,
+        "formats": ["pdf"],
+    }
+
+    result = _run(config)
+
+    manifest = _assert_failed_production_manifest(result, tmp_path / "output")
+    assert all(
+        "optional_broken_diagnostic" not in error
+        for error in manifest["completion"]["errors"]
+        if error.startswith("required plot")
+    )
+    assert any(
+        error.startswith("plot_errors is not empty:") for error in manifest["completion"]["errors"]
+    )
 
 
 @pytest.mark.integration

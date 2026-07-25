@@ -241,11 +241,14 @@ class TestSaveResultsDescriptive:
     def test_descriptive_writes_separate_csv_not_summary(self, tmp_path: Any) -> None:
         ctx = _geometry_ctx(tmp_path)
         ctx.results["statistics"] = StatisticsStage().execute(ctx)
-        SaveResultsStage().execute(ctx)
+        result = SaveResultsStage().execute(ctx)
         out = tmp_path / "out"
         # Descriptive stats go to their own file; the comparison summary is NOT written.
         assert (out / "statistics_descriptive.csv").exists()
         assert not (out / "statistics_summary.csv").exists()
+        assert result.data["saved_products"] == {
+            "statistics_descriptive": str(out / "statistics_descriptive.csv")
+        }
         df = pd.read_csv(out / "statistics_descriptive.csv")
         assert {"mean", "median", "p90"}.issubset(df.columns)
         assert {"O3", "CO"}.issubset(set(df["Variable"]))

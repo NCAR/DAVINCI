@@ -24,6 +24,8 @@ The implementation is split across submodules for maintainability; this
 - module `~davinci_monet.pipeline.stages.summary` — :class:`SummaryStage`.
 - module `~davinci_monet.pipeline.stages.inspection` —
   :class:`InspectionStage`.
+- module `~davinci_monet.pipeline.stages.completion` —
+  :class:`CompletionStage`.
 - module `~davinci_monet.pipeline.stages.manifest` —
   :class:`ManifestStage`.
 - module `~davinci_monet.pipeline.stages.factory` — pipeline constructors.
@@ -41,6 +43,7 @@ from davinci_monet.pipeline.stages.base import (
     StageResult,
     StageStatus,
 )
+from davinci_monet.pipeline.stages.completion import CompletionStage
 from davinci_monet.pipeline.stages.factory import (
     create_geometry_pipeline,
     create_standard_pipeline,
@@ -87,6 +90,7 @@ __all__ = [
     "SaveResultsStage",
     "SummaryStage",
     "InspectionStage",
+    "CompletionStage",
     "ManifestStage",
     # Pipeline factories
     "create_standard_pipeline",

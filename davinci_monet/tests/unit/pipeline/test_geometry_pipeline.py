@@ -196,6 +196,7 @@ class TestGeometryOnlyPipelineDetection:
             "plotting",
             "summary",
             "inspection",
+            "completion",
             "manifest",
         ]
 

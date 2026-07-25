@@ -31,6 +31,7 @@ class SaveResultsStage(BaseStage):
 
         start = time.time()
         saved_files: list[str] = []
+        saved_products: dict[str, str] = {}
 
         # Get output directory from analysis config
         output_dir = Path(context.analysis_config().output_dir or ".")
@@ -54,6 +55,7 @@ class SaveResultsStage(BaseStage):
                 desc_file = output_dir / "statistics_descriptive.csv"
                 desc_df.to_csv(desc_file)
                 saved_files.append(str(desc_file))
+                saved_products["statistics_descriptive"] = str(desc_file)
                 context.log_progress(f"done: {len(desc_rows)} rows saved")
         elif stats_result and stats_result.data:
             context.log_progress("step: Writing statistics CSV...")
@@ -116,6 +118,7 @@ class SaveResultsStage(BaseStage):
                 stats_file = output_dir / "statistics_summary.csv"
                 df.to_csv(stats_file)
                 saved_files.append(str(stats_file))
+                saved_products["statistics_summary"] = str(stats_file)
                 context.log_progress(f"done: {len(rows)} rows saved")
 
             # Save per-flight statistics if available
@@ -147,10 +150,14 @@ class SaveResultsStage(BaseStage):
                 flight_stats_file = output_dir / "statistics_per_flight.csv"
                 flight_df.to_csv(flight_stats_file, index=False)
                 saved_files.append(str(flight_stats_file))
+                saved_products["statistics_per_flight"] = str(flight_stats_file)
                 context.log_progress(f"done: {len(flight_df)} rows")
 
         return self._create_result(
             StageStatus.COMPLETED,
-            data={"saved_files": saved_files},
+            data={
+                "saved_files": saved_files,
+                "saved_products": saved_products,
+            },
             duration=time.time() - start,
         )

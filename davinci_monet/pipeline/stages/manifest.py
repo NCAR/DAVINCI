@@ -49,11 +49,25 @@ class ManifestStage(BaseStage):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         plots: list[str] = []
+        plot_products: dict[str, Any] = {}
         plotting = context.results.get("plotting")
         if plotting and isinstance(plotting.data, dict):
             plots = list(plotting.data.get("plots_generated", []))
+            raw_plot_products = plotting.data.get("plot_products", {})
+            if isinstance(raw_plot_products, dict):
+                plot_products = raw_plot_products
+
+        saved_files: list[str] = []
+        saved_products: dict[str, Any] = {}
+        save_results = context.results.get("save_results")
+        if save_results and isinstance(save_results.data, dict):
+            saved_files = list(save_results.data.get("saved_files", []))
+            raw_saved_products = save_results.data.get("saved_products", {})
+            if isinstance(raw_saved_products, dict):
+                saved_products = raw_saved_products
 
         inspection = context.results.get("inspection")
+        completion = context.results.get("completion")
         failed = [
             name for name, result in context.results.items() if result.status == StageStatus.FAILED
         ]
@@ -78,8 +92,14 @@ class ManifestStage(BaseStage):
             "analysis_dependency_blocked": context.metadata.get("analysis_dependency_blocked", []),
             "analysis_partial_failure": context.metadata.get("analysis_partial_failure", []),
             "plots": plots,
+            "plot_products": plot_products,
+            "saved_files": saved_files,
+            "saved_products": saved_products,
             "inspection": (
                 inspection.data if inspection and isinstance(inspection.data, dict) else {}
+            ),
+            "completion": (
+                completion.data if completion and isinstance(completion.data, dict) else {}
             ),
             "stages": {
                 name: result.status.name.lower() for name, result in context.results.items()
