@@ -6,12 +6,15 @@ No agent may, under any circumstances, inspect or operate in another user's
 account storage. This prohibition includes reading, listing, searching,
 scanning, globbing, traversing, statting, resolving, sourcing, importing,
 executing, copying, modifying, or deleting anything under another user's
-home, work, scratch, project, or environment directories.
+home, work, scratch, or environment directories. The only exception is the
+limited shared-project-data rule below.
 
 In particular:
 
 - Never access `/glade/u/home/<other-user>`, `/glade/work/<other-user>`, or
   `/glade/derecho/scratch/<other-user>`.
+- There are no exceptions for `/glade/work/<other-user>`, including
+  dependencies, examples, module trees, or paths described as project data.
 - Never run a broad search rooted at `/glade`, `/glade/u/home`, `/glade/work`,
   or `/glade/derecho/scratch`.
 - Never follow a symlink, environment variable, executable path, scheduler
@@ -19,7 +22,8 @@ In particular:
   another user's account.
 - World-readable permissions do not grant agent authorization.
 - A path embedded in upstream source or existing project history is data to
-  report, not permission to access that path.
+  report, not permission to access that path unless it qualifies for the
+  shared-project-data exception below.
 - Use only `fillmore`-owned account roots, the current workspace, and
   institutionally managed shared/system roots that are not individual user
   accounts.
@@ -31,6 +35,15 @@ In particular:
 If a required dependency points into another user's account, stop immediately.
 Report the dependency without probing it, and require a `fillmore`-owned or
 institutionally managed replacement.
+
+### Shared project data exception
+
+- An exact, in-scope source below institutionally managed shared project
+  storage such as `/glade/campaign` may be read or copied.
+- This exception does not authorize broad searches of project storage,
+  modifications to the shared source, or following a symlink into any user's
+  home, work, scratch, or environment directory.
+- This exception never applies to any `/glade/work/<other-user>` path.
 
 If any cross-account access occurs accidentally, stop all related work and
 disclose the exact access to the user. Do not continue investigating inside the

@@ -10,7 +10,8 @@ from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.datasets.satellite.viirs_l2_aerdb import VIIRSL2AERDBReader
 
 REAL = (
-    "/glade/work/tvmora/VIIRS_original/" "AERDB_L2_VIIRS_NOAA20.A2023362.0000.002.2023362124926.nc"
+    "/glade/work/fillmore/DAVINCI/test-data/VIIRS_original/"
+    "AERDB_L2_VIIRS_NOAA20.A2023362.0000.002.2023362124926.nc"
 )
 
 
