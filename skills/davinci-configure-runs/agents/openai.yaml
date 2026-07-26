@@ -1,0 +1,4 @@
+interface:
+  display_name: "DAVINCI Configure Runs"
+  short_description: "Build and validate complete DAVINCI run controls"
+  default_prompt: "Use $davinci-configure-runs to construct or audit a DAVINCI run configuration and stop before submission."
