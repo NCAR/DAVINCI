@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,10 @@ from davinci_monet.core.coordinates import normalize_post_load_coordinates
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.schema_utils import dump_schema, is_schema_object
 from davinci_monet.io.source_registration import ensure_builtin_source_readers_registered
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -71,7 +76,35 @@ class LoadSourcesStage(BaseStage):
                 total_sources = len(source_configs)
                 for index, (label, raw_config) in enumerate(source_configs.items(), start=1):
                     context.log_progress(f"    Loading source: {label} ({index}/{total_sources})")
-                    source = self._load_unified_source(label, raw_config, context)
+                    manager = item_checkpoint_manager(context)
+                    request = CheckpointRequest(
+                        stage=self.name,
+                        item=str(label),
+                        config={
+                            "source": raw_config,
+                            "analysis": config.get("analysis", {}),
+                        },
+                        source_paths=tuple(
+                            path
+                            for path in self._file_list(
+                                self._as_dict(raw_config).get("files")
+                                or self._as_dict(raw_config).get("filename")
+                            )
+                            if Path(path).is_file()
+                        ),
+                    )
+                    lookup = manager.lookup(request) if manager is not None else None
+                    if manager is not None and lookup is not None and lookup.receipt is not None:
+                        source = manager.restore_source(lookup.receipt)
+                        context.log_progress(f"    Restored source checkpoint: {label}")
+                    else:
+                        source = self._load_unified_source(label, raw_config, context)
+                        if (
+                            manager is not None
+                            and manager.config.execution is not None
+                            and manager.config.execution.checkpoints.loaded_sources
+                        ):
+                            manager.capture_source(request, source)
                     self._register_source(context, label, source)
                 return self._create_result(
                     StageStatus.COMPLETED,

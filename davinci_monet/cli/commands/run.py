@@ -24,6 +24,9 @@ def run_analysis(
     debug: bool = False,
     show_plots: bool = False,
     preview_format: str = "pdf",
+    resume: bool = False,
+    resume_plan: bool = False,
+    restart_from: str | None = None,
 ) -> None:
     """Execute DAVINCI analysis from a control file.
 
@@ -47,6 +50,15 @@ def run_analysis(
     if not p.is_file():
         typer.secho(f"Error: control file {control_path!r} does not exist", fg=ERROR_COLOR)
         raise typer.Exit(2)
+    if resume and resume_plan:
+        typer.secho("Error: --resume and --resume-plan are mutually exclusive", fg=ERROR_COLOR)
+        raise typer.Exit(2)
+    if restart_from is not None and not resume:
+        typer.secho("Error: --restart-from requires --resume", fg=ERROR_COLOR)
+        raise typer.Exit(2)
+    if resume_plan and show_plots:
+        typer.secho("Error: --resume-plan cannot be combined with --show-plots", fg=ERROR_COLOR)
+        raise typer.Exit(2)
 
     # Run the full pipeline with progress bars and logging
     # Note: ProgressFormatter.header() displays the config path
@@ -54,7 +66,13 @@ def run_analysis(
 
     try:
         result = pipeline_run(
-            str(p), show_progress=True, show_plots=show_plots, preview_format=preview_format  # type: ignore[arg-type]
+            str(p),
+            show_progress=True,
+            show_plots=show_plots,
+            preview_format=preview_format,  # type: ignore[arg-type]
+            resume=resume,
+            resume_plan=resume_plan,
+            restart_from=restart_from,
         )
     except ConfigurationError as e:
         # Styled display for configuration/YAML errors (before pipeline starts)
@@ -74,6 +92,19 @@ def run_analysis(
         if debug:
             raise
         raise typer.Exit(1)
+
+    from davinci_monet.pipeline.checkpoints.models import ResumePlan
+
+    if isinstance(result, ResumePlan):
+        typer.echo(f"Resume plan for {result.attempt_id}:")
+        if result.blocked:
+            for reason in result.blocked_reasons:
+                typer.echo(f"  BLOCKED: {reason}")
+            raise typer.Exit(1)
+        for item in result.items:
+            key = item.stage if item.item is None else f"{item.stage}:{item.item}"
+            typer.echo(f"  {key}: {item.disposition.value} ({item.reason})")
+        return
 
     # Report results (success case only - failure shown by pipeline footer)
     if result.success:

@@ -430,6 +430,37 @@ class TestConfigToYaml:
         assert reloaded.analysis.start_time == datetime(2024, 1, 1)
         assert reloaded.analysis.output_dir == tmp_path / "output"
 
+    def test_execution_checkpoint_policy_round_trips(self, tmp_path: Path) -> None:
+        """Execution policy survives JSON-mode YAML serialization."""
+        attempt = tmp_path / "a001"
+        config = validate_schema(
+            MonetConfig,
+            {
+                "run": {"id": "aod-preflight", "kind": "preflight"},
+                "analysis": {
+                    "output_dir": attempt / "output",
+                    "log_dir": attempt / "logs",
+                },
+                "execution": {
+                    "attempt_root": attempt,
+                    "checkpoints": {
+                        "mode": "best_effort",
+                        "granularity": "item",
+                        "loaded_sources": True,
+                        "retain": "all",
+                    },
+                },
+                "sources": {"model": {"type": "generic"}},
+            },
+        )
+
+        reloaded = load_config(config_to_yaml(config))
+
+        assert reloaded.execution is not None
+        assert reloaded.execution.attempt_root == attempt
+        assert reloaded.execution.checkpoints.mode == "best_effort"
+        assert reloaded.execution.checkpoints.granularity == "item"
+
 
 class TestMergeConfigs:
     """Tests for merge_configs function."""

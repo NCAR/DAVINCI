@@ -11,6 +11,10 @@ from __future__ import annotations
 from typing import Any
 
 from davinci_monet.core.registry import analysis_registry
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -73,6 +77,36 @@ class AnalysesStage(BaseStage):
             spec = specs[key]
             try:
                 context.log_progress(f"    Analysis: {key} ({spec.type})")
+                manager = item_checkpoint_manager(context)
+                source_stage = "analyses" if spec.source in specs else "load_sources"
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item=key,
+                    config=spec,
+                    dependencies=((source_stage, spec.source),),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    restored = manager.restore_source(lookup.receipt)
+                    context.sources[key] = restored
+                    restored_summary = lookup.receipt.context_delta.get("analysis_summary")
+                    summary[key] = (
+                        dict(restored_summary)
+                        if isinstance(restored_summary, dict)
+                        else {
+                            "type": spec.type,
+                            "geometry": restored.geometry.name.lower(),
+                            "variables": list(restored.data.data_vars),
+                        }
+                    )
+                    restored_artifact = lookup.receipt.context_delta.get("product_artifact")
+                    if isinstance(restored_artifact, dict) and restored_artifact:
+                        context.metadata.setdefault("product_artifacts", {})[key] = dict(
+                            restored_artifact
+                        )
+                    context.log_progress(f"    Restored analysis checkpoint: {key}")
+                    continue
+
                 src_obj = context.sources.get(spec.source)
                 if src_obj is None:
                     raise ValueError(f"analysis '{key}' references unknown source '{spec.source}'")
@@ -107,7 +141,7 @@ class AnalysesStage(BaseStage):
                 out_ds.attrs["derived"] = True
                 out_ds.attrs.setdefault("source_label", key)
 
-                context.sources[key] = SourceData(
+                source = SourceData(
                     data=out_ds,
                     label=key,
                     source_type=spec.type,
@@ -115,11 +149,22 @@ class AnalysesStage(BaseStage):
                     variables={},
                     config={**spec.model_dump(), **artifact_config},
                 )
-                summary[key] = {
+                context.sources[key] = source
+                analysis_summary = {
                     "type": spec.type,
                     "geometry": geometry.name.lower(),
                     "variables": list(out_ds.data_vars),
                 }
+                summary[key] = analysis_summary
+                if manager is not None:
+                    manager.capture_source(
+                        request,
+                        source,
+                        context_delta={
+                            "analysis_summary": analysis_summary,
+                            "product_artifact": artifact_config,
+                        },
+                    )
             except Exception as exc:  # noqa: BLE001 - soft per-analysis failure
                 context.metadata.setdefault("analysis_errors", []).append(f"{key}: {exc}")
                 context.log_progress(f"warning: analysis failed for {key}: {exc}")

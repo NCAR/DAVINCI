@@ -100,6 +100,19 @@ class TestStepDetailClearedBetweenStages:
         # Now _current_step should be cleared
         assert fmt._current_step is None
 
+    def test_stage_end_logs_checkpoint_disposition(self) -> None:
+        fmt = _make_fmt()
+        fmt.stage_start("load_sources")
+
+        fmt.stage_end(
+            "load_sources",
+            success=True,
+            duration=0.0,
+            disposition="restored",
+        )
+
+        assert any("completed [restored]" in line for line in fmt._lines)
+
 
 class TestCurrentItemTakesPrecedenceOverStepDetail:
     """When _current_item is set, item display takes priority over step detail."""

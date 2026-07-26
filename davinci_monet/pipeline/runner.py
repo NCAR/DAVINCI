@@ -13,12 +13,22 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TextIO
+from typing import Any, Callable, Literal, Sequence, TextIO, overload
 
 from tqdm import tqdm
 
 from davinci_monet.config.schema import MonetConfig, PlotStyleConfig
 from davinci_monet.core.exceptions import ConfigurationError, PipelineError
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointManager,
+    CheckpointRequest,
+)
+from davinci_monet.pipeline.checkpoints.models import (
+    ExecutionStatus,
+    ResumeDisposition,
+    ResumePlan,
+)
+from davinci_monet.pipeline.checkpoints.signals import interruption_signals
 from davinci_monet.pipeline.display import ProgressFormatter
 from davinci_monet.pipeline.lifecycle import PipelineResourcePolicy
 from davinci_monet.pipeline.progress import create_progress_callback
@@ -300,6 +310,51 @@ class PipelineRunner:
         self._resource_policy.cleanup_context_datasets(context)
 
     def run(self, context: PipelineContext | None = None) -> PipelineResult:
+        """Execute the pipeline with an optional durable attempt lifecycle."""
+        if context is None:
+            context = PipelineContext()
+        manager = context.checkpoint_manager
+        if manager is None:
+            return self._run_pipeline(context)
+
+        manager.begin_execution()
+        try:
+            with interruption_signals():
+                result = self._run_pipeline(context)
+        except KeyboardInterrupt:
+            manager.finish_execution(
+                ExecutionStatus.INTERRUPTED,
+                error="execution interrupted by operator or scheduler signal",
+            )
+            raise
+        except BaseException as exc:
+            manager.finish_execution(ExecutionStatus.FAILED, error=str(exc))
+            raise
+        terminal_status = ExecutionStatus.COMPLETED if result.success else ExecutionStatus.FAILED
+        try:
+            manager.finish_execution(
+                terminal_status,
+                error=None if result.success else "one or more pipeline stages failed",
+                finalize_attempt=False,
+                release_lock=False,
+            )
+            if "manifest" in context.results:
+                from davinci_monet.pipeline.stages.manifest import ManifestStage
+
+                refreshed = ManifestStage().execute(context)
+                if refreshed.status is StageStatus.FAILED:
+                    raise PipelineError(refreshed.error or "terminal manifest refresh failed")
+                context.results["manifest"] = refreshed
+                for index, stage_result in enumerate(result.stage_results):
+                    if stage_result.stage_name == "manifest":
+                        result.stage_results[index] = refreshed
+                        break
+            manager.finalize_attempt(terminal_status)
+        finally:
+            manager.release_execution_lock()
+        return result
+
+    def _run_pipeline(self, context: PipelineContext) -> PipelineResult:
         """Execute the pipeline.
 
         Parameters
@@ -312,9 +367,6 @@ class PipelineRunner:
         PipelineResult
             Result of pipeline execution.
         """
-        if context is None:
-            context = PipelineContext()
-
         self._resource_policy.prepare_before_run()
 
         # Apply plot styling from config if specified
@@ -335,7 +387,13 @@ class PipelineRunner:
 
             # Create timestamped log file with .md extension
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_path = log_dir_path / f"pipeline_{timestamp}.md"
+            execution_suffix = (
+                f"_{context.checkpoint_manager.execution_id}"
+                if context.checkpoint_manager is not None
+                and context.checkpoint_manager.execution_id is not None
+                else ""
+            )
+            log_path = log_dir_path / f"pipeline_{timestamp}{execution_suffix}.md"
 
             # Initialize log collector
             log_collector = LogCollector()
@@ -363,15 +421,26 @@ class PipelineRunner:
             stage_result = self._execute_stage(stage, context)
             result.stage_results.append(stage_result)
             context.results[stage.name] = stage_result
+            disposition = stage_result.metadata.get("resume_disposition")
 
             if log_collector:
                 log_collector.finalize_items()
 
             if stage_result.status == StageStatus.FAILED:
                 result.success = False
-                formatter.stage_end(stage.name, False, stage_result.duration_seconds)
+                formatter.stage_end(
+                    stage.name,
+                    False,
+                    stage_result.duration_seconds,
+                    disposition=disposition,
+                )
                 if log_collector:
-                    log_collector.end_stage(stage.name, "failed", stage_result.duration_seconds)
+                    log_collector.end_stage(
+                        stage.name,
+                        "failed",
+                        stage_result.duration_seconds,
+                        disposition=disposition,
+                    )
                     if stage_result.error:
                         log_collector.log_error(
                             stage_name=stage.name,
@@ -380,13 +449,33 @@ class PipelineRunner:
                             traceback_str=stage_result.traceback_str,
                         )
             elif stage_result.status == StageStatus.SKIPPED:
-                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                formatter.stage_end(
+                    stage.name,
+                    True,
+                    stage_result.duration_seconds,
+                    disposition=disposition,
+                )
                 if log_collector:
-                    log_collector.end_stage(stage.name, "skipped", stage_result.duration_seconds)
+                    log_collector.end_stage(
+                        stage.name,
+                        "skipped",
+                        stage_result.duration_seconds,
+                        disposition=disposition,
+                    )
             elif stage_result.status == StageStatus.COMPLETED:
-                formatter.stage_end(stage.name, True, stage_result.duration_seconds)
+                formatter.stage_end(
+                    stage.name,
+                    True,
+                    stage_result.duration_seconds,
+                    disposition=disposition,
+                )
                 if log_collector:
-                    log_collector.end_stage(stage.name, "completed", stage_result.duration_seconds)
+                    log_collector.end_stage(
+                        stage.name,
+                        "completed",
+                        stage_result.duration_seconds,
+                        disposition=disposition,
+                    )
             return stage_result
 
         try:
@@ -481,7 +570,44 @@ class PipelineRunner:
 
         return result
 
-    def run_from_config(self, config: dict[str, Any] | str | MonetConfig) -> PipelineResult:
+    @overload
+    def run_from_config(
+        self,
+        config: dict[str, Any] | str | MonetConfig,
+        *,
+        resume: bool = False,
+        resume_plan: Literal[False] = False,
+        restart_from: str | None = None,
+    ) -> PipelineResult: ...
+
+    @overload
+    def run_from_config(
+        self,
+        config: dict[str, Any] | str | MonetConfig,
+        *,
+        resume: bool = False,
+        resume_plan: Literal[True],
+        restart_from: str | None = None,
+    ) -> ResumePlan: ...
+
+    @overload
+    def run_from_config(
+        self,
+        config: dict[str, Any] | str | MonetConfig,
+        *,
+        resume: bool = False,
+        resume_plan: bool,
+        restart_from: str | None = None,
+    ) -> PipelineResult | ResumePlan: ...
+
+    def run_from_config(
+        self,
+        config: dict[str, Any] | str | MonetConfig,
+        *,
+        resume: bool = False,
+        resume_plan: bool = False,
+        restart_from: str | None = None,
+    ) -> PipelineResult | ResumePlan:
         """Execute pipeline from configuration.
 
         Parameters
@@ -522,7 +648,47 @@ class PipelineRunner:
         # single-source runs: pairing skips when there are no pairs, while
         # statistics/plotting dispatch on the available source state.
 
-        context = PipelineContext(config=config_model)
+        manager = CheckpointManager.create(
+            config_model,
+            config_path=config_path,
+            resume=resume or resume_plan,
+            read_only=resume_plan,
+            restart_from=restart_from,
+        )
+        if manager is not None and manager.restart_from is not None:
+            target_stage, target_item = manager.restart_from
+            known_stages = {stage.name for stage in self._stages}
+            if target_stage not in known_stages:
+                raise ConfigurationError(
+                    f"restart-from stage is not in this pipeline: {target_stage}"
+                )
+            if (
+                target_item is not None
+                and manager.store.read_receipt(target_stage, target_item) is None
+            ):
+                raise ConfigurationError(
+                    "restart-from item has no checkpoint receipt: " f"{target_stage}:{target_item}"
+                )
+        if resume_plan:
+            if manager is None:
+                raise ConfigurationError("resume planning requires enabled checkpoints")
+            dependencies: list[tuple[str, str | None]] = []
+            requests: list[CheckpointRequest] = []
+            for stage in self._stages:
+                requests.append(
+                    CheckpointRequest(
+                        stage=stage.name,
+                        item=None,
+                        config={"stage": stage.name, "config": config_model},
+                        dependencies=(
+                            tuple(dependencies) + manager.stage_item_dependencies(stage.name)
+                        ),
+                    )
+                )
+                dependencies.append((stage.name, None))
+            return manager.plan_attempt(requests)
+
+        context = PipelineContext(config=config_model, checkpoint_manager=manager)
         if config_path:
             context.metadata["config_path"] = config_path
         return self.run(context)
@@ -545,8 +711,36 @@ class PipelineRunner:
         self._call_hook("on_stage_start", stage, context)
 
         start_time = time.time()
+        manager = context.checkpoint_manager
+        request = (
+            CheckpointRequest(
+                stage=stage.name,
+                item=None,
+                config={"stage": stage.name, "config": context.config},
+                dependencies=(
+                    tuple(context.checkpoint_dependencies)
+                    + manager.stage_item_dependencies(stage.name)
+                ),
+            )
+            if manager is not None
+            else None
+        )
 
         try:
+            if (
+                manager is not None
+                and request is not None
+                and manager.resume
+                and stage.name != "manifest"
+            ):
+                lookup = manager.lookup(request)
+                if lookup.receipt is not None:
+                    result = manager.restore_stage(lookup.receipt, context)
+                    result.metadata["checkpoint_reason"] = lookup.reason
+                    context.checkpoint_dependencies.append((stage.name, None))
+                    self._call_hook("on_stage_end", stage, result, context)
+                    return result
+
             # Validate stage
             if not stage.validate(context):
                 # A stage that opts out of running for this configuration is a
@@ -566,6 +760,38 @@ class PipelineRunner:
                 result.duration_seconds = time.time() - start_time
                 logger.info(f"Stage '{stage.name}' completed in " f"{result.duration_seconds:.2f}s")
 
+            if (
+                manager is not None
+                and request is not None
+                and result.status in {StageStatus.COMPLETED, StageStatus.SKIPPED}
+            ):
+                request = CheckpointRequest(
+                    stage=stage.name,
+                    item=None,
+                    config=request.config,
+                    dependencies=(
+                        tuple(context.checkpoint_dependencies)
+                        + manager.stage_item_dependencies(stage.name)
+                    ),
+                )
+                existing = manager.store.read_receipt(stage.name, None)
+                if result.status is StageStatus.SKIPPED:
+                    disposition = ResumeDisposition.SKIPPED
+                else:
+                    disposition = (
+                        ResumeDisposition.RECOMPUTED
+                        if existing is not None
+                        else ResumeDisposition.COMPUTED
+                    )
+                manager.capture_stage(
+                    request,
+                    context,
+                    result,
+                    disposition=disposition,
+                )
+                result.metadata["resume_disposition"] = disposition.value
+                context.checkpoint_dependencies.append((stage.name, None))
+
         except Exception as e:
             # Don't use logger.exception() - it prints traceback to console
             # We capture the traceback and store it in the result for the log file
@@ -579,6 +805,8 @@ class PipelineRunner:
                 traceback_str=tb_str,
                 duration_seconds=time.time() - start_time,
             )
+            if manager is not None:
+                manager.record_failed_stage(stage.name, str(e))
 
         self._call_hook("on_stage_end", stage, result, context)
 
@@ -700,7 +928,10 @@ def run_analysis(
     show_progress: bool = True,
     show_plots: bool = False,
     preview_format: Literal["pdf", "png"] = "pdf",
-) -> PipelineResult:
+    resume: bool = False,
+    resume_plan: bool = False,
+    restart_from: str | None = None,
+) -> PipelineResult | ResumePlan:
     """Convenience function to run a complete analysis.
 
     Parameters
@@ -730,4 +961,9 @@ def run_analysis(
         show_plots=show_plots,
         preview_format=preview_format,
     )
-    return runner.run_from_config(config)
+    return runner.run_from_config(
+        config,
+        resume=resume,
+        resume_plan=resume_plan,
+        restart_from=restart_from,
+    )

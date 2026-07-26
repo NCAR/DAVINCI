@@ -5,14 +5,45 @@ Writes statistics (comparison, descriptive, and per-flight) to CSV files.
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
     StageResult,
     StageStatus,
 )
+
+
+def _atomic_to_csv(dataframe: Any, destination: Path, **kwargs: Any) -> None:
+    """Write one CSV durably without exposing partial destination bytes."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(name)
+    try:
+        dataframe.to_csv(temporary, **kwargs)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class SaveResultsStage(BaseStage):
@@ -25,12 +56,12 @@ class SaveResultsStage(BaseStage):
         """Save analysis results to files."""
         import math
         import time
-        from pathlib import Path
 
         import pandas as pd
 
         start = time.time()
         saved_files: list[str] = []
+        saved_products: dict[str, str] = {}
 
         # Get output directory from analysis config
         output_dir = Path(context.analysis_config().output_dir or ".")
@@ -52,8 +83,26 @@ class SaveResultsStage(BaseStage):
             if desc_rows:
                 desc_df = pd.DataFrame(desc_rows).set_index("Variable")
                 desc_file = output_dir / "statistics_descriptive.csv"
-                desc_df.to_csv(desc_file)
+                manager = item_checkpoint_manager(context)
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item="statistics_descriptive",
+                    config={"kind": "descriptive"},
+                    dependencies=tuple(("statistics", str(name)) for name in stats_result.data),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    desc_file = Path(manager.restore_files(lookup.receipt)[0])
+                else:
+                    _atomic_to_csv(desc_df, desc_file)
+                    if manager is not None:
+                        manager.capture_files(
+                            request,
+                            (desc_file,),
+                            context_delta={"logical_role": "statistics_descriptive"},
+                        )
                 saved_files.append(str(desc_file))
+                saved_products["statistics_descriptive"] = str(desc_file)
                 context.log_progress(f"done: {len(desc_rows)} rows saved")
         elif stats_result and stats_result.data:
             context.log_progress("step: Writing statistics CSV...")
@@ -114,8 +163,26 @@ class SaveResultsStage(BaseStage):
                 df = pd.DataFrame(rows)
                 df = df.set_index("Variable")
                 stats_file = output_dir / "statistics_summary.csv"
-                df.to_csv(stats_file)
+                manager = item_checkpoint_manager(context)
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item="statistics_summary",
+                    config={"kind": "comparison"},
+                    dependencies=tuple(("statistics", str(name)) for name in stats_result.data),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    stats_file = Path(manager.restore_files(lookup.receipt)[0])
+                else:
+                    _atomic_to_csv(df, stats_file)
+                    if manager is not None:
+                        manager.capture_files(
+                            request,
+                            (stats_file,),
+                            context_delta={"logical_role": "statistics_summary"},
+                        )
                 saved_files.append(str(stats_file))
+                saved_products["statistics_summary"] = str(stats_file)
                 context.log_progress(f"done: {len(rows)} rows saved")
 
             # Save per-flight statistics if available
@@ -145,12 +212,33 @@ class SaveResultsStage(BaseStage):
                 flight_df = flight_df.sort_values(["variable", "flight"])
 
                 flight_stats_file = output_dir / "statistics_per_flight.csv"
-                flight_df.to_csv(flight_stats_file, index=False)
+                manager = item_checkpoint_manager(context)
+                request = CheckpointRequest(
+                    stage=self.name,
+                    item="statistics_per_flight",
+                    config={"kind": "per_flight"},
+                    dependencies=tuple(("statistics", str(name)) for name in stats_result.data),
+                )
+                lookup = manager.lookup(request) if manager is not None else None
+                if manager is not None and lookup is not None and lookup.receipt is not None:
+                    flight_stats_file = Path(manager.restore_files(lookup.receipt)[0])
+                else:
+                    _atomic_to_csv(flight_df, flight_stats_file, index=False)
+                    if manager is not None:
+                        manager.capture_files(
+                            request,
+                            (flight_stats_file,),
+                            context_delta={"logical_role": "statistics_per_flight"},
+                        )
                 saved_files.append(str(flight_stats_file))
+                saved_products["statistics_per_flight"] = str(flight_stats_file)
                 context.log_progress(f"done: {len(flight_df)} rows")
 
         return self._create_result(
             StageStatus.COMPLETED,
-            data={"saved_files": saved_files},
+            data={
+                "saved_files": saved_files,
+                "saved_products": saved_products,
+            },
             duration=time.time() - start,
         )

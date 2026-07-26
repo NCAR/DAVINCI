@@ -6,6 +6,15 @@ non-fatal: any failure (missing key/dep, network/API error) degrades to SKIPPED.
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
+from davinci_monet.core.identity import canonicalize
+from davinci_monet.pipeline.checkpoints.manager import (
+    CheckpointRequest,
+    item_checkpoint_manager,
+)
 from davinci_monet.pipeline.stages.base import (
     BaseStage,
     PipelineContext,
@@ -28,7 +37,6 @@ class SummaryStage(BaseStage):
     def execute(self, context: PipelineContext) -> StageResult:
         import logging
         import time
-        from pathlib import Path
 
         from davinci_monet.ai import collect_payload, extract_bullets, generate_summary
         from davinci_monet.config.schema import SummaryConfig
@@ -50,13 +58,43 @@ class SummaryStage(BaseStage):
                     duration=time.time() - start,
                 )
 
+            manager = item_checkpoint_manager(context)
+            request = CheckpointRequest(
+                stage=self.name,
+                item="brief",
+                config=cfg,
+                dependencies=tuple(context.checkpoint_dependencies),
+            )
+            lookup = manager.lookup(request) if manager is not None else None
+            if lookup is not None and lookup.receipt is not None:
+                data = dict(lookup.receipt.context_delta["result"])
+                context.log_progress("done: restored AI summary checkpoint")
+                return self._create_result(
+                    StageStatus.COMPLETED,
+                    data=data,
+                    duration=time.time() - start,
+                )
+
             payload = collect_payload(context, cfg)
             result = generate_summary(payload, cfg=cfg)
 
             output_dir = Path(context.analysis_config().output_dir or ".")
             output_dir.mkdir(parents=True, exist_ok=True)
             out_path = output_dir / cfg.output_filename
-            out_path.write_text(result.markdown)
+            descriptor, name = tempfile.mkstemp(
+                prefix=f".{out_path.name}.",
+                suffix=".tmp",
+                dir=output_dir,
+            )
+            temporary = Path(name)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write(result.markdown)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, out_path)
+            finally:
+                temporary.unlink(missing_ok=True)
         except Exception as exc:  # noqa: BLE001 - summary must never fail the run
             logger.warning("AI summary skipped: %s: %s", type(exc).__name__, exc)
             return self._create_result(
@@ -71,16 +109,23 @@ class SummaryStage(BaseStage):
         # progress callback, so it is not used for display.
         context.log_progress(f"done: AI summary written ({result.images_sent} figures)")
 
+        data = {
+            "summary_file": str(out_path),
+            "markdown": result.markdown,
+            "bullets": extract_bullets(result.markdown),
+            "model": result.model,
+            "usage": canonicalize(result.usage),
+            "credits_remaining": result.credits_remaining,
+            "images_sent": result.images_sent,
+        }
+        if manager is not None:
+            manager.capture_files(
+                request,
+                (out_path,),
+                context_delta={"result": data},
+            )
         return self._create_result(
             StageStatus.COMPLETED,
-            data={
-                "summary_file": str(out_path),
-                "markdown": result.markdown,
-                "bullets": extract_bullets(result.markdown),
-                "model": result.model,
-                "usage": result.usage,
-                "credits_remaining": result.credits_remaining,
-                "images_sent": result.images_sent,
-            },
+            data=data,
             duration=time.time() - start,
         )

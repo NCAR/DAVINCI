@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +32,48 @@ class FlexibleSchema(
     str_strip_whitespace=True,
 ):
     """Base schema that allows reader-specific extra fields."""
+
+
+# =============================================================================
+# Run / Execution Identity
+# =============================================================================
+
+
+class RunConfig(StrictSchema):
+    """Stable scientific run identity for a checkpointed attempt."""
+
+    id: str = Field(min_length=1)
+    kind: Literal["production", "preflight", "smoke", "example"]
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value) is None:
+            raise ValueError("run.id must be one safe path component")
+        return value
+
+
+class CheckpointConfig(StrictSchema):
+    """Operational checkpoint policy for one pipeline attempt."""
+
+    mode: Literal["required", "best_effort", "off"]
+    granularity: Literal["item", "stage"]
+    loaded_sources: bool
+    retain: Literal["all", "failed", "none"]
+
+
+class ExecutionConfig(StrictSchema):
+    """Operational paths and checkpoint policy for one attempt."""
+
+    attempt_root: Path
+    checkpoints: CheckpointConfig
+
+    @field_validator("attempt_root")
+    @classmethod
+    def _validate_attempt_root_name(cls, value: Path) -> Path:
+        if re.fullmatch(r"a\d{3,}", value.name) is None:
+            raise ValueError("execution.attempt_root must end in aNNN notation")
+        return value
 
 
 # =============================================================================
@@ -820,6 +863,8 @@ class MonetConfig(StrictSchema):
     datetime.datetime(2024, 1, 1, 0, 0)
     """
 
+    run: RunConfig | None = None
+    execution: ExecutionConfig | None = None
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     # Data sources keyed by dataset label.
     sources: dict[str, SourceConfig] = Field(default_factory=dict)
@@ -914,6 +959,28 @@ class MonetConfig(StrictSchema):
         pair_names = set(self.pairs)
         analysis_names = set(self.analyses)
         errors: list[str] = []
+
+        if (
+            self.execution is not None
+            and self.execution.checkpoints.mode != "off"
+            and self.run is None
+        ):
+            errors.append("checkpointed execution requires run identity")
+
+        if self.execution is not None:
+            output_dir = self.analysis.output_dir
+            log_dir = self.analysis.log_dir
+            if output_dir is None or log_dir is None:
+                errors.append("execution requires analysis.output_dir and analysis.log_dir")
+            else:
+                attempt_root = self.execution.attempt_root.expanduser().resolve()
+                output_parent = Path(output_dir).expanduser().resolve().parent
+                log_parent = Path(log_dir).expanduser().resolve().parent
+                if attempt_root != output_parent or attempt_root != log_parent:
+                    errors.append(
+                        "execution.attempt_root must be the common parent of "
+                        "analysis.output_dir and analysis.log_dir"
+                    )
 
         for pair_name, pair in self.pairs.items():
             if source_names and pair.x.source not in source_names | analysis_names:

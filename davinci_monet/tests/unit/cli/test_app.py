@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -224,8 +225,82 @@ pairs:
             "show_progress": True,
             "show_plots": True,
             "preview_format": "png",
+            "resume": False,
+            "resume_plan": False,
+            "restart_from": None,
         }
         assert "Analysis complete" in result.stdout
+
+    def test_run_help_documents_resume_controls(self) -> None:
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(app, ["run", "--help"])
+
+        assert result.exit_code == 0
+        assert "--resume" in result.stdout
+        assert "--resume-plan" in result.stdout
+        assert "--restart-from" in result.stdout
+
+    @pytest.mark.parametrize(
+        ("options", "message"),
+        [
+            (["--resume", "--resume-plan"], "mutually exclusive"),
+            (["--restart-from", "analysis"], "requires --resume"),
+            (["--resume-plan", "--show-plots"], "cannot be combined"),
+        ],
+    )
+    def test_run_rejects_invalid_resume_option_combinations(
+        self,
+        sample_config: Path,
+        options: list[str],
+        message: str,
+    ) -> None:
+        from typer.testing import CliRunner
+
+        result = CliRunner().invoke(app, ["run", *options, str(sample_config)])
+
+        assert result.exit_code == 2
+        assert message in result.stdout
+
+    def test_run_forwards_resume_options(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from typer.testing import CliRunner
+
+        import davinci_monet.pipeline.runner as runner_module
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("analysis: {}\nsources: {}\n")
+        captured: dict[str, Any] = {}
+
+        def fake_pipeline_run(
+            config_path: str,
+            **kwargs: Any,
+        ) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                success=True,
+                total_duration_seconds=0.1,
+                completed_stages=[],
+            )
+
+        monkeypatch.setattr(runner_module, "run_analysis", fake_pipeline_run)
+        result = CliRunner().invoke(
+            app,
+            [
+                "run",
+                "--resume",
+                "--restart-from",
+                "analyses:daily_aod",
+                str(config_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured["resume"] is True
+        assert captured["restart_from"] == "analyses:daily_aod"
 
 
 # =============================================================================

@@ -100,11 +100,19 @@ class LogCollector:
             start_time=time.time(),
         )
 
-    def end_stage(self, name: str, status: str, duration: float) -> None:
+    def end_stage(
+        self,
+        name: str,
+        status: str,
+        duration: float,
+        disposition: str | None = None,
+    ) -> None:
         """Record stage completion."""
         if self._current_stage and self._current_stage.name == name:
             self._current_stage.end_time = time.time()
             self._current_stage.status = status
+            if disposition is not None:
+                self._current_stage.details["disposition"] = disposition
             self.entries.append(self._current_stage)
             self._current_stage = None
 
@@ -296,12 +304,14 @@ class LogCollector:
         if stages:
             lines.append("## Stage Summary")
             lines.append("")
-            lines.append("| Stage | Status | Duration |")
-            lines.append("|-------|--------|----------|")
+            lines.append("| Stage | Status | Checkpoint | Duration |")
+            lines.append("|-------|--------|------------|----------|")
             for entry in stages:
                 status_icon = "✓" if entry.status == "completed" else "✗"
+                disposition = entry.details.get("disposition", "-")
                 lines.append(
-                    f"| {entry.name} | {status_icon} {entry.status.title()} | {entry.duration:.1f}s |"
+                    f"| {entry.name} | {status_icon} {entry.status.title()} | "
+                    f"{disposition} | {entry.duration:.1f}s |"
                 )
             lines.append("")
 

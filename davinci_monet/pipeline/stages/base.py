@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, cast, runtime_checkable
 
 import xarray as xr
 
@@ -28,6 +28,9 @@ from davinci_monet.config.schema import (
 )
 from davinci_monet.core.protocols import DataGeometry
 from davinci_monet.core.schema_utils import dump_schema, is_schema_object
+
+if TYPE_CHECKING:
+    from davinci_monet.pipeline.checkpoints.manager import CheckpointManager
 
 
 class StageStatus(Enum):
@@ -148,6 +151,8 @@ class PipelineContext:
     results: dict[str, StageResult] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     progress_callback: Callable[[str], None] | None = None
+    checkpoint_manager: CheckpointManager | None = None
+    checkpoint_dependencies: list[tuple[str, str | None]] = field(default_factory=list)
 
     def config_dict(self) -> dict[str, Any]:
         """Return config as a plain dict for legacy stage code."""
