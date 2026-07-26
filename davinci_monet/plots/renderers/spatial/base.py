@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import cartopy.crs
     import matplotlib.axes
     import matplotlib.figure
+    import matplotlib.transforms
     import xarray as xr
 
 
@@ -429,7 +430,7 @@ class BaseSpatialPlotter(BasePlotter):
         fig: matplotlib.figure.Figure,
         output_path: str | Path,
         dpi: int | None = None,
-        bbox_inches: Any | None = None,
+        bbox_inches: str | matplotlib.transforms.Bbox | None = None,
         **kwargs: Any,
     ) -> Path:
         """Save map figures without rcParam tight-bbox cropping Cartopy GeoAxes."""
