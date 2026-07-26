@@ -44,8 +44,9 @@ identities. Validate a scheduled control before execution:
 davinci validate path/to/control.yaml --strict --readiness
 ```
 
-Repository-local DAVINCI workflow skills are tracked under `skills/`. Use
-`$davinci-configure-runs` to construct or audit a control; it always stops before submission.
+Repository-local DAVINCI workflow skills are tracked under `skills/` and exposed to Codex through
+the discovery symlinks in `.agents/skills/`. Use `$davinci-configure-runs` to construct or audit a
+control; it always stops before submission.
 
 ## Running Analyses
 
