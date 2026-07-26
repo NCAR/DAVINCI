@@ -149,6 +149,16 @@ def test_daily_d3_hdf4_returns_canonical_qa_screened_aod(tmp_path):
     assert int(ds["aod_550nm_stddev"].isnull().sum()) == 2
     assert ds["aod_550nm"].attrs["qa_screening"] == "level2_usefulness_flag"
     assert "finite cells" in ds["aod_550nm"].attrs["support_definition"]
+    for name in ("aod_550nm", "aod_550nm_stddev"):
+        for packing_attr in (
+            "_FillValue",
+            "missing_value",
+            "scale_factor",
+            "add_offset",
+            "valid_range",
+        ):
+            assert packing_attr not in ds[name].attrs
+            assert packing_attr not in ds[name].encoding
 
 
 def test_daily_d3_hdf4_rejects_unverified_qa_contract(tmp_path):

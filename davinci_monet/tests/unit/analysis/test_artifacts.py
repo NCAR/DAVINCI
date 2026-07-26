@@ -56,6 +56,44 @@ def test_write_product_artifacts_serializes_boolean_variable_and_coord_attrs(tmp
         assert artifact["lat"].attrs["edge"] == "False"
 
 
+def test_dataset_collection_discards_stale_packing_without_changing_values(tmp_path) -> None:
+    source = xr.Dataset(
+        {
+            "aod": ("time", np.array([0.2, np.nan])),
+            "valid": ("time", np.array([True, False])),
+        },
+        coords={"time": np.arange("2008-01-01", "2008-01-03", dtype="datetime64[D]")},
+    )
+    packing = {
+        "_FillValue": -9999,
+        "missing_value": -9999,
+        "scale_factor": 0.001,
+        "add_offset": 0.0,
+    }
+    for name in source.data_vars:
+        source[name].attrs.update(packing)
+        source[name].encoding.update(packing)
+
+    result = write_dataset_collection(tmp_path, "decoded_hdf", source)
+
+    with xr.open_dataset(result.paths[0]) as restored:
+        np.testing.assert_allclose(restored["aod"], source["aod"], equal_nan=True)
+        np.testing.assert_array_equal(restored["valid"], source["valid"])
+        for name in restored.data_vars:
+            assert not _packing_attrs(restored[name].attrs)
+    for name in source.data_vars:
+        assert _packing_attrs(source[name].attrs) == set(packing)
+        assert _packing_attrs(source[name].encoding) == set(packing)
+
+
+def _packing_attrs(attrs: dict[str, object]) -> set[str]:
+    return {
+        name
+        for name in ("_FillValue", "missing_value", "scale_factor", "add_offset")
+        if name in attrs
+    }
+
+
 def test_write_product_artifacts_cleans_temporary_files_on_failure(tmp_path, monkeypatch) -> None:
     ds = xr.Dataset({"aod": ("time", np.array([0.1, 0.2]))})
 

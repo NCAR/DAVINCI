@@ -24,6 +24,15 @@ from davinci_monet.datasets.satellite.catalog import ProductEntry, get_catalog
 from davinci_monet.io.reader_utils import apply_hdf4_scale, set_geometry_attr, validate_file_list
 
 _DATE_TOKEN = re.compile(r"\.A(\d{7})\.")  # ".A2024032." -> 2024032
+_HDF4_PACKING_ATTRS = frozenset(
+    {
+        "_FillValue",
+        "add_offset",
+        "missing_value",
+        "scale_factor",
+        "valid_range",
+    }
+)
 
 
 @source_registry.register("modis_viirs")
@@ -206,7 +215,12 @@ class MODISVIIRSReader:
                 v.endaccess()
 
                 physical = self._apply_hdf4_scale(raw, attrs)
-                data_arrays[sds_name] = (dims, physical, attrs)
+                decoded_attrs = {
+                    str(name): value
+                    for name, value in attrs.items()
+                    if str(name) not in _HDF4_PACKING_ATTRS
+                }
+                data_arrays[sds_name] = (dims, physical, decoded_attrs)
 
             # Read axis variables (XDim, YDim) and record their dims.
             coord_data: dict[str, tuple[str, np.ndarray]] = {}

@@ -21,6 +21,15 @@ from davinci_monet.analysis.base import ArtifactDeclaration
 from davinci_monet.analysis.gridded_reductions import product_summary
 from davinci_monet.core.identity import canonical_sha256
 
+_NETCDF_PACKING_ATTRS = frozenset(
+    {
+        "_FillValue",
+        "add_offset",
+        "missing_value",
+        "scale_factor",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ProductArtifactResult:
@@ -264,9 +273,15 @@ def _dataset_chunks(ds: xr.Dataset) -> dict[str, list[list[int]] | None]:
     }
 
 
-def _netcdf_safe_attrs(attrs: dict[Any, Any]) -> dict[str, Any]:
+def _netcdf_safe_attrs(
+    attrs: dict[Any, Any],
+    *,
+    discard_packing: bool = False,
+) -> dict[str, Any]:
     safe: dict[str, Any] = {}
     for key, value in attrs.items():
+        if discard_packing and str(key) in _NETCDF_PACKING_ATTRS:
+            continue
         if isinstance(value, bool):
             safe[str(key)] = str(value)
         else:
@@ -278,9 +293,17 @@ def _netcdf_safe_dataset(ds: xr.Dataset) -> xr.Dataset:
     writable = ds.copy(deep=False)
     writable.attrs = _netcdf_safe_attrs(dict(ds.attrs))
     for name in writable.data_vars:
-        writable[name].attrs = _netcdf_safe_attrs(dict(writable[name].attrs))
+        writable[name].attrs = _netcdf_safe_attrs(
+            dict(writable[name].attrs),
+            discard_packing=True,
+        )
+        writable[name].encoding = {}
     for name in writable.coords:
-        writable.coords[name].attrs = _netcdf_safe_attrs(dict(writable.coords[name].attrs))
+        writable.coords[name].attrs = _netcdf_safe_attrs(
+            dict(writable.coords[name].attrs),
+            discard_packing=True,
+        )
+        writable.coords[name].encoding = {}
     return writable
 
 
