@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import xarray as xr
 
@@ -12,7 +15,11 @@ from davinci_monet.pipeline.stages.base import (
     StageResult,
     StageStatus,
 )
-from davinci_monet.pipeline.stages.completion import CompletionStage
+from davinci_monet.pipeline.stages.completion import (
+    CompletionStage,
+    _required_artifact_entries,
+    _verify_artifact_entry,
+)
 
 
 def _production_config(output_dir: Path) -> MonetConfig:
@@ -182,3 +189,63 @@ def test_completion_stage_skips_nonproduction_run(tmp_path: Path) -> None:
 
     assert result.status is StageStatus.SKIPPED
     assert result.data == {"skipped": "no production completion contract"}
+
+
+def test_completion_verifies_every_corrected_mmr_file(tmp_path: Path) -> None:
+    entries: list[Mapping[str, Any]] = []
+    for index in range(2):
+        path = tmp_path / f"corrected-{index}.nc4"
+        path.write_bytes(f"corrected-{index}".encode())
+        entries.append(
+            {
+                "analysis": "corrected_mmr",
+                "role": "corrected_mmr",
+                "kind": "mmr_file",
+                "status": "written",
+                "path": str(path),
+                "checksums": {
+                    "input_sha256": "a" * 64,
+                    "output_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "payload_sha256": "b" * 64,
+                    "scaling_sha256": "c" * 64,
+                    "config_sha256": "d" * 64,
+                    "code_sha256": "e" * 64,
+                },
+            }
+        )
+    requirement = _production_config(tmp_path / "a001" / "output").run
+    assert requirement is not None and requirement.completion is not None
+    artifact_requirement = requirement.completion.required_artifacts[0].model_copy(
+        update={"analysis": "corrected_mmr", "role": "corrected_mmr"}
+    )
+
+    matched = _required_artifact_entries(artifact_requirement, entries)
+    errors: list[str] = []
+    for entry in matched:
+        _verify_artifact_entry(entry, errors)
+
+    assert len(matched) == 2
+    assert errors == []
+
+
+def test_completion_rejects_mmr_file_without_provenance_hashes(tmp_path: Path) -> None:
+    path = tmp_path / "corrected.nc4"
+    path.write_bytes(b"corrected")
+    errors: list[str] = []
+
+    _verify_artifact_entry(
+        {
+            "analysis": "corrected_mmr",
+            "role": "corrected_mmr",
+            "kind": "mmr_file",
+            "status": "written",
+            "path": str(path),
+            "checksums": {
+                "output_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            },
+        },
+        errors,
+    )
+
+    assert len(errors) == 1
+    assert "missing provenance hashes" in errors[0]

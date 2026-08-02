@@ -1,0 +1,157 @@
+# MERRA-2 / MODIS Aqua 2008 corrected-AOD production.
+#
+# This is the terminal continuation of the completed immutable r01/a002 fit.
+# It consumes the finalized EOF/projection/wavelet artifacts plus the retained,
+# content-addressed model_daily and aqua_daily checkpoints. It does not repeat
+# raw preprocessing, EOF fitting, observation projection, or wavelet filtering.
+#
+# Required environment variables:
+#   DAVINCI_EOF_WAVELET_ATTEMPT
+#       Completed r01 attempt root (the scientifically accepted source is a002).
+#   DAVINCI_RUN_ROOT
+#       Unique empty r02 attempt root ending in aNNN.
+#
+# Native MERRA-2 MMR rewriting is intentionally deferred to a later revision.
+
+run:
+  id: aod-merra2-myd08-aqua-2008-eof-wavelet-r02
+  kind: production
+  completion:
+    required_analyses:
+      corrected_aod: aod_scaling
+    required_artifacts:
+      - analysis: corrected_aod
+        role: scaling
+    required_saved_files: [statistics_summary]
+    required_plots: [aod_correction_science]
+    inspection:
+      required: true
+      presets: [aod_correction]
+    allow_item_errors: false
+
+execution:
+  attempt_root: ${DAVINCI_RUN_ROOT}
+  checkpoints:
+    mode: required
+    granularity: item
+    loaded_sources: true
+    retain: all
+
+analysis:
+  workflow: standard
+  start_time: "2008-01-01 00:00:00"
+  end_time: "2008-12-31 23:59:59"
+  output_dir: ${DAVINCI_RUN_ROOT}/output
+  log_dir: ${DAVINCI_RUN_ROOT}/logs
+  debug: false
+  style:
+    theme: ncar
+    context: publication
+
+sources:
+  # Exact content-addressed daily MERRA-2 checkpoint retained by r01/a002.
+  model_daily:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/objects/sha256/62/62f44bd475c3d892283a96e4648baf7e67881536387e4a0aa2444a4a4de43312/chunk-*.nc
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  # Exact content-addressed daily MODIS Aqua checkpoint retained by r01/a002.
+  aqua_daily:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/objects/sha256/a6/a610e119e9ca7dc7286c6edcbde2f02d4c37984e9f0d52d565a86f2584faf00f/chunk-*.nc
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  aod_basis:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/aod_basis/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: basis_fit
+    artifact_analysis: aod_basis
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  obs_pcs:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/obs_pcs/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: projection_fit
+    artifact_analysis: obs_pcs
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  filtered_pcs:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/filtered_pcs/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: wavelet_filter
+    artifact_analysis: filtered_pcs
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+analyses:
+  corrected_aod:
+    type: aod_scaling
+    basis: aod_basis
+    projection: obs_pcs
+    coefficients: filtered_pcs
+    model: model_daily
+    r_bounds: [0.2, 5.0]
+    aod_floor: 0.001
+    time_chunk_days: 31
+    required: true
+
+pairs:
+  original_vs_modis:
+    x: {source: aqua_daily, variable: aod}
+    y: {source: model_daily, variable: aod}
+  corrected_vs_modis:
+    x: {source: aqua_daily, variable: aod}
+    y: {source: corrected_aod, variable: aod_target}
+
+stats:
+  data: [original_vs_modis, corrected_vs_modis]
+  output_table: true
+  round_output: 4
+  metrics: [N, MX, MY, MB, RMSE, R, NMB, NME, IOA]
+
+plots:
+  aod_correction_science:
+    type: aod_correction_science
+    sources:
+      - {source: model_daily, variable: aod}
+      - {source: corrected_aod, variable: aod_target}
+      - {source: aqua_daily, variable: aod}
+    model_source: model_daily
+    corrected_source: corrected_aod
+    observation_source: aqua_daily
+    max_scatter_points: 300000
+    output_subdir: plots
+    formats: [pdf, png]
+
+inspection:
+  enabled: true
+  required: true
+  presets: [aod_correction]
+  preview_format: png

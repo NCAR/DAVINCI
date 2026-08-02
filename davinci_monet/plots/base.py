@@ -16,6 +16,7 @@ for renderers, tests, pipeline stages, and examples.
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -150,6 +151,20 @@ class BasePlotter(ABC):
             f"{type(self).__name__}.render is not implemented for {len(series)} series."
         )
 
+    def validate_rendered_figures(
+        self,
+        figures: Sequence[tuple[str | None, matplotlib.figure.Figure]],
+    ) -> dict[str, Any] | None:
+        """Validate renderer-specific publication protocols before saving.
+
+        Most renderers rely entirely on shared DAVINCI primitives and need no
+        extra checks. Specialized multi-figure renderers can override this
+        hook to reject nonconforming artists and return a JSON-serializable
+        report for inspection and the final run manifest.
+        """
+        del figures
+        return None
+
     def create_figure(
         self,
         config: FigureConfig | None = None,
@@ -277,6 +292,7 @@ class BasePlotter(ABC):
         subtitle: str | None = None,
         *,
         y: float = 0.95,
+        subtitle_y: float | None = None,
         fontsize: float | None = None,
     ) -> None:
         """Set a figure title with an optional smaller subtitle below it."""
@@ -293,7 +309,7 @@ class BasePlotter(ABC):
         if subtitle_text:
             fig.text(
                 0.5,
-                y - 0.04,
+                subtitle_y if subtitle_y is not None else y - 0.04,
                 subtitle_text,
                 ha="center",
                 va="top",

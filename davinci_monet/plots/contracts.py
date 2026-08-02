@@ -14,6 +14,18 @@ from typing import Any
 from davinci_monet.core.exceptions import PlottingError
 from davinci_monet.core.registry import plotter_registry
 
+AOD_CORRECTION_PROTOCOL = "davinci-aod-correction-v2"
+AOD_CORRECTION_FIGURES = (
+    "annual_aod",
+    "annual_bias_improvement",
+    "seasonal_aod",
+    "seasonal_error_reduction",
+    "agreement_metrics",
+    "global_timeseries",
+    "matched_scatter",
+    "correction_diagnostics",
+)
+
 
 class PlotArity(str, Enum):
     """Supported renderer input shapes."""
@@ -114,6 +126,7 @@ def validate_plot_shape(
     pairs: list[str],
     source: str | None,
     variable: str | None,
+    sources: list[Any] | None = None,
 ) -> list[str]:
     """Return config-shape validation errors for one plot spec."""
     arity = plot_arity(plot_type)
@@ -121,6 +134,7 @@ def validate_plot_shape(
     has_source = source is not None
     has_variable = variable is not None
     has_single = has_source or has_variable
+    has_sources = bool(sources)
 
     errors: list[str] = []
     if arity == PlotArity.SINGLE_SOURCE:
@@ -136,6 +150,10 @@ def validate_plot_shape(
             errors.append(
                 f"plots.{plot_name}.variable is required for single-source plot '{plot_type}'"
             )
+        if has_sources:
+            errors.append(
+                f"plots.{plot_name}.sources is invalid for single-source plot '{plot_type}'"
+            )
     elif arity == PlotArity.PAIRWISE:
         if not has_pairs:
             errors.append(f"plots.{plot_name}.pairs is required for pairwise plot '{plot_type}'")
@@ -143,17 +161,22 @@ def validate_plot_shape(
             errors.append(f"plots.{plot_name}.source is invalid for pairwise plot '{plot_type}'")
         if has_variable:
             errors.append(f"plots.{plot_name}.variable is invalid for pairwise plot '{plot_type}'")
+        if has_sources:
+            errors.append(f"plots.{plot_name}.sources is invalid for pairwise plot '{plot_type}'")
     elif arity == PlotArity.MULTI_SOURCE:
-        if has_pairs and has_single:
+        shapes = int(has_pairs) + int(has_single) + int(has_sources)
+        if shapes > 1:
             errors.append(
-                f"plots.{plot_name} must use either pairs or source/variable for plot "
-                f"'{plot_type}', not both"
+                f"plots.{plot_name} must use either pairs or source/variable, or sources "
+                f"(exactly one shape) "
+                f"for plot '{plot_type}'"
             )
-        if not has_pairs and not (has_source and has_variable):
+        if shapes == 0:
             errors.append(
-                f"plots.{plot_name} requires pairs or source+variable for plot '{plot_type}'"
+                f"plots.{plot_name} requires pairs, source+variable, or sources for plot "
+                f"'{plot_type}'"
             )
-        if has_single and not (has_source and has_variable):
+        if has_single and not (has_source and has_variable) and not has_pairs and not has_sources:
             errors.append(
                 f"plots.{plot_name} source and variable must be provided together for plot "
                 f"'{plot_type}'"
@@ -162,6 +185,8 @@ def validate_plot_shape(
 
 
 __all__ = [
+    "AOD_CORRECTION_FIGURES",
+    "AOD_CORRECTION_PROTOCOL",
     "PlotArity",
     "SINGLE_SOURCE_PLOTS",
     "PAIRWISE_PLOTS",

@@ -1,0 +1,118 @@
+# Plot-only production continuation for the 2008 MODIS-constrained MERRA-2 AOD product.
+#
+# This immutable revision consumes the finalized r02 corrected-AOD artifact and the
+# retained, content-addressed r01 model/observation inputs. It reruns only source
+# loading, pairing, statistics, plotting, inspection, completion, and manifest
+# publication. It does not rerun preprocessing, EOF fitting, projection, wavelet
+# filtering, AOD scaling, or native-MMR writing.
+#
+# Required environment variables:
+#   DAVINCI_EOF_WAVELET_ATTEMPT
+#       Completed r01 source attempt (the accepted source is r01/a002).
+#   DAVINCI_CORRECTED_AOD_ATTEMPT
+#       Completed r02 corrected-AOD attempt (the accepted source is r02/a001).
+#   DAVINCI_RUN_ROOT
+#       Unique empty r03 attempt root ending in aNNN.
+
+run:
+  id: aod-merra2-myd08-aqua-2008-eof-wavelet-r03
+  kind: production
+  completion:
+    required_analyses: {}
+    required_artifacts: []
+    required_saved_files: [statistics_summary]
+    required_plots: [aod_correction_science]
+    inspection:
+      required: true
+      presets: [aod_correction]
+    allow_item_errors: false
+
+execution:
+  attempt_root: ${DAVINCI_RUN_ROOT}
+  checkpoints:
+    mode: required
+    granularity: item
+    loaded_sources: true
+    retain: all
+
+analysis:
+  workflow: standard
+  start_time: "2008-01-01 00:00:00"
+  end_time: "2008-12-31 23:59:59"
+  output_dir: ${DAVINCI_RUN_ROOT}/output
+  log_dir: ${DAVINCI_RUN_ROOT}/logs
+  debug: false
+  style:
+    theme: ncar
+    context: publication
+
+sources:
+  # Exact content-addressed daily MERRA-2 checkpoint retained by r01/a002.
+  merra2:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/objects/sha256/62/62f44bd475c3d892283a96e4648baf7e67881536387e4a0aa2444a4a4de43312/chunk-*.nc
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  # Exact content-addressed daily MODIS Aqua checkpoint retained by r01/a002.
+  modis_aqua:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/objects/sha256/a6/a610e119e9ca7dc7286c6edcbde2f02d4c37984e9f0d52d565a86f2584faf00f/chunk-*.nc
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  # Finalized r02 scaling product, verified against its completed manifest.
+  corrected_merra2:
+    type: generic
+    files: ${DAVINCI_CORRECTED_AOD_ATTEMPT}/output/artifacts/corrected_aod/chunk-*.nc
+    artifact_manifest: ${DAVINCI_CORRECTED_AOD_ATTEMPT}/output/manifest.json
+    artifact_role: scaling
+    artifact_analysis: corrected_aod
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+pairs:
+  original_vs_modis:
+    x: {source: modis_aqua, variable: aod}
+    y: {source: merra2, variable: aod}
+  corrected_vs_modis:
+    x: {source: modis_aqua, variable: aod}
+    y: {source: corrected_merra2, variable: aod_target}
+
+stats:
+  data: [original_vs_modis, corrected_vs_modis]
+  output_table: true
+  round_output: 4
+  metrics: [N, MX, MY, MB, RMSE, R, NMB, NME, IOA]
+
+plots:
+  aod_correction_science:
+    type: aod_correction_science
+    sources:
+      - {source: merra2, variable: aod}
+      - {source: corrected_merra2, variable: aod_target}
+      - {source: modis_aqua, variable: aod}
+    model_source: merra2
+    corrected_source: corrected_merra2
+    observation_source: modis_aqua
+    max_scatter_points: 300000
+    output_subdir: plots
+    formats: [pdf, png]
+
+inspection:
+  enabled: true
+  required: true
+  presets: [aod_correction]
+  preview_format: png

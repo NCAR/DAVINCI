@@ -121,3 +121,53 @@ def test_inspection_stage_uses_plotting_stage_products(tmp_path, monkeypatch) ->
 
     assert result.status == StageStatus.COMPLETED
     assert result.data["passed"] is True
+
+
+def test_inspection_stage_forwards_aod_protocol_report(tmp_path, monkeypatch) -> None:
+    _install_fake_pdftoppm(tmp_path, monkeypatch)
+    figures = [
+        "annual_aod",
+        "annual_bias_improvement",
+        "seasonal_aod",
+        "seasonal_error_reduction",
+        "agreement_metrics",
+        "global_timeseries",
+        "matched_scatter",
+        "correction_diagnostics",
+    ]
+    plots = tmp_path / "plots"
+    plots.mkdir()
+    pdfs = []
+    for figure in figures:
+        path = plots / f"science_{figure}.pdf"
+        path.write_bytes(b"%PDF-1.4\n")
+        pdfs.append(str(path))
+    ctx = PipelineContext(
+        config={
+            "analysis": {"output_dir": str(tmp_path)},
+            "inspection": {
+                "enabled": True,
+                "required": True,
+                "presets": ["aod_correction"],
+            },
+        }
+    )
+    ctx.results["plotting"] = StageResult(
+        "plotting",
+        StageStatus.COMPLETED,
+        data={
+            "plots_generated": pdfs,
+            "plot_protocol_reports": {
+                "science": {
+                    "protocol": "davinci-aod-correction-v2",
+                    "passed": True,
+                    "figures": figures,
+                }
+            },
+        },
+    )
+
+    result = InspectionStage().execute(ctx)
+
+    assert result.status == StageStatus.COMPLETED
+    assert result.data["passed"] is True

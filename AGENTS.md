@@ -100,6 +100,41 @@ Do NOT track handoff files in git — they are ephemeral working artifacts. Dele
 
 - **Stop after planning**: After a planning session, always stop and wait for user conversation before proceeding to implementation
 
+## Plot Standards Enforcement
+
+- **Shared standards are mandatory**: Before adding or changing a renderer, inspect
+  `davinci_monet/plots/style.py`, `davinci_monet/plots/labeling.py`, and the nearest
+  existing renderer. A configured NCAR theme does not authorize ad-hoc colors,
+  contour levels, titles, units, legends, or tick formatting.
+- **AOD has a fixed house style**: Absolute AOD maps must use
+  `geosit_aod_levels()`, `get_geosit_aod_cmap()`, and `BoundaryNorm`. Diverging
+  colormaps are reserved for signed differences; dense artists are rasterized.
+- **Specialized suites must enforce themselves**: A specialized or multi-figure
+  renderer must implement `validate_rendered_figures()` when it has domain-specific
+  standards. The plotting stage must run that hook before saving and carry its
+  JSON-serializable report into inspection and the manifest.
+- **Inspection must be functional**: A production inspection preset may not pass
+  from filenames or file existence alone when a renderer protocol exists. It must
+  require the complete expected product set and a passing protocol report.
+- **Test the actual artists and pipeline**: Add unit assertions for norms, colormaps,
+  labels, tick rotation, and rasterization; add a `PipelineRunner` integration test;
+  and prove that an injected standards violation fails plotting/inspection.
+- **Rendered layout is part of the protocol**: Draw the canvas during specialized
+  validation and reject clipped or overlapping titles, subtitles, panel headings,
+  axis labels, legends, and colorbar ticks. Visually inspect every production
+  preview before accepting or copying a suite; a machine-passing manifest alone is
+  not visual acceptance.
+- **Keep production controls reproducible**: Git-track every scheduled production
+  YAML and the code that interprets it. Completed `rNN/aNNN` controls are immutable;
+  any scientific or plotting-contract change gets a new `rNN`. Until the exact
+  code and config are committed with user approval, label resulting output
+  provisional rather than accepted or reproducible.
+- **Reuse persisted science for plot-only revisions**: A new label, layout, or
+  renderer-contract revision must not reload, pair, or recompute unchanged science.
+  Pin `execution.checkpoints.restore_from` to the prior terminal attempt, the
+  finalized stage boundary, and its exact receipt SHA-256. Require readiness and
+  the manifest to validate and record that upstream checkpoint lineage.
+
 ## Quick Validation
 
 ```bash

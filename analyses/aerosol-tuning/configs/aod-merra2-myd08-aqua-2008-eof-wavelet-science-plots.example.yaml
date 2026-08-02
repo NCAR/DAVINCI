@@ -1,0 +1,71 @@
+# Plot-only scientific presentation of the completed 2008 production analysis.
+#
+# This control consumes finalized, immutable artifacts from one completed
+# attempt. It does not rerun preprocessing, EOF fitting, projection, or the
+# wavelet filter, and it does not create a new production run identity.
+#
+# Required environment variables:
+#   DAVINCI_EOF_WAVELET_ATTEMPT  Completed attempt root (for example .../a002)
+#   DAVINCI_EOF_WAVELET_PLOTS    Destination for the scientific figure suite
+
+analysis:
+  workflow: standard
+  start_time: "2008-01-01 00:00:00"
+  end_time: "2008-12-31 23:59:59"
+  output_dir: ${DAVINCI_EOF_WAVELET_PLOTS}
+  log_dir: ${DAVINCI_EOF_WAVELET_PLOTS}/logs
+  style:
+    theme: ncar
+    context: publication
+
+sources:
+  aod_basis:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/aod_basis/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: basis_fit
+    artifact_analysis: aod_basis
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  obs_pcs:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/obs_pcs/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: projection_fit
+    artifact_analysis: obs_pcs
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+  filtered_pcs:
+    type: generic
+    files: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/artifacts/filtered_pcs/chunk-*.nc
+    artifact_manifest: ${DAVINCI_EOF_WAVELET_ATTEMPT}/output/manifest.json
+    artifact_role: wavelet_filter
+    artifact_analysis: filtered_pcs
+    data_vars: minimal
+    coords: minimal
+    compat: override
+    combine: nested
+    concat_dim: time
+    join: exact
+
+plots:
+  eof_wavelet_science:
+    type: eof_wavelet_science
+    sources:
+      - {source: aod_basis, variable: eofs}
+      - {source: obs_pcs, variable: pc}
+      - {source: filtered_pcs, variable: pc}
+    modes: [1, 2, 3, 4, 5, 6]
+    pc_modes: [1, 2, 3, 4]
+    wavelet_modes: [1, 2, 3]
+    formats: [pdf, png]

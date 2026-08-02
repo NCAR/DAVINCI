@@ -50,12 +50,16 @@ class ManifestStage(BaseStage):
 
         plots: list[str] = []
         plot_products: dict[str, Any] = {}
+        plot_protocol_reports: dict[str, Any] = {}
         plotting = context.results.get("plotting")
         if plotting and isinstance(plotting.data, dict):
             plots = list(plotting.data.get("plots_generated", []))
             raw_plot_products = plotting.data.get("plot_products", {})
             if isinstance(raw_plot_products, dict):
                 plot_products = raw_plot_products
+            raw_protocol_reports = plotting.data.get("plot_protocol_reports", {})
+            if isinstance(raw_protocol_reports, dict):
+                plot_protocol_reports = raw_protocol_reports
 
         saved_files: list[str] = []
         saved_products: dict[str, Any] = {}
@@ -84,7 +88,13 @@ class ManifestStage(BaseStage):
         status = "failed" if failed else "completed"
         manager = context.checkpoint_manager
         checkpoint_receipts = (
-            [receipt.model_dump(mode="json") for receipt in manager.store.iter_receipts()]
+            [
+                {
+                    **receipt.model_dump(mode="json"),
+                    "receipt_sha256": manager.receipt_sha256(receipt),
+                }
+                for receipt in manager.store.iter_receipts()
+            ]
             if manager is not None
             else []
         )
@@ -126,6 +136,7 @@ class ManifestStage(BaseStage):
         for event in checkpoint_events:
             if event.get("execution_id") != execution_id or event.get("event") not in {
                 "checkpoint_decision",
+                "checkpoint_adopted",
                 "checkpoint_finalized",
                 "checkpoint_restored",
             }:
@@ -164,6 +175,7 @@ class ManifestStage(BaseStage):
             "analysis_partial_failure": context.metadata.get("analysis_partial_failure", []),
             "plots": plots,
             "plot_products": plot_products,
+            "plot_protocol_reports": plot_protocol_reports,
             "saved_files": saved_files,
             "saved_products": saved_products,
             "inspection": (

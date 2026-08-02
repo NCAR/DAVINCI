@@ -215,6 +215,63 @@ class TestAnalysisConfig:
         with pytest.raises(ValueError, match="inspection.enabled=true"):
             validate_schema(MonetConfig, raw)
 
+    def test_production_plot_only_revision_accepts_upstream_sources(self) -> None:
+        raw: dict[str, Any] = {
+            "run": {
+                "id": "aod-model-sensor-2008-eof-wavelet-r03",
+                "kind": "production",
+                "completion": {
+                    "required_analyses": {},
+                    "required_artifacts": [],
+                    "required_plots": ["aod_correction_science"],
+                    "inspection": {
+                        "required": True,
+                        "presets": ["aod_correction"],
+                    },
+                },
+            },
+            "analysis": {
+                "output_dir": "/run/a001/output",
+                "log_dir": "/run/a001/logs",
+            },
+            "execution": {
+                "attempt_root": "/run/a001",
+                "checkpoints": {
+                    "mode": "required",
+                    "granularity": "item",
+                    "loaded_sources": True,
+                    "retain": "all",
+                },
+            },
+            "sources": {
+                "corrected": {
+                    "type": "generic",
+                    "files": "/upstream/a001/output/artifacts/corrected/chunk-*.nc",
+                    "artifact_manifest": "/upstream/a001/output/manifest.json",
+                    "artifact_role": "scaling",
+                    "artifact_analysis": "corrected_aod",
+                }
+            },
+            "plots": {
+                "aod_correction_science": {
+                    "type": "spatial",
+                    "source": "corrected",
+                    "variable": "aod_target",
+                }
+            },
+            "inspection": {
+                "enabled": True,
+                "required": True,
+                "presets": ["aod_correction"],
+            },
+        }
+
+        config = validate_schema(MonetConfig, raw)
+
+        assert config.run is not None and config.run.completion is not None
+        assert config.run.completion.required_analyses == {}
+        assert config.run.completion.required_artifacts == []
+
     def test_nonproduction_run_must_not_declare_completion_contract(self) -> None:
         raw: dict[str, Any] = {
             "run": {
@@ -379,6 +436,33 @@ class TestAnalysisConfig:
 
         assert config.execution is not None
         assert config.execution.checkpoints.mode == "best_effort"
+
+    def test_checkpoint_policy_accepts_pinned_prior_attempt_restore(self) -> None:
+        raw = self._minimal_production_config()
+        raw["execution"]["checkpoints"]["restore_from"] = {
+            "source_attempt_root": "/run/prior/a001",
+            "through_stage": "statistics",
+            "receipt_sha256": "a" * 64,
+        }
+
+        config = validate_schema(MonetConfig, raw)
+
+        assert config.execution is not None
+        restore = config.execution.checkpoints.restore_from
+        assert restore is not None
+        assert restore.through_stage == "statistics"
+        assert restore.receipt_sha256 == "a" * 64
+
+    def test_checkpoint_restore_rejects_unpinned_receipt(self) -> None:
+        raw = self._minimal_production_config()
+        raw["execution"]["checkpoints"]["restore_from"] = {
+            "source_attempt_root": "/run/prior/a001",
+            "through_stage": "statistics",
+            "receipt_sha256": "not-a-sha256",
+        }
+
+        with pytest.raises(ValueError, match="receipt_sha256"):
+            validate_schema(MonetConfig, raw)
 
     @pytest.mark.parametrize("legacy_key", ["checkpoint_dir", "resume_from"])
     def test_execution_rejects_unknown_or_legacy_keys(self, legacy_key: str) -> None:

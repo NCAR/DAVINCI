@@ -88,6 +88,36 @@ def test_timeseries_accepts_single_source_shape() -> None:
     assert cfg.plots["plot_a"].source == "obs"
 
 
+def test_explicit_multi_source_plot_accepts_named_source_variables() -> None:
+    cfg = validate_config(
+        _base_config(
+            {
+                "type": "eof_wavelet_science",
+                "sources": [
+                    {"source": "obs", "variable": "O3"},
+                    {"source": "model", "variable": "O3"},
+                ],
+            }
+        )
+    )
+    assert [ref.source for ref in cfg.plots["plot_a"].sources] == ["obs", "model"]
+
+
+def test_explicit_multi_source_plot_rejects_unknown_source() -> None:
+    with pytest.raises(ConfigurationError, match="sources references unknown source 'missing'"):
+        validate_config(
+            _base_config(
+                {
+                    "type": "eof_wavelet_science",
+                    "sources": [
+                        {"source": "obs", "variable": "O3"},
+                        {"source": "missing", "variable": "O3"},
+                    ],
+                }
+            )
+        )
+
+
 def test_timeseries_rejects_mixed_shape() -> None:
     with pytest.raises(ConfigurationError, match=r"must use either pairs or source/variable"):
         validate_config(

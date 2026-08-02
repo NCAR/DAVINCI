@@ -71,12 +71,14 @@ from davinci_monet.plots.registry import (
 
 # Import all renderers to ensure they register
 from davinci_monet.plots.renderers import (  # Temporal; Statistical; Specialized; Spatial
+    AODCorrectionSciencePlotter,
     BaseSpatialPlotter,
     BoxPlotter,
     CurtainPlotter,
     DiurnalPlotter,
     EOFPatternPlotter,
     EOFScreePlotter,
+    EOFWaveletSciencePlotter,
     FlightTrackPlotter,
     HistogramPlotter,
     LMADensityPlotter,
@@ -178,7 +180,9 @@ __all__ = [
     "TaylorPlotter",
     "BoxPlotter",
     # Specialized plotters
+    "AODCorrectionSciencePlotter",
     "CurtainPlotter",
+    "EOFWaveletSciencePlotter",
     "ScorecardPlotter",
     "TrackMap3DPlotter",
     # Spatial plotters

@@ -50,6 +50,38 @@ def _verify_artifact_entry(entry: Mapping[str, Any], errors: list[str]) -> None:
     analysis = str(entry.get("analysis", ""))
     role = str(entry.get("role", ""))
     description = f"required artifact {analysis}:{role}"
+    kind = entry.get("kind")
+
+    if kind == "mmr_file":
+        status = str(entry.get("status", ""))
+        if status not in {"written", "resumed", "finalized_before_failure"}:
+            errors.append(f"{description} has non-durable MMR status {status!r}")
+            return
+        checksums = entry.get("checksums")
+        if not isinstance(checksums, Mapping):
+            errors.append(f"{description} has no checksum receipt")
+            return
+        artifact_path = Path(str(entry.get("path", "")))
+        if _require_file(artifact_path, description, errors):
+            expected = checksums.get("output_sha256")
+            if not expected:
+                errors.append(f"{description} has no output SHA-256 receipt")
+            elif _sha256(artifact_path) != expected:
+                errors.append(f"{description} checksum mismatch: {artifact_path}")
+        required_hashes = (
+            "input_sha256",
+            "payload_sha256",
+            "scaling_sha256",
+            "config_sha256",
+            "code_sha256",
+        )
+        missing_hashes = [name for name in required_hashes if not checksums.get(name)]
+        if missing_hashes:
+            errors.append(
+                f"{description} is missing provenance hashes: {', '.join(missing_hashes)}"
+            )
+        return
+
     if entry.get("status") != "finalized":
         errors.append(f"{description} is not finalized")
         return
@@ -59,7 +91,6 @@ def _verify_artifact_entry(entry: Mapping[str, Any], errors: list[str]) -> None:
         errors.append(f"{description} has no checksum receipt")
         return
 
-    kind = entry.get("kind")
     if kind == "netcdf_collection":
         artifact_dir = Path(str(entry.get("artifact_dir", "")))
         files = checksums.get("files")
@@ -93,14 +124,15 @@ def _verify_artifact_entry(entry: Mapping[str, Any], errors: list[str]) -> None:
     errors.append(f"{description} uses unsupported artifact kind {kind!r}")
 
 
-def _required_artifact_entry(
+def _required_artifact_entries(
     requirement: RequiredArtifactSpec,
     entries: list[Mapping[str, Any]],
-) -> Mapping[str, Any] | None:
-    for entry in entries:
-        if entry.get("analysis") == requirement.analysis and entry.get("role") == requirement.role:
-            return entry
-    return None
+) -> list[Mapping[str, Any]]:
+    return [
+        entry
+        for entry in entries
+        if entry.get("analysis") == requirement.analysis and entry.get("role") == requirement.role
+    ]
 
 
 def _plot_formats(plot_spec: Mapping[str, Any]) -> set[str]:
@@ -200,14 +232,15 @@ class CompletionStage(BaseStage):
             else []
         )
         for requirement in completion.required_artifacts:
-            entry = _required_artifact_entry(requirement, artifact_entries)
-            if entry is None:
+            entries = _required_artifact_entries(requirement, artifact_entries)
+            if not entries:
                 errors.append(
                     "required artifact "
                     f"{requirement.analysis}:{requirement.role} was not published"
                 )
                 continue
-            _verify_artifact_entry(entry, errors)
+            for entry in entries:
+                _verify_artifact_entry(entry, errors)
 
         save_result = context.results.get("save_results")
         save_data = save_result.data if save_result and isinstance(save_result.data, dict) else {}

@@ -57,6 +57,69 @@ def test_inspect_run_directory_uses_explicit_plot_paths(tmp_path) -> None:
     assert data["checks"][0]["pdfs"] == ["cam/cam-analyzed-aod.pdf"]
 
 
+def test_aod_correction_inspection_requires_complete_protocol_evidence(tmp_path) -> None:
+    figures = [
+        "annual_aod",
+        "annual_bias_improvement",
+        "seasonal_aod",
+        "seasonal_error_reduction",
+        "agreement_metrics",
+        "global_timeseries",
+        "matched_scatter",
+        "correction_diagnostics",
+    ]
+    plots = tmp_path / "plots"
+    plots.mkdir()
+    pdfs = []
+    for figure in figures:
+        path = plots / f"aod_correction_science_{figure}.pdf"
+        path.write_bytes(b"%PDF-1.4\n")
+        pdfs.append(path)
+    reports = {
+        "aod_correction_science": {
+            "protocol": "davinci-aod-correction-v2",
+            "passed": True,
+            "figures": figures,
+        }
+    }
+
+    result = inspect_run_directory(
+        tmp_path,
+        presets=["aod_correction"],
+        plot_paths=pdfs,
+        plot_protocol_reports=reports,
+    )
+
+    assert result.passed is True
+    check = next(check for check in result.checks if check["name"] == "aod_correction_protocol")
+    assert check["passed"] is True
+    payload = json.loads(result.json_path.read_text())
+    assert payload["plot_protocol_reports"] == reports
+
+
+def test_aod_correction_inspection_rejects_name_only_pdfs(tmp_path) -> None:
+    plots = tmp_path / "plots"
+    plots.mkdir()
+    for figure in (
+        "annual_aod",
+        "annual_bias_improvement",
+        "seasonal_aod",
+        "seasonal_error_reduction",
+        "agreement_metrics",
+        "global_timeseries",
+        "matched_scatter",
+        "correction_diagnostics",
+    ):
+        (plots / f"science_{figure}.pdf").write_bytes(b"%PDF-1.4\n")
+
+    result = inspect_run_directory(tmp_path, presets=["aod_correction"])
+
+    assert result.passed is False
+    check = next(check for check in result.checks if check["name"] == "aod_correction_protocol")
+    assert check["passed"] is False
+    assert "protocol report missing or invalid" in check["detail"]
+
+
 def test_inspect_run_directory_writes_png_previews_for_final_pdfs(tmp_path, monkeypatch) -> None:
     _install_fake_pdftoppm(tmp_path, monkeypatch)
     plots = tmp_path / "plots" / "daily"

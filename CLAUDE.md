@@ -366,6 +366,34 @@ numerical runtime, and an incomplete attempt. Production jobs are
 noninteractive and must run through completion, inspection, and the refreshed
 manifest.
 
+A new immutable revision that changes only downstream plotting may seed itself
+from a finalized stage boundary in a terminal prior attempt:
+
+```yaml
+execution:
+  attempt_root: ${DAVINCI_RUN_ROOT}
+  checkpoints:
+    mode: required
+    granularity: item
+    loaded_sources: true
+    retain: all
+    restore_from:
+      source_attempt_root: ${DAVINCI_PRIOR_ATTEMPT}
+      through_stage: statistics
+      receipt_sha256: <exact-stage-receipt-sha256>
+```
+
+DAVINCI validates the pinned receipt, every dependency receipt, and every
+checksummed object before initializing the new attempt. It restores the declared
+boundary, skips all preceding stages, and records the source attempt and receipt
+in checkpoint events and the manifest. Use this path for label, layout, or plot
+protocol changes; do not rerun loading, pairing, statistics, or analyses when
+their persisted boundary is unchanged.
+
+For manifests written by this implementation, select the pin with
+`jq -r '.checkpointing.receipts[] | select(.stage == "statistics" and .item == null) | .receipt_sha256' output/manifest.json`
+(substitute the chosen boundary stage as needed).
+
 ### YAML Configuration Pattern
 
 ```yaml
@@ -452,6 +480,16 @@ run:
 At runtime, the completion stage verifies the declared outputs before the manifest can report a
 completed production run. Preflight, smoke, and example controls cannot declare a production
 completion contract.
+
+A plot-only production revision may use empty `required_analyses` and
+`required_artifacts` only when its scientific inputs are finalized upstream artifacts with
+manifest provenance. It must still declare exact `required_plots`, require a functional
+inspection preset, and use a new immutable `-rNN` identity. Never mutate or reuse the control of a
+completed revision. Git-track scheduled production controls before execution; do not describe an
+output as accepted/reproducible until the exact config and interpreting code are committed with
+user approval. When a prior terminal attempt already contains the required paired/statistical
+state, pin `execution.checkpoints.restore_from` at that boundary so the new plot revision restores
+the saved science instead of recomputing it.
 
 **Note**: The old pair shape (`sources: [a, b]` + `geometry:` + `variables:`) is rejected by validation. Use the nested `x:`/`y:` shape above.
 
@@ -802,6 +840,33 @@ Rules (enforced by `tests/unit/plots/test_labeling.py` + `test_labels_rendered.p
   `error::UserWarning` gate, so do NOT rasterize contour lines).
 - **Date/time x-axes**: rotate tick labels with `ax.tick_params(axis="x", rotation=45)`
   (the convention in `timeseries`/`curtain`) to avoid overlap.
+
+### Plot Protocol Enforcement
+
+The NCAR theme only establishes global typography and defaults; it is not proof that a renderer
+followed DAVINCI's semantic plotting conventions. Domain-specific plot suites must enforce those
+conventions before files are accepted:
+
+- Inspect `plots/style.py`, `plots/labeling.py`, and the nearest standard renderer before writing
+  or changing a plotter. Use the shared helpers instead of parallel local palettes, levels, or text
+  composition.
+- Absolute AOD maps use `geosit_aod_levels()`, `get_geosit_aod_cmap()` (`turbo`), and
+  `matplotlib.colors.BoundaryNorm`; signed bias/difference fields use a diverging colormap.
+- A specialized multi-figure renderer with domain-specific rules implements
+  `validate_rendered_figures()`. `PlottingStage` calls the hook before saving and stores its
+  JSON-serializable report in `plot_protocol_reports`; inspection and the manifest preserve that
+  evidence.
+- A functional inspection preset requires the complete logical product set and a passing protocol
+  report. File existence, readable PDFs, correct filenames, and visually plausible previews are
+  necessary but not sufficient.
+- Tests cover renderer artists (norms, colormaps, labels, titles/subtitles, date ticks, and
+  rasterization), the real `PipelineRunner` path, and a negative case proving that a protocol
+  violation fails the plotting stage. A specialized renderer is not production-ready without all
+  three layers.
+- Specialized protocols draw the rendered canvas and reject clipped or overlapping titles,
+  subtitles, panel headings, axis labels, legends, and colorbar ticks. Every production preview
+  is also inspected visually before the suite is accepted or copied; manifest success is not a
+  substitute for that visual gate.
 
 ## Common Gotchas
 

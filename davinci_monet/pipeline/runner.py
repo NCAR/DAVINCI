@@ -659,6 +659,8 @@ class PipelineRunner:
             read_only=resume_plan,
             restart_from=restart_from,
         )
+        if manager is not None:
+            manager.configure_stage_order(tuple(stage.name for stage in self._stages))
         if manager is not None and manager.restart_from is not None:
             target_stage, target_item = manager.restart_from
             known_stages = {stage.name for stage in self._stages}
@@ -679,6 +681,7 @@ class PipelineRunner:
             dependencies: list[tuple[str, str | None]] = []
             requests: list[CheckpointRequest] = []
             for stage in self._stages:
+                restore_action = manager.restore_action(stage.name)
                 requests.append(
                     CheckpointRequest(
                         stage=stage.name,
@@ -689,7 +692,8 @@ class PipelineRunner:
                         ),
                     )
                 )
-                dependencies.append((stage.name, None))
+                if restore_action != "skip":
+                    dependencies.append((stage.name, None))
             return manager.plan_attempt(requests)
 
         context = PipelineContext(config=config_model, checkpoint_manager=manager)
@@ -731,6 +735,27 @@ class PipelineRunner:
         )
 
         try:
+            if manager is not None and request is not None:
+                restore_action = manager.restore_action(stage.name)
+                if restore_action == "skip":
+                    result = StageResult(
+                        stage_name=stage.name,
+                        status=StageStatus.SKIPPED,
+                        metadata={
+                            "resume_disposition": ResumeDisposition.RESTORED.value,
+                            "checkpoint_reason": "pinned_prior_attempt_prefix",
+                            "restored_through_stage": manager.restore_through_stage,
+                        },
+                        duration_seconds=time.time() - start_time,
+                    )
+                    self._call_hook("on_stage_end", stage, result, context)
+                    return result
+                if restore_action == "restore":
+                    result = manager.restore_boundary(request, context)
+                    context.checkpoint_dependencies.append((stage.name, None))
+                    self._call_hook("on_stage_end", stage, result, context)
+                    return result
+
             if (
                 manager is not None
                 and request is not None

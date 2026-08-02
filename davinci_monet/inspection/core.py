@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from davinci_monet.inspection.presets import BUILTIN_INSPECTION_PRESETS
+from davinci_monet.plots.contracts import AOD_CORRECTION_FIGURES, AOD_CORRECTION_PROTOCOL
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ def inspect_run_directory(
     presets: list[str] | tuple[str, ...],
     preview_format: Literal["png"] | None = None,
     plot_paths: list[str | Path] | tuple[str | Path, ...] | None = None,
+    plot_protocol_reports: Mapping[str, Any] | None = None,
 ) -> InspectionResult:
     """Inspect a run directory and write deterministic inspection artifacts."""
     root = Path(run_dir)
@@ -55,6 +58,8 @@ def inspect_run_directory(
             "presets": list(presets),
         },
     ]
+    if "aod_correction" in presets:
+        checks.append(_aod_correction_protocol_check(pdfs, plot_protocol_reports))
 
     preview_paths: list[Path] = []
     if preview_format == "png":
@@ -81,6 +86,7 @@ def inspect_run_directory(
         "presets": list(presets),
         "checks": checks,
         "previews": [str(path.relative_to(root)) for path in preview_paths],
+        "plot_protocol_reports": dict(plot_protocol_reports or {}),
     }
     json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     markdown_path.write_text(_render_markdown(payload))
@@ -92,6 +98,41 @@ def inspect_run_directory(
         markdown_path=markdown_path,
         preview_paths=preview_paths,
     )
+
+
+def _aod_correction_protocol_check(
+    pdfs: list[Path],
+    plot_protocol_reports: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Require the complete AOD suite and its renderer protocol evidence."""
+    expected_figures = list(AOD_CORRECTION_FIGURES)
+    pdf_names = [path.name for path in pdfs]
+    missing_pdfs = [
+        label
+        for label in expected_figures
+        if not any(name.endswith(f"_{label}.pdf") for name in pdf_names)
+    ]
+    reports = plot_protocol_reports if isinstance(plot_protocol_reports, Mapping) else {}
+    matching_reports = [
+        report
+        for report in reports.values()
+        if isinstance(report, Mapping)
+        and report.get("protocol") == AOD_CORRECTION_PROTOCOL
+        and report.get("passed") is True
+        and report.get("figures") == expected_figures
+    ]
+    passed = not missing_pdfs and bool(matching_reports)
+    detail_parts = [f"{len(expected_figures) - len(missing_pdfs)} of {len(expected_figures)} PDFs"]
+    detail_parts.append(
+        "protocol report passed" if matching_reports else "protocol report missing or invalid"
+    )
+    return {
+        "name": "aod_correction_protocol",
+        "passed": passed,
+        "detail": "; ".join(detail_parts),
+        "missing_figures": missing_pdfs,
+        "protocol": AOD_CORRECTION_PROTOCOL,
+    }
 
 
 def _collect_final_pdfs(

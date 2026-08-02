@@ -28,6 +28,7 @@ from davinci_monet.pipeline.stages.helpers import (
 from davinci_monet.pipeline.stages.plot_options import (
     build_comparison_plot_options,
     build_plot_subtitle,
+    explicit_multi_source_plot_kwargs,
     single_source_flight_plot_kwargs,
     single_source_plot_kwargs,
     timestamp_from_field,
@@ -305,6 +306,103 @@ class PlottingStage(BaseStage):
         if errors:
             raise PlottingError("; ".join(errors))
 
+        return file_index
+
+    def _render_explicit_multi_source_plot(
+        self,
+        *,
+        context: PipelineContext,
+        plot_name: str,
+        plot_type: str,
+        plot_spec: dict[str, Any],
+        analysis_config: dict[str, Any],
+        output_dir: Any,
+        source_map: dict[str, tuple[Any, Any]],
+        plots_generated: list[str],
+        plot_protocol_reports: dict[str, dict[str, Any]],
+        file_index: int,
+    ) -> int:
+        """Render one plot from explicitly listed, independently loaded sources."""
+        from pathlib import Path
+
+        import matplotlib.pyplot as plt
+
+        from davinci_monet.core.base import PlotSeries
+        from davinci_monet.plots.base import build_series
+        from davinci_monet.plots.registry import get_plotter
+
+        refs = plot_spec.get("sources") or []
+        if not isinstance(refs, list) or not refs:
+            raise PlottingError(f"Plot '{plot_name}' has no explicit sources")
+
+        series: list[PlotSeries] = []
+        for index, raw_ref in enumerate(refs):
+            ref = self._config_dict(raw_ref)
+            source_label = str(ref.get("source") or "")
+            variable = str(ref.get("variable") or "")
+            if source_label not in source_map:
+                raise PlottingError(f"Source '{source_label}' not found for plot '{plot_name}'")
+            source_obj, dataset = source_map[source_label]
+            if variable not in dataset.data_vars:
+                raise PlottingError(
+                    f"Variable '{variable}' not in source '{source_label}' "
+                    f"for plot '{plot_name}'"
+                )
+            if _is_artifact_source(source_obj, dataset):
+                plotter_class = get_plotter(plot_type)
+                if not bool(getattr(plotter_class, "supports_artifact", False)):
+                    raise PlottingError(
+                        f"Source '{source_label}' has ARTIFACT geometry, which plot type "
+                        f"'{plot_type}' does not support"
+                    )
+            if not _has_finite_values(dataset[variable]):
+                raise PlottingError(
+                    f"Variable '{variable}' in source '{source_label}' has no finite values"
+                )
+            tag_source_label(dataset, source_label=source_label)
+            item = build_series(dataset, variable)[0]
+            item.index = index
+            series.append(item)
+
+        plotter = get_plotter(plot_type)
+        plot_kwargs = explicit_multi_source_plot_kwargs(
+            plot_spec,
+            analysis_config=analysis_config,
+        )
+        title = plot_kwargs.pop("title", None)
+        if title:
+            plotter.config.title = str(title)
+        plotter.config.subtitle = plot_kwargs.pop("subtitle", None)
+        result = plotter.render(series, **plot_kwargs)
+        figures = result if isinstance(result, list) else [(None, result)]
+        try:
+            protocol_report = plotter.validate_rendered_figures(figures)
+            if protocol_report is not None:
+                plot_protocol_reports[plot_name] = protocol_report
+
+            formats = self._plot_formats(plot_spec)
+            plot_output_dir = output_dir
+            output_subdir = plot_spec.get("output_subdir")
+            if output_subdir:
+                subdir = Path(str(output_subdir))
+                plot_output_dir = subdir if subdir.is_absolute() else output_dir / subdir
+            plot_output_dir.mkdir(parents=True, exist_ok=True)
+
+            for figure_label, figure in figures:
+                suffix = f"_{figure_label}" if figure_label else ""
+                path_base = plot_output_dir / f"{plot_name}{suffix}"
+                self._remove_unrequested_format_siblings(path_base, formats)
+                saved_paths = []
+                for fmt in formats:
+                    out_path = self._format_path(path_base, fmt)
+                    plotter.save(figure, out_path)
+                    plots_generated.append(str(out_path))
+                    saved_paths.append(out_path)
+                file_index += 1
+                context.log_progress("done: saved " + ", ".join(str(path) for path in saved_paths))
+        finally:
+            for _figure_label, figure in figures:
+                plt.close(figure)
         return file_index
 
     def _resolve_pair_labels_and_vars(
@@ -675,6 +773,7 @@ class PlottingStage(BaseStage):
         start = time.time()
         plots_generated: list[str] = []
         plot_products: dict[str, list[str]] = {}
+        plot_protocol_reports: dict[str, dict[str, Any]] = {}
 
         config = context.config_dict()
         plot_config = config.get("plots", {})
@@ -723,6 +822,9 @@ class PlottingStage(BaseStage):
                     restored_paths = manager.restore_files(lookup.receipt)
                     plots_generated.extend(restored_paths)
                     plot_products[str(plot_name)] = restored_paths
+                    restored_report = lookup.receipt.context_delta.get("plot_protocol_report")
+                    if isinstance(restored_report, dict):
+                        plot_protocol_reports[str(plot_name)] = restored_report
                     increment = int(
                         lookup.receipt.context_delta.get(
                             "file_index_increment",
@@ -773,7 +875,20 @@ class PlottingStage(BaseStage):
                             plot_name=plot_name,
                         )
                 elif arity == PlotArity.MULTI_SOURCE:
-                    if plot_pairs:
+                    if plot_spec.get("sources"):
+                        file_index = self._render_explicit_multi_source_plot(
+                            context=context,
+                            plot_name=plot_name,
+                            plot_type=plot_type,
+                            plot_spec=plot_spec,
+                            analysis_config=analysis_config,
+                            output_dir=output_dir,
+                            source_map=source_map,
+                            plots_generated=plots_generated,
+                            plot_protocol_reports=plot_protocol_reports,
+                            file_index=file_index,
+                        )
+                    elif plot_pairs:
                         for pair_name in plot_pairs:
                             file_index = self._render_pair(
                                 context=context,
@@ -812,6 +927,7 @@ class PlottingStage(BaseStage):
                             context_delta={
                                 "logical_plot": plot_name,
                                 "file_index_increment": file_index - file_index_before,
+                                "plot_protocol_report": plot_protocol_reports.get(plot_name),
                             },
                         )
 
@@ -828,6 +944,7 @@ class PlottingStage(BaseStage):
                         "plot_count": plot_count,
                         "plots_generated": plots_generated,
                         "plot_products": plot_products,
+                        "plot_protocol_reports": plot_protocol_reports,
                     },
                     error=f"all {len(errors)} plots failed",
                     duration=time.time() - start,
@@ -839,6 +956,7 @@ class PlottingStage(BaseStage):
                     "plot_count": plot_count,
                     "plots_generated": plots_generated,
                     "plot_products": plot_products,
+                    "plot_protocol_reports": plot_protocol_reports,
                 },
                 duration=time.time() - start,
                 warnings=list(errors),
@@ -850,6 +968,7 @@ class PlottingStage(BaseStage):
                 "plot_count": plot_count,
                 "plots_generated": plots_generated,
                 "plot_products": plot_products,
+                "plot_protocol_reports": plot_protocol_reports,
             },
             duration=time.time() - start,
         )

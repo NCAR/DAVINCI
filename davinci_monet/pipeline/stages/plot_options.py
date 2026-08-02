@@ -10,6 +10,7 @@ SINGLE_SOURCE_SCHEMA_KEYS = {
     "type",
     "geometry",
     "source",
+    "sources",
     "variable",
     "mode",
     "fig_kwargs",
@@ -23,6 +24,8 @@ SINGLE_SOURCE_SCHEMA_KEYS = {
     "formats",
     "output_formats",
 }
+
+EXPLICIT_MULTI_SOURCE_SCHEMA_KEYS = SINGLE_SOURCE_SCHEMA_KEYS
 
 
 FORWARDED_COMPARISON_OPTION_KEYS = {
@@ -106,6 +109,24 @@ def single_source_plot_kwargs(
             if dname and dname != "all":
                 kwargs["domain_name"] = dname
 
+    return kwargs
+
+
+def explicit_multi_source_plot_kwargs(
+    plot_spec: dict[str, Any],
+    *,
+    analysis_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return renderer kwargs for an explicit multi-source plot spec."""
+    kwargs = {k: v for k, v in plot_spec.items() if k not in EXPLICIT_MULTI_SOURCE_SCHEMA_KEYS}
+
+    subtitle = build_plot_subtitle(analysis_config or {})
+    if subtitle and not kwargs.get("subtitle"):
+        kwargs["subtitle"] = subtitle
+
+    title = kwargs.get("title")
+    if isinstance(title, str):
+        kwargs["title"] = strip_trailing_date_title(title)
     return kwargs
 
 

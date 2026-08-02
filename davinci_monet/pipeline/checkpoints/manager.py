@@ -55,6 +55,7 @@ REASON_IDENTITY = "identity_changed"
 REASON_CORRUPT = "object_invalid"
 REASON_DEPENDENCY = "dependency_invalid"
 REASON_RESTART = "operator_restart"
+REASON_PRIOR_ATTEMPT = "pinned_prior_attempt"
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,9 @@ class CheckpointManager:
         read_only: bool = False,
         restart_from: str | None = None,
         blocked_reasons: Sequence[str] = (),
+        restore_store: AttemptStore | None = None,
+        restore_receipt: CheckpointReceipt | None = None,
+        restore_codecs: CheckpointCodecs | None = None,
     ) -> None:
         self.config = config
         self.config_path = None if config_path is None else Path(config_path).resolve()
@@ -160,12 +164,17 @@ class CheckpointManager:
         self.read_only = read_only
         self.restart_from = self._parse_restart_from(restart_from)
         self.blocked_reasons = tuple(blocked_reasons)
+        self.restore_store = restore_store
+        self.restore_receipt = restore_receipt
+        self.restore_codecs = restore_codecs
         self.code_sha256 = self.identities["code_sha256"]
         self.codecs = CheckpointCodecs(store.root)
         self.execution_id: str | None = None
         self._lock: AbstractContextManager[None] | None = None
         self._recorded_restorations: set[str] = set()
         self._pending_decisions: dict[str, tuple[str, tuple[str, ...]]] = {}
+        self._stage_order: tuple[str, ...] = ()
+        self._restored_boundary_result: StageResult | None = None
 
     @classmethod
     def create(
@@ -190,6 +199,43 @@ class CheckpointManager:
             raise AttemptStoreError("checkpointed execution requires run identity")
 
         attempt_root = execution.attempt_root.expanduser().resolve()
+        restore_store: AttemptStore | None = None
+        restore_receipt: CheckpointReceipt | None = None
+        restore_codecs: CheckpointCodecs | None = None
+        restore_config = execution.checkpoints.restore_from
+        if restore_config is not None:
+            source_root = restore_config.source_attempt_root.expanduser().resolve()
+            if source_root == attempt_root:
+                raise AttemptStoreError("checkpoint restore source must be a different attempt")
+            restore_store = AttemptStore(source_root)
+            source_attempt = restore_store.read_attempt()
+            if source_attempt.status is AttemptStatus.IN_PROGRESS:
+                raise AttemptStoreError("checkpoint restore source attempt must be terminal")
+            restore_receipt = restore_store.read_receipt(
+                restore_config.through_stage,
+                None,
+            )
+            if restore_receipt is None:
+                raise AttemptStoreError(
+                    "checkpoint restore receipt does not exist: " f"{restore_config.through_stage}"
+                )
+            actual_receipt_sha256 = canonical_sha256(restore_receipt)
+            if actual_receipt_sha256 != restore_config.receipt_sha256:
+                raise AttemptStoreError("checkpoint restore receipt SHA-256 mismatch")
+            restore_codecs = CheckpointCodecs(source_root)
+            cls._validate_restore_receipt_chain(
+                restore_store,
+                restore_codecs,
+                restore_receipt,
+            )
+            result_payload = restore_receipt.context_delta.get("result")
+            if (
+                not isinstance(result_payload, Mapping)
+                or result_payload.get("status") != "COMPLETED"
+            ):
+                raise AttemptStoreError(
+                    "checkpoint restore boundary must contain a completed stage result"
+                )
         source_paths = _extract_existing_source_paths(config)
         inventory = inventory_sources(source_paths)
         package_root = Path(__file__).resolve().parents[2]
@@ -238,7 +284,54 @@ class CheckpointManager:
             read_only=read_only,
             restart_from=restart_from,
             blocked_reasons=blocked_reasons,
+            restore_store=restore_store,
+            restore_receipt=restore_receipt,
+            restore_codecs=restore_codecs,
         )
+
+    @classmethod
+    def _validate_restore_receipt_chain(
+        cls,
+        store: AttemptStore,
+        codecs: CheckpointCodecs,
+        receipt: CheckpointReceipt,
+        seen: set[tuple[str, str | None]] | None = None,
+        validated_objects: set[str] | None = None,
+    ) -> None:
+        """Validate a pinned boundary and all receipts in its dependency chain."""
+        if receipt.status is not CheckpointStatus.FINALIZED:
+            raise AttemptStoreError("checkpoint restore receipt is not finalized")
+        checked_objects = validated_objects if validated_objects is not None else set()
+        for obj in receipt.objects:
+            if obj.object_id in checked_objects:
+                continue
+            if not codecs.validate_object(obj):
+                raise AttemptStoreError("checkpoint restore contains an invalid object")
+            checked_objects.add(obj.object_id)
+        visited = seen if seen is not None else set()
+        key = (receipt.stage, receipt.item)
+        if key in visited:
+            return
+        visited.add(key)
+        for dependency in receipt.dependencies:
+            upstream = store.read_receipt(dependency.stage, dependency.item)
+            if upstream is None:
+                raise AttemptStoreError(
+                    "checkpoint restore dependency is missing: "
+                    f"{_checkpoint_key(dependency.stage, dependency.item)}"
+                )
+            if cls.receipt_sha256(upstream) != dependency.receipt_sha256:
+                raise AttemptStoreError(
+                    "checkpoint restore dependency SHA-256 mismatch: "
+                    f"{_checkpoint_key(dependency.stage, dependency.item)}"
+                )
+            cls._validate_restore_receipt_chain(
+                store,
+                codecs,
+                upstream,
+                visited,
+                checked_objects,
+            )
 
     @staticmethod
     def _parse_restart_from(value: str | None) -> tuple[str, str | None] | None:
@@ -248,6 +341,108 @@ class CheckpointManager:
         if not stage or (separator and not item) or ":" in item:
             raise AttemptStoreError("restart-from must use STAGE or STAGE:ITEM")
         return stage, item if separator else None
+
+    @property
+    def restore_through_stage(self) -> str | None:
+        """Return the configured prior-attempt boundary stage, if any."""
+        if self.config.execution is None:
+            return None
+        restore = self.config.execution.checkpoints.restore_from
+        return None if restore is None else restore.through_stage
+
+    def configure_stage_order(self, stage_names: Sequence[str]) -> None:
+        """Validate and retain pipeline order for prior-attempt restoration."""
+        self._stage_order = tuple(stage_names)
+        through_stage = self.restore_through_stage
+        if through_stage is not None and through_stage not in self._stage_order:
+            raise AttemptStoreError(
+                "checkpoint restore stage is not in this pipeline: " f"{through_stage}"
+            )
+
+    def restore_action(self, stage: str) -> str | None:
+        """Classify a stage relative to a configured restored boundary."""
+        through_stage = self.restore_through_stage
+        if through_stage is None:
+            return None
+        if not self._stage_order:
+            raise AttemptStoreError("checkpoint restore stage order is not configured")
+        stage_index = self._stage_order.index(stage)
+        boundary_index = self._stage_order.index(through_stage)
+        if stage_index < boundary_index:
+            return "skip"
+        if stage_index == boundary_index:
+            return "restore"
+        return None
+
+    def restore_boundary(
+        self,
+        request: CheckpointRequest,
+        context: PipelineContext,
+    ) -> StageResult:
+        """Restore and adopt the pinned prior-attempt stage boundary."""
+        if request.stage != self.restore_through_stage or request.item is not None:
+            raise AttemptStoreError("checkpoint restore request is not the pinned boundary")
+        if self._restored_boundary_result is not None:
+            return self._restored_boundary_result
+
+        if self.resume:
+            lookup = self.lookup(request)
+            if lookup.receipt is not None:
+                result = self.restore_stage(lookup.receipt, context)
+                result.metadata["checkpoint_reason"] = lookup.reason
+                self._restored_boundary_result = result
+                return result
+
+        if (
+            self.restore_store is None
+            or self.restore_receipt is None
+            or self.restore_codecs is None
+        ):
+            raise AttemptStoreError("checkpoint restore source is unavailable")
+
+        result = self.restore_stage(self.restore_receipt, context)
+        source_attempt = self.restore_store.read_attempt()
+        lineage = {
+            "source_attempt_root": str(self.restore_store.root),
+            "source_run_id": source_attempt.run_id,
+            "source_attempt_id": source_attempt.attempt_id,
+            "source_attempt_status": source_attempt.status.value,
+            "stage": self.restore_receipt.stage,
+            "receipt_sha256": self.receipt_sha256(self.restore_receipt),
+        }
+        adopted_delta = {
+            **dict(self.restore_receipt.context_delta),
+            "upstream_checkpoint": lineage,
+        }
+        self.publish(
+            request,
+            objects=self.restore_receipt.objects,
+            context_delta=adopted_delta,
+            disposition=ResumeDisposition.RESTORED,
+        )
+        context.metadata["upstream_checkpoint"] = lineage
+        result.duration_seconds = 0.0
+        result.metadata.update(
+            {
+                "resume_disposition": ResumeDisposition.RESTORED.value,
+                "checkpoint_reason": REASON_PRIOR_ATTEMPT,
+                "upstream_checkpoint": lineage,
+            }
+        )
+        self.store.append_event(
+            {
+                "event": "checkpoint_adopted",
+                "execution_id": self.execution_id,
+                "stage": request.stage,
+                "item": None,
+                "disposition": ResumeDisposition.RESTORED.value,
+                "reason": REASON_PRIOR_ATTEMPT,
+                "upstream_checkpoint": lineage,
+                "at": _now().isoformat(),
+            }
+        )
+        self._restored_boundary_result = result
+        return result
 
     @property
     def attempt(self) -> AttemptRecord:
@@ -919,6 +1114,19 @@ class CheckpointManager:
         items: list[ResumePlanItem] = []
         invalid: set[str] = set()
         for request in stage_requests:
+            restore_action = self.restore_action(request.stage)
+            if restore_action == "skip":
+                identity, _, _ = self.identity(request)
+                items.append(
+                    ResumePlanItem(
+                        stage=request.stage,
+                        item=request.item,
+                        disposition=ResumeDisposition.RESTORED,
+                        reason="pinned_prior_attempt_prefix",
+                        identity_sha256=identity,
+                    )
+                )
+                continue
             for receipt in sorted(
                 receipts_by_stage.get(request.stage, []),
                 key=lambda value: str(value.item),
@@ -994,6 +1202,19 @@ class CheckpointManager:
                     (),
                     invalid_dependencies,
                 )
+            elif (
+                restore_action == "restore"
+                and self.store.read_receipt(request.stage, request.item) is None
+                and self.restore_receipt is not None
+            ):
+                identity, _, _ = self.identity(request)
+                lookup = CheckpointLookup(
+                    self.restore_receipt,
+                    ResumeDisposition.RESTORED,
+                    REASON_PRIOR_ATTEMPT,
+                    identity,
+                    (),
+                )
             else:
                 lookup = self.lookup(request, mutate_restart=False)
             if lookup.disposition is not ResumeDisposition.RESTORED:
@@ -1045,6 +1266,7 @@ __all__ = [
     "REASON_DEPENDENCY",
     "REASON_IDENTITY",
     "REASON_MISSING",
+    "REASON_PRIOR_ATTEMPT",
     "REASON_RESTART",
     "REASON_VALID",
 ]

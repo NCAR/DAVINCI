@@ -108,8 +108,8 @@ class CompletionInspectionSpec(StrictSchema):
 class RunCompletionSpec(StrictSchema):
     """Exact outputs and error policy required for a completed production run."""
 
-    required_analyses: dict[str, AnalysisTypeName] = Field(min_length=1)
-    required_artifacts: list[RequiredArtifactSpec] = Field(min_length=1)
+    required_analyses: dict[str, AnalysisTypeName] = Field(default_factory=dict)
+    required_artifacts: list[RequiredArtifactSpec] = Field(default_factory=list)
     required_saved_files: list[str] = Field(default_factory=list)
     required_plots: list[str] = Field(min_length=1)
     inspection: CompletionInspectionSpec
@@ -165,6 +165,21 @@ class RunConfig(StrictSchema):
         return self
 
 
+class CheckpointRestoreConfig(StrictSchema):
+    """Pinned prior-attempt stage boundary used to seed a new attempt."""
+
+    source_attempt_root: Path
+    through_stage: str = Field(min_length=1, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("source_attempt_root")
+    @classmethod
+    def _validate_source_attempt_root(cls, value: Path) -> Path:
+        if re.fullmatch(r"a\d{3,}", value.name) is None:
+            raise ValueError("checkpoint restore source must end in aNNN notation")
+        return value
+
+
 class CheckpointConfig(StrictSchema):
     """Operational checkpoint policy for one pipeline attempt."""
 
@@ -172,6 +187,13 @@ class CheckpointConfig(StrictSchema):
     granularity: Literal["item", "stage"]
     loaded_sources: bool
     retain: Literal["all", "failed", "none"]
+    restore_from: CheckpointRestoreConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_restore_policy(self) -> "CheckpointConfig":
+        if self.restore_from is not None and self.mode == "off":
+            raise ValueError("checkpoint restore requires enabled checkpoints")
+        return self
 
 
 class ExecutionConfig(StrictSchema):
@@ -637,6 +659,13 @@ class TextKwargs(StrictSchema):
     fontsize: float = 12.0
 
 
+class PlotSourceRef(StrictSchema):
+    """One explicitly named input to a multi-source plot renderer."""
+
+    source: str = Field(min_length=1)
+    variable: str = Field(min_length=1)
+
+
 class PlotGroupConfig(FlexibleSchema):
     """Configuration for a plot group.
 
@@ -669,6 +698,7 @@ class PlotGroupConfig(FlexibleSchema):
     pairs: list[str] = Field(default_factory=list)
     source: str | None = None
     variable: str | None = None
+    sources: list[PlotSourceRef] = Field(default_factory=list)
     mode: int | None = None
     display_level: int | None = None
     data_proc: DataProcConfig | dict[str, Any] = Field(default_factory=dict)
@@ -1816,6 +1846,7 @@ class MonetConfig(StrictSchema):
                     pairs=list(plot.pairs),
                     source=plot.source,
                     variable=plot.variable,
+                    sources=list(plot.sources),
                 )
             )
 
@@ -1838,6 +1869,19 @@ class MonetConfig(StrictSchema):
                     f"plots.{plot_name}.source '{source_ref}' is an ARTIFACT analysis output "
                     f"unsupported by plot type '{plot.type}'"
                 )
+            for input_ref in plot.sources:
+                if input_ref.source not in source_names | analysis_names:
+                    errors.append(
+                        f"plots.{plot_name}.sources references unknown source "
+                        f"'{input_ref.source}'"
+                    )
+                if input_ref.source in artifact_analysis_names and not _plotter_supports_artifact(
+                    plot.type
+                ):
+                    errors.append(
+                        f"plots.{plot_name}.sources source '{input_ref.source}' is an ARTIFACT "
+                        f"analysis output unsupported by plot type '{plot.type}'"
+                    )
 
         for suite_name, suite in self.plot_suites.items():
             if suite.source in artifact_analysis_names:
@@ -1907,14 +1951,17 @@ class MonetConfig(StrictSchema):
                         f"analyses.{a_spec.source}.min_resolution"
                     )
 
-        # Pairs may NOT reference a derived (analysis) source — not pairable.
+        # Physical gridded products may be evaluated in the same run after the
+        # analyses stage. Mode/spectrum/artifact products remain non-pairable.
+        pairable_analysis_types = {"aod_preprocess", "aod_scaling", "gridded_analysis"}
         for pair_name, pair in self.pairs.items():
             for axis in ("x", "y"):
                 ref = getattr(pair, axis).source
-                if ref in analysis_names:
+                analysis = self.analyses.get(ref)
+                if analysis is not None and analysis.type not in pairable_analysis_types:
                     errors.append(
                         f"pairs.{pair_name}.{axis}.source '{ref}' is a derived analysis "
-                        "output; derived sources are not pairable"
+                        f"output of type '{analysis.type}'; derived sources are not pairable"
                     )
 
         # Detect cycles in the analysis dependency graph (topological sort).

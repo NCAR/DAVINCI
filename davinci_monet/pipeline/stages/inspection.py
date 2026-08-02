@@ -51,14 +51,17 @@ class InspectionStage(BaseStage):
                 duration=time.time() - start,
             )
         plot_paths = None
+        plot_protocol_reports = None
         plotting = context.results.get("plotting")
         if plotting and isinstance(plotting.data, dict) and "plots_generated" in plotting.data:
             plot_paths = plotting.data["plots_generated"]
+            plot_protocol_reports = plotting.data.get("plot_protocol_reports")
         result = inspect_run_directory(
             output_dir,
             presets=cfg.presets,
             preview_format=cfg.preview_format,
             plot_paths=plot_paths,
+            plot_protocol_reports=plot_protocol_reports,
         )
         data = {
             "passed": result.passed,

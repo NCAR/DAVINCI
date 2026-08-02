@@ -87,6 +87,28 @@ def test_pair_referencing_derived_source_rejected() -> None:
     assert "references unknown source" not in str(excinfo.value)
 
 
+def test_pair_may_reference_physical_aod_scaling_output() -> None:
+    cfg = _config(
+        analyses={
+            "scaling": {
+                "type": "aod_scaling",
+                "basis": "cam",
+                "projection": "cam",
+                "coefficients": "cam",
+                "model": "cam",
+            }
+        },
+        pairs={
+            "p": {
+                "x": {"source": "cam", "variable": "O3"},
+                "y": {"source": "scaling", "variable": "aod_target"},
+            }
+        },
+    )
+
+    assert cfg.pairs["p"].y.source == "scaling"
+
+
 def test_plot_may_reference_derived_source() -> None:
     cfg = _config(
         analyses={"cam_O3_eof": {"type": "eof", "source": "cam", "variable": "O3"}},
