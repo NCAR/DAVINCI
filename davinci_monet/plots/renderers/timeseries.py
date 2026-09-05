@@ -20,6 +20,7 @@ from davinci_monet.plots.base import (
     get_variable_label,
     get_variable_units,
     series_colors,
+    set_ylabel_wrapped,
 )
 from davinci_monet.plots.registry import register_plotter
 
@@ -422,7 +423,9 @@ class TimeSeriesPlotter(BasePlotter):
 
         units = ds[s.var_name].attrs.get("units") or None
         var_label = get_variable_label(ds, s.var_name, include_prefix=False)
-        ax.set_ylabel(labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize)
+        set_ylabel_wrapped(
+            ax, labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize
+        )
         ax.set_xlabel("Time", fontsize=self.config.text.fontsize)
         # Synthesise a title when none is configured (mirrors the spatial
         # renderer): source name first, then quantity, so a single-source series
@@ -489,7 +492,9 @@ class TimeSeriesPlotter(BasePlotter):
         first = series[0]
         units = first.dataset[first.var_name].attrs.get("units") or None
         var_label = get_variable_label(first.dataset, first.var_name, include_prefix=False)
-        ax.set_ylabel(labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize)
+        set_ylabel_wrapped(
+            ax, labeling.axis_label(var_label, units), fontsize=self.config.text.fontsize
+        )
         ax.set_xlabel("Time", fontsize=self.config.text.fontsize)
         # Overlay sources are distinguished by the legend, so the synthesised
         # title carries the quantity only (no single source name).

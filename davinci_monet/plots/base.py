@@ -15,6 +15,7 @@ for renderers, tests, pipeline stages, and examples.
 
 from __future__ import annotations
 
+import math
 from abc import ABC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -95,6 +96,71 @@ def clean_xy(x: Any, y: Any) -> tuple[np.ndarray, np.ndarray]:
     y = np.asarray(y).flatten()
     mask = np.isfinite(x) & np.isfinite(y)
     return x[mask], y[mask]
+
+
+def set_ylabel_wrapped(
+    ax: "matplotlib.axes.Axes",
+    label: str,
+    *,
+    fontsize: float | None = None,
+    fontweight: str | None = None,
+    max_lines: int = 3,
+) -> None:
+    """Set a y-axis label, wrapping it if it is taller than the axes.
+
+    A rotated y label longer than the axes it is centred on is silently
+    truncated at BOTH ends by the Agg backend, and ``bbox_inches="tight"``
+    does not rescue it -- the label simply loses characters, so
+    ``"... Anomaly (W m^-2)"`` renders as ``"...Anomaly (W m"``. It is a
+    quiet, publication-breaking failure: nothing errors and nothing warns.
+
+    Long composed labels hit this routinely at ``context: presentation`` font
+    sizes, where a quantity plus units can exceed the axes height. Wrapping
+    onto extra lines preserves both the full text and the configured font
+    size, which shrinking the font would not.
+    """
+    kwargs: dict[str, Any] = {}
+    if fontsize is not None:
+        kwargs["fontsize"] = fontsize
+    if fontweight is not None:
+        kwargs["fontweight"] = fontweight
+
+    ax.set_ylabel(label, **kwargs)
+    if "\n" in label:
+        return  # caller wrapped it deliberately; respect that
+
+    available = _axes_height_px(ax)
+    needed = _ylabel_height_px(ax)
+    if available <= 0 or needed <= 0 or needed <= available:
+        return
+
+    import textwrap
+
+    lines = min(max_lines, math.ceil(needed / available))
+    width = max(1, math.ceil(len(label) / lines))
+    ax.set_ylabel("\n".join(textwrap.wrap(label, width=width)), **kwargs)
+
+
+def _axes_height_px(ax: "matplotlib.axes.Axes") -> float:
+    try:
+        return float(ax.get_window_extent().height)
+    except Exception:  # noqa: BLE001 - measurement is best-effort
+        return 0.0
+
+
+def _ylabel_height_px(ax: "matplotlib.axes.Axes") -> float:
+    """Rendered height of the current y label, or 0 if it cannot be measured."""
+    fig = ax.get_figure()
+    if fig is None or fig.canvas is None:
+        return 0.0
+    try:
+        renderer = fig.canvas.get_renderer()  # type: ignore[attr-defined]
+    except AttributeError:
+        return 0.0  # non-raster backend: skip rather than guess
+    try:
+        return float(ax.yaxis.label.get_window_extent(renderer=renderer).height)
+    except Exception:  # noqa: BLE001 - measurement is best-effort
+        return 0.0
 
 
 # =============================================================================
@@ -226,7 +292,8 @@ class BasePlotter(ABC):
             )
 
         if ylabel or self.config.ylabel:
-            ax.set_ylabel(
+            set_ylabel_wrapped(
+                ax,
                 ylabel or self.config.ylabel,  # type: ignore[arg-type]
                 fontsize=cfg.fontsize,
                 fontweight=cfg.fontweight,
@@ -421,6 +488,7 @@ __all__ = [
     # Paired-series helpers
     "extract_xy_series",
     "clean_xy",
+    "set_ylabel_wrapped",
     # Label/formatting utilities
     "VARIABLE_DISPLAY_NAMES",
     "TITLE_FORMULA_REPLACEMENTS",
