@@ -1,0 +1,53 @@
+POWER Integration with the DAVINCI Model Evaluation Toolkit:
+Global Climate to Regional Air Quality
+
+Presentation summary
+
+Model evaluations — from global climate to regional air quality —
+are built on systematic comparison with observations.
+DAVINCI (Data Analysis and Visual Intelligence for Climate/Chemistry)
+is an open-source evaluation toolkit from NSF NCAR that makes such comparison
+routine: it pairs model output with observations of any geometry (surface
+stations, aircraft tracks, vertical profiles, satellite swaths and grids),
+computes evaluation statistics,
+and integrates large language models to interpret and summarize the findings.
+The result is a single reproducible workflow, designed for use in agentic AI systems.
+DAVINCI spans scales — global climate models such as CESM/CAM,
+reanalyses such as MERRA-2, and regional air-quality and forecast models such as
+MPAS-GOCART2G-JEDI and CheMPAS-A — and is used in production within the NASA CERES project
+to evaluate CAM radiative fluxes with SARB.
+
+In this talk we introduce DAVINCI's newest evaluation reference: NASA POWER.
+POWER provides a single, consistent benchmark for every model DAVINCI reads:
+more than four decades of continuous surface radiation and meteorology
+at any location on Earth, from virtual stations to regional maps,
+on hourly to monthly timescales.
+Evaluations that once meant gathering station
+records and satellite archives reduce to a single step,
+yielding paired comparisons, bias maps,
+and summary statistics against a uniform global reference.
+And because POWER blends CERES solar with MERRA-2 meteorology —
+parent products DAVINCI also reads natively —
+every model comparison can be traced back to its source observations.
+
+Which POWER data tools and capabilities do you use (Data Access Viewer, API,
+AWS, ArcGIS Image Services)?
+
+API — the temporal point and regional endpoints (hourly, daily, monthly)
+with NetCDF output, accessed programmatically with local caching for
+reproducible analyses; the Parameter Dictionary underpins DAVINCI's standardized
+variable catalog.
+
+What is the impact of your work, project, or research?
+
+POWER's mission is to put NASA Earth observations to work;
+DAVINCI closes the loop by putting POWER to work on the models themselves.
+The integration provides rigorous,
+reproducible model evaluation against POWER as free,
+open-source infrastructure.
+It feeds model development directly:
+surface radiation and meteorology biases, quantified against POWER in models
+from global climate (CESM/CAM) to regional air quality
+(MPAS-GOCART2G-JEDI, CheMPAS-A), inform the modeling community,
+while parent-product cross-checks (CERES, MERRA-2)
+could offer the POWER project an independent consistency assessment.
