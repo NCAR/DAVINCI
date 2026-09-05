@@ -707,6 +707,59 @@ class WaveletSpec(StrictSchema):
         return v
 
 
+class AnomalySpec(StrictSchema):
+    """Departure of one source variable from its own climatology.
+
+    Shape-preserving: the output keeps the input's dims, coords and geometry,
+    so an anomaly of a POINT source plots exactly like the source it came from.
+
+    ``baseline_start``/``baseline_end`` bound the years the climatology is
+    computed over; the anomaly itself always spans the full record. Leaving
+    both unset uses the whole record as its own baseline, which makes the
+    anomalies sum to zero but lets the trend being examined pull the reference
+    it is measured against -- so an explicit window is preferred.
+    """
+
+    type: Literal["anomaly"]
+    source: str
+    variable: str
+    baseline_start: datetime | str | None = None
+    baseline_end: datetime | str | None = None
+    climatology: Literal["month", "dayofyear", "none"] = "month"
+    smooth: int | None = Field(default=None, ge=2)
+    """Centred rolling-mean window, in TIME STEPS -- so 12 on a monthly series
+    is a 12-month mean, but 12 on a daily one is 12 days. Edges are left NaN
+    rather than averaged over a short window, because a half-filled endpoint is
+    noisier than the interior and reads as if it were not."""
+
+    @staticmethod
+    def _as_datetime(value: datetime | str | None) -> datetime | None:
+        """Coerce an ISO date for comparison.
+
+        The field is ``datetime | str``, and pydantic leaves an ISO string on
+        the ``str`` branch, so comparing the raw values would silently never
+        fire. Anything unparseable is left to the analysis layer, which reports
+        it against the actual record.
+        """
+        if value is None or isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+
+    @model_validator(mode="after")
+    def _baseline_ordered(self) -> "AnomalySpec":
+        start = self._as_datetime(self.baseline_start)
+        end = self._as_datetime(self.baseline_end)
+        if start is not None and end is not None and start > end:
+            raise ValueError(
+                f"anomaly baseline_start ({start:%Y-%m-%d}) is after "
+                f"baseline_end ({end:%Y-%m-%d})"
+            )
+        return self
+
+
 class FormulaFieldSpec(StrictSchema):
     """One named field produced by a gridded analysis formula."""
 
@@ -750,12 +803,12 @@ class GriddedAnalysisSpec(StrictSchema):
         return value
 
 
-AnalysisSpec = EOFSpec | WaveletSpec | GriddedAnalysisSpec
+AnalysisSpec = EOFSpec | WaveletSpec | GriddedAnalysisSpec | AnomalySpec
 
 
 def build_analysis_spec(cfg: Any) -> AnalysisSpec:
     """Build the right AnalysisSpec submodel from a dict, dispatching on type."""
-    if isinstance(cfg, (EOFSpec, WaveletSpec, GriddedAnalysisSpec)):
+    if isinstance(cfg, (EOFSpec, WaveletSpec, GriddedAnalysisSpec, AnomalySpec)):
         return cfg
     if not isinstance(cfg, dict):
         raise ValueError(f"analysis entry must be a mapping, got {type(cfg).__name__}")
@@ -764,6 +817,8 @@ def build_analysis_spec(cfg: Any) -> AnalysisSpec:
         return EOFSpec(**cfg)
     if analysis_type == "wavelet":
         return WaveletSpec(**cfg)
+    if analysis_type == "anomaly":
+        return AnomalySpec(**cfg)
     if analysis_type == "gridded_analysis":
         return GriddedAnalysisSpec(**cfg)
     raise ValueError(

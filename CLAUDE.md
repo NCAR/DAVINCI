@@ -488,6 +488,34 @@ plots:
   pc1_scal:    { type: wavelet_scalogram,  source: pc1_wav,    variable: power }
 ```
 
+**Anomaly analysis** (`type: anomaly`) subtracts a climatology measured over a fixed **baseline window** from the full record. It is **shape-preserving** — dims, coords and geometry pass through — so the anomaly of a POINT source plots exactly like the source it came from.
+
+| Field | Default | Description |
+|---|---|---|
+| `source` | required | Source key from `sources:` or `analyses:` |
+| `variable` | required | Variable name in that source |
+| `baseline_start` / `baseline_end` | full record | ISO dates bounding the climatology. Leaving both unset makes anomalies sum to zero but lets the trend pull its own reference — prefer an explicit window (e.g. the 1991–2020 WMO normal) |
+| `climatology` | `month` | `month` (per calendar month), `dayofyear`, or `none` (a single scalar baseline mean, leaving the seasonal cycle standing) |
+| `smooth` | — | Centred rolling-mean window in **time steps** (12 on a monthly series = 12-month mean). Edges are left NaN rather than averaged over a short window |
+
+**Output**: `<variable>` (the anomaly, units unchanged, `display_name` gains "Anomaly") and `<variable>_climatology`.
+
+Removing the seasonal cycle is usually mandatory, not cosmetic: polar surface shortwave swings ~450 W m⁻² between solstices, which buries a decadal drift of a few W m⁻². A baseline window that selects **no** times raises rather than returning an all-NaN (blank) plot.
+
+```yaml
+analyses:
+  t2m_anomaly:
+    type: anomaly
+    source: power_monthly
+    variable: T2M
+    baseline_start: "1991-01-01"
+    baseline_end: "2020-12-31"
+    smooth: 12
+
+plots:
+  t2m_anom: { type: timeseries, source: t2m_anomaly, variable: T2M }
+```
+
 ## Key Design Patterns
 
 1. **Plugin Registry**: Components register via decorators
