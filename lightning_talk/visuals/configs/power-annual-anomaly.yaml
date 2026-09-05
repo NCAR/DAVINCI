@@ -1,0 +1,54 @@
+# Annual 2 m temperature anomalies at four sites, for the talk's graphics.
+#
+# Same four POWER sites and cache as analyses/power/configs/power-longrecord.example.yaml,
+# but resampled to calendar-year means at load time so the anomaly analysis yields one
+# value per year. `climatology: none` subtracts the scalar 1991-2020 baseline mean, so the
+# output is the annual departure from the WMO normal. Every number on a card comes from
+# this run's context (see extract_data.py), never from a side computation.
+#
+#   export POWER_ANALYSIS=$(pwd)/lightning_talk/visuals
+#   export POWER_CACHE=$(pwd)/analyses/power/cache
+#   davinci-monet run lightning_talk/visuals/configs/power-annual-anomaly.yaml
+
+analysis:
+  start_time: "1981-01-01"
+  end_time: "2024-12-31"
+  output_dir: ${POWER_ANALYSIS}/output
+  log_dir: ${POWER_ANALYSIS}/logs
+  style:
+    theme: ncar
+    context: presentation
+
+sources:
+  power_annual:
+    type: power
+    temporal: monthly
+    community: RE
+    cache_dir: ${POWER_CACHE}
+    resample: "YS"            # monthly -> calendar-year mean, stamped at 1 January
+    sites:
+      - {name: "Boulder, CO",   latitude: 40.02,   longitude: -105.27}
+      - {name: "Barrow, AK",    latitude: 71.323,  longitude: -156.611}
+      - {name: "Mauna Loa, HI", latitude: 19.536,  longitude: -155.576}
+      - {name: "South Pole",    latitude: -89.997, longitude: -24.8}
+    variables:
+      T2M: {}                 # MERRA-2-derived; K
+      ALLSKY_SFC_SW_DWN: {}   # CERES/SRB-derived; W m-2; record starts 1984
+
+analyses:
+  t2m_annual_anomaly:
+    type: anomaly
+    source: power_annual
+    variable: T2M
+    baseline_start: "1991-01-01"
+    baseline_end: "2020-12-31"
+    climatology: none         # one scalar baseline per site: annual anomaly vs the normal
+
+plots:
+  t2m_annual_anomaly_check:
+    type: timeseries
+    source: t2m_annual_anomaly
+    variable: T2M
+    show_individual_sites: true
+    site_label_var: site
+    title: "2 m Temperature Anomaly, Annual Mean"
