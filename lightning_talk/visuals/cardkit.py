@@ -75,6 +75,7 @@ THEMES = {
 CSS = """
 @font-face {{ font-family: "HNC";  src: local("HelveticaNeue-CondensedBold"); }}
 @font-face {{ font-family: "HNCK"; src: local("HelveticaNeue-CondensedBlack"); }}
+@page {{ size: {W}px {H}px; margin: 0; }}
 html, body {{ margin: 0; width: {W}px; height: {H}px; overflow: hidden; }}
 body {{ background: {bg}; color: {text}; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
        -webkit-font-smoothing: antialiased; }}
@@ -133,8 +134,9 @@ class Card:
 </div></body></html>"""
 
 
-def render(html: str, out_png: Path, scale: int = 2) -> Path:
-    """Render *html* at 1920 x 1080 CSS px, *scale* x for a crisp PowerPoint image."""
+def render(html: str, out_png: Path, scale: int = 2, pdf: bool = True) -> Path:
+    """Render *html* at 1920 x 1080 CSS px, *scale* x for a crisp PowerPoint image,
+    plus a vector PDF of the same page next to it when *pdf* is true."""
     from playwright.sync_api import sync_playwright
 
     out_png = Path(out_png)
@@ -145,6 +147,9 @@ def render(html: str, out_png: Path, scale: int = 2) -> Path:
         page.set_content(html)
         page.wait_for_timeout(150)  # let local() fonts settle
         page.screenshot(path=str(out_png))
+        if pdf:
+            page.pdf(path=str(out_png.with_suffix(".pdf")), width=f"{W}px", height=f"{H}px",
+                     print_background=True, prefer_css_page_size=True)
         browser.close()
     return out_png
 
