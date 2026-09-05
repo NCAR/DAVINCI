@@ -58,6 +58,14 @@ THEMES = {
     "navy": Theme("navy", "linear-gradient(180deg, #022749 0%, #032d54 100%)", grid="#1b4a7a"),
     # Near-black for stripes: the colour is the graphic.
     "ink": Theme("ink", "#161417", accent="#d9d9d9", muted="rgba(217,217,217,0.6)", grid="#2a2a2a"),
+    # Deep green-teal for ecosystem / field-site context.
+    "biome": Theme(
+        "biome",
+        "radial-gradient(900px 620px at 10% 100%, rgba(240,128,60,0.14), rgba(240,128,60,0) 70%),"
+        " linear-gradient(180deg, #0a2a2e 0%, #10403d 100%)",
+        accent="#9fd6c8", muted="rgba(159,214,200,0.62)", grid="#1f5150",
+        node="rgba(255,255,255,0.07)", edge="rgba(159,214,200,0.35)",
+    ),
 }
 
 # ---------------------------------------------------------------------------
