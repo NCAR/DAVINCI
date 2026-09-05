@@ -27,14 +27,58 @@ sources:
     temporal: monthly       # monthly sends year-only dates; the client handles that
     community: RE
     cache_dir: ${POWER_CACHE}
+    # Sites must be far enough apart to land in DIFFERENT POWER cells. Table
+    # Mountain (40.125, -105.24) was dropped for exactly this reason: it sits
+    # ~11 km from Boulder, well inside MERRA-2's 0.5 x 0.625 cell, so POWER
+    # returned the *same* cell and byte-identical values for both. The two
+    # lines then overplotted and the legend advertised four sites while the
+    # figure showed three. POWER point mode returns the nearest cell and does
+    # not interpolate (see the leg-B result in POWER.md), so co-located sites
+    # are duplicates, not independent samples.
+    #
+    # The set below is NOAA GML's three baseline observatories plus Boulder,
+    # spanning 71 N to 90 S: the two polar solar records run in antiphase,
+    # which is the point of a four-decade global-reach figure.
+    # `name` is the legend label verbatim -- the reader carries it onto the
+    # `site` coord and the plots read it via `site_label_var: site` -- so it is
+    # written the way it should appear in a figure, not as an identifier. The
+    # cache filename is slugified from it, so punctuation here is safe.
     sites:
-      - {name: boulder,     latitude: 40.02,  longitude: -105.27}
-      - {name: table_mtn,   latitude: 40.125, longitude: -105.24}
-      - {name: mauna_loa,   latitude: 19.536, longitude: -155.576}
-      - {name: south_pole,  latitude: -89.997, longitude: -24.8}
+      - {name: "Boulder, CO",        latitude: 40.02,   longitude: -105.27}
+      - {name: "Barrow, AK",         latitude: 71.323,  longitude: -156.611}
+      - {name: "Mauna Loa, HI",      latitude: 19.536,  longitude: -155.576}
+      - {name: "South Pole",         latitude: -89.997, longitude: -24.8}
     variables:
       ALLSKY_SFC_SW_DWN: {}   # CERES-derived; -> W m-2
       T2M: {}                 # MERRA-2-derived; -> K
+
+# Anomalies relative to the 1991-2020 WMO climate normal. The normal is fully
+# inside both records -- solar starts 1984, not 1981 -- so one baseline serves
+# both variables, which a talk does not have to stop and explain.
+#
+# The seasonal cycle has to come out for the four-decade trend to be visible at
+# all: Barrow and the South Pole swing ~450 W m-2 between solstices, against a
+# decadal drift of a few W m-2. `climatology: month` removes a per-site,
+# per-calendar-month mean, so what is left is the departure of each month from
+# its own normal.
+analyses:
+  swdn_anomaly:
+    type: anomaly
+    source: power_monthly
+    variable: ALLSKY_SFC_SW_DWN
+    baseline_start: "1991-01-01"
+    baseline_end: "2020-12-31"
+    climatology: month
+    smooth: 12
+
+  t2m_anomaly:
+    type: anomaly
+    source: power_monthly
+    variable: T2M
+    baseline_start: "1991-01-01"
+    baseline_end: "2020-12-31"
+    climatology: month
+    smooth: 12
 
 plots:
   # show_individual_sites is REQUIRED here, not cosmetic. The default averages
@@ -61,6 +105,24 @@ plots:
     # coord `site`. Without this the legend reads "Site 0", "Site 1", ...
     site_label_var: site
     title: "2 m Temperature"
+
+  # The anomaly pair. Same sources, same sites, same legend -- only the
+  # reference changes, so these read directly against the two panels above.
+  swdn_anomaly_record:
+    type: timeseries
+    source: swdn_anomaly
+    variable: ALLSKY_SFC_SW_DWN
+    show_individual_sites: true
+    site_label_var: site
+    title: "Surface Downwelling Shortwave Anomaly, 12-Month Mean"
+
+  t2m_anomaly_record:
+    type: timeseries
+    source: t2m_anomaly
+    variable: T2M
+    show_individual_sites: true
+    site_label_var: site
+    title: "2 m Temperature Anomaly, 12-Month Mean"
 
 summary:
   enabled: true
