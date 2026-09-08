@@ -8,7 +8,7 @@ aerosol optical depth measurements since 2000.
 
 Note
 ----
-This reader requires monetio.sat._modis_l2_mm for full functionality.
+This reader requires monetio.sat.modis_l2 for full functionality.
 Without monetio, it falls back to basic xarray reading which may not handle
 all MODIS-specific features (HDF-EOS, swath geometry).
 """
@@ -138,7 +138,10 @@ class MODISL2AODReader:
         **kwargs: Any,
     ) -> xr.Dataset:
         """Open MODIS files using monetio."""
-        import monetio.sat._modis_l2_mm as modis_module
+        try:
+            import monetio.sat._modis_l2_mm as modis_module
+        except ImportError:
+            from monetio.sat import modis_l2 as modis_module
 
         files = [str(f) for f in file_paths]
         variable_dict = kwargs.pop("variable_dict", None)

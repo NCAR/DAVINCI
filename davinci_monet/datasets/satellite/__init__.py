@@ -14,7 +14,7 @@ monetio for full functionality:
   Requires: monetio.sat._tempo_l2_no2_mm
 
 - **MODISL2AODReader**: MODIS L2 AOD products
-  Requires: monetio.sat._modis_l2_mm
+  Requires: monetio.sat.modis_l2
 
 - **GOESL3AODReader**: GOES-ABI L3 AOD products
   Requires: monetio.sat.goes
