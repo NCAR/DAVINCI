@@ -72,6 +72,8 @@ _SOURCE_ACRONYMS = {
     "cmaq": "CMAQ",
     "ebaf": "EBAF",
     "ssf": "SSF",
+    "us": "US",
+    "usa": "USA",
 }
 
 

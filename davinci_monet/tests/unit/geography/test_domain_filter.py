@@ -24,6 +24,56 @@ def test_asia_aq_domain_registered() -> None:
     assert get_domain_extent("asia_aq") == (90.0, 140.0, 0.0, 45.0)
 
 
+def test_aerosol_region_catalog_matches_published_aot_zones() -> None:
+    """The aerosol catalog reproduces the 12 NOAA/NCEP AOT evaluation boxes."""
+    from davinci_monet.geography import AEROSOL_REGIONS, get_domain_extent
+
+    expected = {
+        "north_atlantic_ocean": (-80.0, -10.0, 0.0, 35.0),
+        "south_atlantic_ocean": (-40.0, 20.0, -35.0, 0.0),
+        "north_indian_ocean": (40.0, 100.0, 0.0, 24.0),
+        "north_africa": (-18.0, 30.0, 0.0, 30.0),
+        "southern_africa": (8.0, 35.0, -30.0, 0.0),
+        "eastern_us": (-95.0, -68.0, 25.0, 48.0),
+        "western_us": (-125.0, -95.0, 25.0, 48.0),
+        "canada": (-160.0, -60.0, 48.0, 70.0),
+        "south_america": (-80.0, -35.0, -35.0, 0.0),
+        "middle_east": (30.0, 70.0, 10.0, 32.0),
+        "east_asia": (100.0, 140.0, 20.0, 48.0),
+        "india": (68.0, 95.0, 8.0, 35.0),
+    }
+
+    assert AEROSOL_REGIONS == expected
+    for name, extent in expected.items():
+        assert get_domain_extent("aerosol_region", name) == extent
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [
+        ("Sahara", "north_africa"),
+        ("saharan-north-africa", "north_africa"),
+        ("South Africa", "southern_africa"),
+        ("Eastern USA", "eastern_us"),
+        ("Western-USA", "western_us"),
+        ("North Atlantic", "north_atlantic_ocean"),
+        ("South-Atlantic", "south_atlantic_ocean"),
+    ],
+)
+def test_aerosol_region_aliases(alias: str, canonical: str) -> None:
+    from davinci_monet.geography import get_domain_extent
+
+    assert get_domain_extent("aerosol_region", alias) == get_domain_extent(
+        "aerosol_region", canonical
+    )
+
+
+def test_unknown_aerosol_region_is_not_resolved() -> None:
+    from davinci_monet.geography import get_domain_extent
+
+    assert get_domain_extent("aerosol_region", "not-a-region") is None
+
+
 def _paired_point_dataset() -> xr.Dataset:
     """Build a synthetic paired Dataset with sites spanning multiple regions."""
     times = pd.date_range("2024-01-01", periods=6, freq="h")
@@ -80,6 +130,22 @@ class TestFilterPairedByDomain:
         # Expect 2 sites kept.
         assert out.sizes["site"] == 2
         np.testing.assert_array_equal(np.sort(out["latitude"].values), np.array([43.0, 45.0]))
+
+    def test_sahara_alias_keeps_only_north_african_points(self) -> None:
+        ds = (
+            _paired_point_dataset()
+            .isel(site=slice(0, 3))
+            .assign_coords(
+                latitude=("site", [23.0, 31.0, 20.0]),
+                longitude=("site", [10.0, 10.0, 35.0]),
+            )
+        )
+
+        out = filter_paired_by_domain(ds, "aerosol_region", "sahara")
+
+        assert out.sizes["site"] == 1
+        assert out["latitude"].item() == 23.0
+        assert out["longitude"].item() == 10.0
 
     def test_list_form_of_domain_type(self) -> None:
         """YAML schema declares domain_type as list[str]; helper must accept that."""

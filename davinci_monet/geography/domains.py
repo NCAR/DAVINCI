@@ -33,6 +33,46 @@ STANDARD_DOMAINS: dict[str, Extent] = {
 }
 
 
+# Twelve regions used for global aerosol optical thickness evaluation in
+# Bhattacharjee et al. (2018), GMD, Table 1:
+# https://doi.org/10.5194/gmd-11-2333-2018
+#
+# The paper labels ``north_africa`` as its Saharan dust source region and
+# ``southern_africa`` / ``south_america`` as biomass-burning regions.  Keep the
+# published rectangular bounds here so analyses can be reproduced without a
+# land-mask dependency.
+AEROSOL_REGIONS: dict[str, Extent] = {
+    "north_atlantic_ocean": (-80.0, -10.0, 0.0, 35.0),
+    "south_atlantic_ocean": (-40.0, 20.0, -35.0, 0.0),
+    "north_indian_ocean": (40.0, 100.0, 0.0, 24.0),
+    "north_africa": (-18.0, 30.0, 0.0, 30.0),
+    "southern_africa": (8.0, 35.0, -30.0, 0.0),
+    "eastern_us": (-95.0, -68.0, 25.0, 48.0),
+    "western_us": (-125.0, -95.0, 25.0, 48.0),
+    "canada": (-160.0, -60.0, 48.0, 70.0),
+    "south_america": (-80.0, -35.0, -35.0, 0.0),
+    "middle_east": (30.0, 70.0, 10.0, 32.0),
+    "east_asia": (100.0, 140.0, 20.0, 48.0),
+    "india": (68.0, 95.0, 8.0, 35.0),
+}
+
+
+AEROSOL_REGION_ALIASES: dict[str, str] = {
+    "sahara": "north_africa",
+    "saharan_north_africa": "north_africa",
+    "south_africa": "southern_africa",
+    "eastern_usa": "eastern_us",
+    "western_usa": "western_us",
+    "north_atlantic": "north_atlantic_ocean",
+    "south_atlantic": "south_atlantic_ocean",
+}
+
+
+def _normalize_domain_name(name: str) -> str:
+    """Normalize human-friendly region spellings to catalog keys."""
+    return "_".join(name.strip().casefold().replace("-", " ").split())
+
+
 def get_domain_extent(
     domain_type: str,
     domain_name: str | None = None,
@@ -40,6 +80,10 @@ def get_domain_extent(
     """Return ``(lon_min, lon_max, lat_min, lat_max)`` for a named domain."""
     if domain_type == "epa_region" and domain_name:
         return EPA_REGIONS.get(domain_name.upper())
+    if domain_type == "aerosol_region" and domain_name:
+        key = _normalize_domain_name(domain_name)
+        key = AEROSOL_REGION_ALIASES.get(key, key)
+        return AEROSOL_REGIONS.get(key)
     if domain_type in STANDARD_DOMAINS:
         return STANDARD_DOMAINS[domain_type]
     if domain_name and domain_name in STANDARD_DOMAINS:

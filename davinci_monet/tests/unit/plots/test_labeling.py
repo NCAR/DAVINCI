@@ -51,6 +51,8 @@ def test_format_units_micrograms():
         ("merra2", "MERRA-2"),
         ("ceres", "CERES"),
         ("cam", "CAM"),
+        ("eastern_us", "Eastern US"),
+        ("western_usa", "Western USA"),
         ("", ""),
         (None, ""),
     ],
