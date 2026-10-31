@@ -1,0 +1,21 @@
+# Standalone ASCII viewer, not a `davinci run` pipeline configuration.
+# Set MERRA2_ROOT=/Volumes/Io, or replace the filename with a local absolute path.
+source:
+  filename: ${MERRA2_ROOT}/MERRA2_inst3/aer_Nv/MERRA2_300.inst3_3d_aer_Nv.20080701.nc4
+  variable: LWI             # land/water/ice; try RH for a native-level field
+  indices:
+    time: 0                 # zero-based; vertical defaults to the native surface
+
+display:
+  grid: {lat: 180, lon: 360} # cells, one ASCII character each; pan with arrows
+  interpolation: linear    # LWI automatically uses nearest (categorical)
+  fit: false               # true: resample the entire globe to fit the window
+  bins: 10                 # 1-10 numeric bins, represented by digits 0-9
+  limits: null             # [MIN, MAX], or auto from the complete native slice
+  mask_below: null         # use 0 for terrain to mask elevations below sea level
+
+terminal:
+  new_window: false        # true: open a dedicated macOS Terminal window
+  rows: 40
+  columns: 120
+  font_size: 12             # applies to this new window, not your saved profile

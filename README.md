@@ -13,6 +13,7 @@ A modern, type-safe Python toolkit for evaluating climate and atmospheric compos
 - **27 Statistical Metrics** - Bias, error, correlation, and agreement metrics with groupby support
 - **Multiple Plot Types** - Time series, scatter, Taylor diagrams, spatial maps, 3D track, curtain, and more
 - **Type-Safe Configuration** - Pydantic-validated YAML configs
+- **Terminal Maps** - Optional standalone [ASCII geographic viewer](docs/terminal-maps.md) with YAML controls, panning, and variable/level selection
 - **Full Test Coverage** - 1000+ tests with synthetic data generation
 
 ### Supported Observations
